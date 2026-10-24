@@ -68,7 +68,7 @@ function OfficeContents({ floorPlan }: { floorPlan: boolean }) {
     {!floorPlan && <>
       {[-7.4, -5.7, -2.7, -1.2, 1.7, 3.1, 6.2, 7.6].map((x, i) => <Desk key={i} position={[x, 0, i < 6 ? -4.4 : -4.9]} />)}
       {[-7.5, -5.8, -2.8, -1.2, 1.6, 3.0].map((x, i) => <Desk key={`front-${i}`} position={[x, 0, i < 4 ? -1.8 : 1.4]} rotation={Math.PI} />)}
-      {[[-8.7, 0, -7.8], [-4.5, 0, -7.8], [0, 0, -7.8], [4.5, 0, -7.8], [10.3, 0, -5.9], [10.3, 0, -3.1], [10.3, 0, -0.3], [10.3, 0, 2.5], [10.3, 0, 5.3], [-9.8, 0, 7.5], [1.2, 0, 7.5]] as [number, number, number][] .map((p, i) => <Plant key={i} position={p} />)}
+      {([[-8.7, 0, -7.8], [-4.5, 0, -7.8], [0, 0, -7.8], [4.5, 0, -7.8], [10.3, 0, -5.9], [10.3, 0, -3.1], [10.3, 0, -0.3], [10.3, 0, 2.5], [10.3, 0, 5.3], [-9.8, 0, 7.5], [1.2, 0, 7.5]] as [number, number, number][]).map((p, i) => <Plant key={i} position={p} />)}
       <group position={[-1.2, 0, 3.4]}>
         <mesh castShadow position={[0, 0.48, 0]}><boxGeometry args={[2.7, 0.12, 1.15]} /><meshStandardMaterial color="#b88e61" roughness={0.5} /></mesh>
         {[-0.9, 0, 0.9].map((x) => <mesh key={x} castShadow position={[x, 0.22, 0]}><cylinderGeometry args={[0.045, 0.045, 0.45, 8]} /><meshStandardMaterial color="#454c54" /></mesh>)}

@@ -71,6 +71,7 @@ A visual upgrade of the existing 3D office, not a rewrite. The office should loo
 - [ ] Count draw calls and meshes before and after; limit shadow casters; check frame rate while dragging
 - [ ] Full editor regression checklist in 3D and floor plan
 - [ ] Production build (`vite preview`) checked in the browser; `/vo` end to end
+- [ ] Self-host the DM Sans / Manrope fonts only if necessary (user, 2026-10-25: "include it in a later stage if necessary")
 - [ ] README updated (visuals, assets and licences if any, limitations)
 - [ ] Final report per plan.md §10
 

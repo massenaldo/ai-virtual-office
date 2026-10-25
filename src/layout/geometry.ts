@@ -60,23 +60,30 @@ export function roomAt(layout: OfficeLayout, x: number, z: number): string | nul
   return best?.id ?? null
 }
 
-// Bounds are rounded inward so the 0.01 rounding can never push a footprint past the office edge.
-const clampCentre = (value: number, size: number, extent: number) => {
-  const limit = Math.floor((extent / 2 - size / 2) * 100 + 1e-6) / 100
-  return clamp(round2(value), -limit, limit)
+const roundTo = (n: number, step: number) => Math.round(Math.round(n / step) * step * 1000) / 1000
+
+// Bounds are rounded inward so rounding can never push a footprint past the office edge.
+const clampCentre = (value: number, size: number, extent: number, step: number) => {
+  const limit = Math.floor((extent / 2 - size / 2) / step + 1e-6) * step
+  return clamp(roundTo(value, step), -limit, limit)
 }
+
+// Rooms keep their edges on the 1 cm grid: with a width in whole centimetres the centre needs half-centimetre steps,
+// otherwise every resize would shift the "fixed" opposite edge by 5 mm.
+const ROOM_CENTRE_STEP = 0.005
+const FURNITURE_STEP = 0.01
 
 export function clampRoom(next: Room, office: OfficeSettings, previous?: Room): Room {
   const width = round2(clamp(finiteOr(next.width, previous?.width ?? ROOM_LIMITS.minWidth), ROOM_LIMITS.minWidth, Math.min(ROOM_LIMITS.maxWidth, office.width)))
   const depth = round2(clamp(finiteOr(next.depth, previous?.depth ?? ROOM_LIMITS.minDepth), ROOM_LIMITS.minDepth, Math.min(ROOM_LIMITS.maxDepth, office.depth)))
-  const x = round2(clampCentre(finiteOr(next.x, previous?.x ?? 0), width, office.width))
-  const z = round2(clampCentre(finiteOr(next.z, previous?.z ?? 0), depth, office.depth))
+  const x = clampCentre(finiteOr(next.x, previous?.x ?? 0), width, office.width, ROOM_CENTRE_STEP)
+  const z = clampCentre(finiteOr(next.z, previous?.z ?? 0), depth, office.depth, ROOM_CENTRE_STEP)
   return { ...next, width, depth, x, z }
 }
 
 export function clampFurniture(next: Furniture, office: OfficeSettings, previous?: Furniture): Furniture {
   const { width, depth } = furnitureSize(next)
-  const x = round2(clampCentre(finiteOr(next.x, previous?.x ?? 0), width, office.width))
-  const z = round2(clampCentre(finiteOr(next.z, previous?.z ?? 0), depth, office.depth))
+  const x = clampCentre(finiteOr(next.x, previous?.x ?? 0), width, office.width, FURNITURE_STEP)
+  const z = clampCentre(finiteOr(next.z, previous?.z ?? 0), depth, office.depth, FURNITURE_STEP)
   return { ...next, x, z }
 }

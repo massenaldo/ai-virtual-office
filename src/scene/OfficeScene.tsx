@@ -1,10 +1,12 @@
 import { useLayoutEffect, useMemo } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
-import { ContactShadows, Environment, OrbitControls } from '@react-three/drei'
+import { ContactShadows, Environment, Grid, OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import type { OfficeLayout, OfficeSettings, Selection } from '../layout/types'
 import type { Issue } from '../layout/validation'
+import type { TransformIntent } from '../editor/transform'
 import FurnitureItem from './FurnitureItem'
+import ResizeHandles from './ResizeHandles'
 import RoomMesh from './RoomMesh'
 
 export type OfficeSceneProps = {
@@ -15,6 +17,9 @@ export type OfficeSceneProps = {
   selection: Selection
   issues: Map<string, Issue[]>
   onSelect(selection: Selection): void
+  onTransformStart(target: NonNullable<Selection>): void
+  onTransform(intent: TransformIntent): void
+  onTransformEnd(): void
 }
 
 function Floor({ office, floorPlan }: { office: OfficeSettings; floorPlan: boolean }) {
@@ -23,6 +28,9 @@ function Floor({ office, floorPlan }: { office: OfficeSettings; floorPlan: boole
     <planeGeometry args={[office.width, office.depth]} />
   </mesh>
 }
+
+// Top-down view has no rotation, so the left button pans like a map.
+const PLAN_MOUSE_BUTTONS = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }
 
 const PERSPECTIVE_POSITION: [number, number, number] = [15, 17, 19]
 const PERSPECTIVE_TARGET: [number, number, number] = [0, 0.4, 0]
@@ -62,20 +70,24 @@ function ViewCameras({ office, floorPlan, viewKey }: { office: OfficeSettings; f
   }, [camera, viewKey])
 
   return floorPlan
-    ? <OrbitControls key={`plan-${viewKey}`} camera={camera} makeDefault target={[0, 0, 0]} enableRotate={false} screenSpacePanning minZoom={fitZoom * 0.6} maxZoom={fitZoom * 4} />
+    ? <OrbitControls key={`plan-${viewKey}`} camera={camera} makeDefault target={[0, 0, 0]} enableRotate={false} mouseButtons={PLAN_MOUSE_BUTTONS} screenSpacePanning minZoom={fitZoom * 0.6} maxZoom={fitZoom * 4} />
     : <OrbitControls key={`3d-${viewKey}`} camera={camera} makeDefault target={PERSPECTIVE_TARGET} minDistance={7} maxDistance={32} maxPolarAngle={Math.PI / 2.08} />
 }
 
-function OfficeContents({ layout, floorPlan, viewKey, editing, selection, issues, onSelect }: OfficeSceneProps) {
+function OfficeContents({ layout, floorPlan, viewKey, editing, selection, issues, onSelect, onTransformStart, onTransform, onTransformEnd }: OfficeSceneProps) {
   const isSelected = (kind: 'room' | 'furniture', id: string) => selection?.kind === kind && selection.id === id
+  const transform = { onTransformStart, onTransform, onTransformEnd }
+  const selectedRoom = selection?.kind === 'room' ? layout.rooms.find((r) => r.id === selection.id) : undefined
   return <>
     <color attach="background" args={[floorPlan ? '#e9edf0' : '#dbe3e5']} />
     <ambientLight intensity={floorPlan ? 1.6 : 1.15} />
     <directionalLight position={[6, 13, 7]} intensity={floorPlan ? 0.5 : 2.2} castShadow shadow-mapSize-width={2048} shadow-mapSize-height={2048} />
     <pointLight position={[-6, 5, -3]} intensity={18} color="#ffdfb0" distance={18} />
     <Floor office={layout.office} floorPlan={floorPlan} />
-    {layout.rooms.map((room) => <RoomMesh key={room.id} room={room} floorPlan={floorPlan} editing={editing} selected={isSelected('room', room.id)} invalid={issues.has(room.id)} onSelect={() => onSelect({ kind: 'room', id: room.id })} />)}
-    {layout.furniture.map((item) => <FurnitureItem key={item.id} item={item} floorPlan={floorPlan} editing={editing} selected={isSelected('furniture', item.id)} invalid={issues.has(item.id)} onSelect={() => onSelect({ kind: 'furniture', id: item.id })} />)}
+    {layout.rooms.map((room) => <RoomMesh key={room.id} room={room} floorPlan={floorPlan} editing={editing} selected={isSelected('room', room.id)} invalid={issues.has(room.id)} onSelect={() => onSelect({ kind: 'room', id: room.id })} {...transform} />)}
+    {layout.furniture.map((item) => <FurnitureItem key={item.id} item={item} floorPlan={floorPlan} editing={editing} selected={isSelected('furniture', item.id)} invalid={issues.has(item.id)} onSelect={() => onSelect({ kind: 'furniture', id: item.id })} {...transform} />)}
+    {editing && floorPlan && <Grid position={[0, 0.045, 0]} args={[layout.office.width, layout.office.depth]} cellSize={layout.office.gridSize} cellThickness={0.6} cellColor="#9aa6b0" sectionSize={1} sectionThickness={1} sectionColor="#6f7d89" fadeDistance={200} raycast={() => null} />}
+    {editing && floorPlan && selectedRoom && <ResizeHandles room={selectedRoom} {...transform} />}
     <ContactShadows position={[0, -0.055, 0]} opacity={floorPlan ? 0.12 : 0.3} scale={30} blur={2.5} far={8} />
     {!floorPlan && <Environment preset="apartment" />}
     <ViewCameras office={layout.office} floorPlan={floorPlan} viewKey={viewKey} />

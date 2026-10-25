@@ -1,150 +1,93 @@
-# Task: Implement the Virtual Office Layout Editor
+# Milestone 2 — Realistic Office Builder: Tasks
 
-You are working inside my existing repository: `ai-virtual-office`.
+**Spec:** [`plan.md`](plan.md) (Milestone 2 brief). This file is my working task list for that spec.
+**Status:** Draft. Implementation starts after the open questions at the end are answered.
 
-## Project context
+## What this milestone is
 
-This is a self-hosted 3D AI virtual office built with React 19, TypeScript, Vite, Three.js, React Three Fiber, and Drei.
+A visual upgrade of the existing 3D office, not a rewrite. The office should look like a real, premium modern tech office: warm wood desks, graphite metal, glass partitions, realistic chairs and monitors, natural daylight. The dark app UI, the layout editor, saving, undo/redo and `/vo` must all keep working. The scope is visual realism only: no AI agents, backend, auth, multiplayer or video studio.
 
-The current application already has:
-- A dark dashboard UI and department sidebar.
-- An existing 3D office scene with rooms, desks, chairs, monitors, plants, and department labels.
-- Orbit, zoom, and pan camera controls.
-- A 3D overview and top-down floor-plan view.
-- A Save layout button that currently does not persist the complete editable geometry.
-- A Claude Code `/vo` command for starting the app and opening the browser.
+## Current state (from inspecting the code, 2026-10-25)
 
-Keep the existing visual identity and office scene. Do not replace the application with a new starter template.
+- **Build and tests:** `npm run build` passes (only a chunk-size warning, already present before this milestone). `npm test` passes, 84/84.
+- **Scene code:** `src/scene/`
+  - `OfficeScene.tsx`: lights, floor, cameras
+  - `RoomMesh.tsx`: room floor slab, 2 side walls, glass back wall, ceiling slab, label
+  - `FurnitureItem.tsx` and `models.tsx`: 5 procedural models built from primitives
+  - `FootprintOutline.tsx`, `ResizeHandles.tsx`, `useFloorDrag.ts`: editor feedback and interaction
+- **Layout data:** `src/layout/`. The scene renders `OfficeLayout` (schema v1, key `ai-virtual-office:layout:v1`). Furniture types are desk, chair, monitor, plant and meeting-table, and storage only accepts known types.
+- **Remote asset:** `<Environment preset="apartment">` downloads `lebombo_1k.hdr` from `raw.githack.com` at runtime. This conflicts with plan.md §7 (self-hosted).
+- **Shadows:** every model mesh and every wall casts shadows (13 `castShadow` uses), with a 2048² shadow map.
+- **Visibility:** each room has a solid ceiling slab plus three walls with an open front side, so the ceiling hides the room interior from above.
+- **Floor plan:** an orthographic top-down camera with furniture drawn as flat coloured tiles. Walls and ceilings are hidden.
 
-## Goal
+## How I'll work
 
-Turn the existing prototype into a functional, browser-based 3D office layout editor. The user must be able to customize the physical office layout, see the changes in 3D, save them, and restore them after restarting the application.
+- **One stage = one branch = one PR into `main`**, e.g. `feat/office-visuals-stage-a`. No stacked PRs. You merge, then I delete the merged branches.
+- **Before/after screenshots from the same fixed camera angles** go in every PR (3D overview, a close-up, floor plan), because visual quality can't be checked by unit tests.
+- **Each stage ends with the editor regression checklist below,** run in the browser, plus `npm test` and `npm run build`.
+- **Decisions follow your direction over plan.md §10.** plan.md says "do not stop after producing a plan", but you asked to discuss first and review each stage, so I'll stop for review after each PR.
 
-## Phase 1: Inspect before implementing
+## Proposed decisions (mine, not yet agreed)
 
-1. Inspect the repository structure, current scene components, room definitions, furniture components, styles, and save-layout implementation.
-2. Identify how the existing scene is constructed and where the current layout data lives.
-3. Reuse existing components and dependencies wherever practical.
-4. Write a short implementation plan based on the actual code before making changes.
-5. Preserve existing `/vo` behavior and avoid unrelated refactors.
+1. **Lighting without downloads:** replace the remote HDR with lighting built in code (drei `Environment` with `Lightformer` panels, plus sun and soft fill lights). No network requests and no new dependency.
+2. **No new rendering dependencies:** no post-processing library. Soft shadows come from tuned shadow maps plus the existing `ContactShadows`, and "ambient occlusion" is faked cheaply (darker contact areas, baked gradients) rather than a real-time AO pass.
+3. **Floor material comes from the room's department** (for example carpet for offices, concrete for the server room), so the saved-layout format doesn't change.
+4. **New furniture types extend the schema in a backward-compatible way.** Storage cabinet, shelf and meeting chair are added to the furniture list. Old saves still load and the schema stays v1. Keyboard, mouse and desk accessories become part of the desk model, not separate items.
+5. **Shared geometry and materials:** one shared materials module, and each furniture model's parts are merged into a few meshes (using three.js's own utilities, nothing new to install). Only larger objects cast shadows; small details don't.
+6. **Changing the default office only affects Reset.** Your saved layout keeps its own rooms and furniture; new furniture only appears in the default after Reset layout.
 
-## Phase 2: Editor interface
+## Stage A: Lighting, materials, floor, walls, structure
 
-Add an Edit Layout mode with:
+- [ ] Lighting built in code instead of the remote HDR; balanced daylight plus soft interior fill; tuned tone mapping and exposure
+- [ ] Shared material library (oak/walnut, graphite metal, warm-white and warm-grey wall paint, glass, concrete, carpet)
+- [ ] Office floor finish plus per-room floors (by department), with clear room boundaries
+- [ ] Walls with real thickness, clean corners and baseboards; ceiling handling per **Q1**
+- [ ] Clean background and a default overview camera that shows the whole office
+- [ ] Floor plan stays clear: readable room colours, boundaries and labels
+- [ ] PR with before/after screenshots
 
-- A top toolbar containing Edit Layout, 3D View, Floor Plan, Undo, Redo, Save, and Reset.
-- A left sidebar or panel listing all rooms and furniture.
-- A contextual properties panel for the selected object.
-- Clear visual feedback for selection, hover, dragging, and invalid placement.
-- A grid and snap-to-grid option in floor-plan mode.
-- A cancel/exit editing action that does not silently discard unsaved changes.
+## Stage B: Furniture models
 
-The interface must remain usable at typical desktop browser sizes.
+- [ ] Desk: proper top thickness, graphite frame, optional drawer unit or cable tray, keyboard and mouse
+- [ ] Monitor: slim dark bezel, screen surface, stand and base
+- [ ] Ergonomic chair: seat, backrest, armrests, gas lift, 5-star base with wheels; low polygon count
+- [ ] Meeting table refresh, plus **new** meeting chair, storage cabinet and shelf (schema, palette, catalog footprints, floor-plan tiles, tests)
+- [ ] Footprints in `catalog.ts` match the new models, so selection, overlap checks and snapping stay accurate
+- [ ] PR with before/after screenshots
 
-## Phase 3: Room editing
+## Stage C: Glass, doors, plants, details
 
-Implement the following operations using the existing room model where possible:
+- [ ] Glass partitions with slim graphite frames for meeting rooms and offices; walls and glass never catch clicks
+- [ ] Doors where they make sense, per **Q1**
+- [ ] Plants with leaf clusters in a proper planter, in a couple of sizes
+- [ ] A few restrained details (wall art, a whiteboard in meeting rooms) that never block editing
+- [ ] Default office updated with the new furniture (meeting chairs, storage)
+- [ ] PR with before/after screenshots
 
-- Select a room by clicking it in the scene or room list.
-- Move rooms on the horizontal X/Z plane.
-- Resize room width and depth with visible handles or numeric properties.
-- Rename rooms and edit their department labels.
-- Add rooms using a predefined room template.
-- Delete rooms with confirmation when appropriate.
-- Edit room dimensions and position using a properties panel.
-- Enforce minimum and maximum dimensions and prevent invalid coordinates.
-- Make room changes visible immediately in both 3D and floor-plan views.
+## Stage D: Optimize and verify
 
-Use a consistent world-coordinate system. Clearly distinguish room footprint coordinates from wall height and other vertical dimensions.
+- [ ] Count draw calls and meshes before and after; limit shadow casters; check frame rate while dragging
+- [ ] Full editor regression checklist in 3D and floor plan
+- [ ] Production build (`vite preview`) checked in the browser; `/vo` end to end
+- [ ] README updated (visuals, assets and licences if any, limitations)
+- [ ] Final report per plan.md §10
 
-If room geometry is currently made from primitive shapes, refactor it into reusable components driven by structured room data.
+## Editor regression checklist (every stage)
 
-## Phase 4: Furniture editing
+- Select, move, resize and rename rooms
+- Select, move, rotate, duplicate, add and delete furniture
+- Undo and redo
+- Save → reload restores the layout
+- Reset layout, with its confirmation
+- 3D and floor plan stay in sync
+- Grid and snap
+- Keyboard shortcuts
+- Selection outlines and labels stay readable over the new materials
+- No console errors
 
-Support the existing furniture types first:
+## Open questions (need your answer before Stage A)
 
-- Desk
-- Chair
-- Monitor
-- Plant
-- Meeting table
-
-Implement:
-
-- Click to select.
-- Drag to move on the floor plane.
-- Rotate in 90-degree increments.
-- Duplicate.
-- Delete.
-- Add from a furniture palette.
-- Edit position and rotation numerically.
-- Snap to grid.
-- Prevent or clearly warn about invalid placement and unintended furniture overlap.
-
-Keep furniture attached to the correct room when appropriate, but allow moving furniture between rooms.
-
-Use existing furniture components and geometry wherever possible. Do not introduce external 3D asset downloads as a requirement for this milestone.
-
-## Phase 5: Data model and persistence
-
-Create a typed, serializable office-layout model.
-
-It should contain:
-- A schema version.
-- Office dimensions and settings.
-- Room IDs, names, department types, positions, dimensions, and other necessary room properties.
-- Furniture IDs, types, positions, rotations, dimensions or variants, and optional room associations.
-
-Requirements:
-
-1. Use stable IDs rather than array indices.
-2. Make the 3D scene a rendering of the layout data, not the source of truth.
-3. Persist the complete layout in localStorage.
-4. Load a valid saved layout when the app starts.
-5. Handle missing, invalid, or older saved data safely.
-6. Keep a default layout that can be restored without destroying data until the user confirms.
-7. Show clear Saved, Unsaved changes, and Save failed states.
-8. Ensure the Save layout button actually saves all room and furniture geometry.
-9. Never silently overwrite a valid saved layout with an invalid or partially initialized scene.
-
-Use a versioned key such as `ai-virtual-office:layout:v1`.
-
-## Phase 6: Undo and redo
-
-Implement undo and redo for meaningful layout edits, including room movement, resizing, addition, deletion, and furniture changes.
-
-- Support Ctrl+Z / Cmd+Z for undo.
-- Support Ctrl+Shift+Z / Cmd+Shift+Z for redo.
-- Avoid adding a history entry for every mouse-move frame; group one completed drag into one undoable operation.
-- Set a reasonable history limit.
-- Ensure undo and redo update the 3D scene and saved-state indicator correctly.
-
-## Phase 7: Interaction quality
-
-- In floor-plan editing mode, prefer predictable top-down dragging and resizing.
-- In 3D editing mode, support selecting and moving objects without interfering with orbit controls.
-- Provide Escape to cancel the current placement or selection operation where appropriate.
-- Provide Delete/Backspace for the selected object, while preventing accidental browser navigation or unwanted deletion.
-- Add confirmation for destructive reset operations.
-- Keep normal camera navigation working when editing is disabled.
-- Avoid adding a new state-management dependency unless the existing architecture genuinely requires it.
-
-## Phase 8: Verification
-
-After implementation:
-
-1. Run the existing TypeScript/build checks.
-2. Fix any new type errors and build failures.
-3. Verify room and furniture changes render consistently in both views.
-4. Verify Save and browser refresh restore the full layout.
-5. Verify undo/redo, reset, and invalid-data handling.
-6. Check that the existing `/vo` launch command still works.
-7. Report which files changed, features implemented, tests run, and any remaining limitations.
-
-Do not claim that a feature is verified unless you actually tested it.
-
-## Scope boundaries
-
-For this milestone, do not implement AI agents, backend APIs, authentication, multiplayer editing, or agent orchestration. Keep the layout editor local-first and architect it so these features can be added later.
-
-Prioritize a working, maintainable editor over excessive abstraction. Implement in small steps, run checks frequently, and preserve the existing application throughout.
+- **Q1: Ceilings and front walls.** Should the 3D overview be a cutaway (no ceilings, so you see into every room from above)? Should rooms get a front wall with a door, or keep the open front?
+- **Q2: Reference look.** Is there an image, a real office or a product you want it to resemble?
+- **Q3:** Are the proposed decisions 1–6 above OK?

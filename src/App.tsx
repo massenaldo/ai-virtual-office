@@ -30,7 +30,7 @@ export default function App() {
   const [dialog, setDialog] = useState<DialogRequest | null>(null)
   const summary = summarizeLayout(state.layout)
   const issues = useMemo(() => findIssues(state.layout), [state.layout])
-  const actions = useEditorActions(editor, setDialog)
+  const actions = useEditorActions(editor, setDialog, snap)
 
   const undo = () => dispatch({ type: 'undo' })
   const redo = () => dispatch({ type: 'redo' })
@@ -39,7 +39,7 @@ export default function App() {
     message: 'This replaces the current rooms and furniture with the default office. You can undo it until you leave the page.',
     actions: [{ label: 'Reset layout', tone: 'danger', onClick: editor.resetToDefault }],
   })
-  useEditorShortcuts(editing && !dialog, { undo, redo, delete: actions.requestDelete, escape: () => actions.select(null) })
+  useEditorShortcuts(editing && !dialog, { undo, redo, delete: actions.requestDelete, escape: actions.escape })
 
   return <main className="app-shell">
     <aside className="sidebar">
@@ -63,10 +63,10 @@ export default function App() {
           onSave={editor.save} onResetLayout={confirmResetLayout} onResetView={() => setViewKey((k) => k + 1)}/></div>
         <div className="editor-body">
         {editing && <OutlinerPanel layout={state.layout} selection={state.selection} issues={issues} onSelect={actions.select} onAddRoom={actions.addRoom} onAddFurniture={actions.addFurniture}/>}
-        <div className="canvas-wrap"><OfficeScene layout={state.layout} floorPlan={floorPlan} viewKey={viewKey} editing={editing} selection={state.selection} issues={issues} onSelect={actions.select}/>
+        <div className="canvas-wrap"><OfficeScene layout={state.layout} floorPlan={floorPlan} viewKey={viewKey} editing={editing} selection={state.selection} issues={issues} onSelect={actions.select} onTransformStart={actions.transformStart} onTransform={actions.transform} onTransformEnd={actions.transformEnd}/>
           {editor.loadProblem && <div className="scene-notice" role="alert"><AlertTriangle size={15}/><span>{LOAD_PROBLEM_MESSAGE[editor.loadProblem]}</span><button className="notice-close" onClick={editor.dismissLoadProblem} aria-label="Dismiss"><X size={14}/></button></div>}
           {editor.status === 'save-failed' && <div className="scene-notice error" role="alert"><AlertTriangle size={15}/><span>Save failed: {editor.saveError} Your changes are still here; try saving again.</span></div>}
-          <div className="scene-hint"><Maximize2 size={13}/> Drag to orbit <span>·</span> Scroll to zoom <span>·</span> Right-drag to pan</div><div className="scene-badge"><span className="badge-icon"><Building2 size={16}/></span><div><strong>AI Software Company</strong><small>Realistic 3D workspace</small></div></div></div>
+          <div className="scene-hint"><Maximize2 size={13}/> {editing ? <>Click to select <span>·</span> Drag to move <span>·</span> Drag empty space to {floorPlan ? 'pan' : 'orbit'}</> : <>Drag to orbit <span>·</span> Scroll to zoom <span>·</span> Right-drag to pan</>}</div><div className="scene-badge"><span className="badge-icon"><Building2 size={16}/></span><div><strong>AI Software Company</strong><small>Realistic 3D workspace</small></div></div></div>
         {editing && <PropertiesPanel layout={state.layout} selection={state.selection} issues={issues} onRoomChange={actions.roomChange} onFurnitureChange={actions.furnitureChange} onRotate={actions.rotate} onDuplicate={actions.duplicate} onDelete={actions.requestDelete}/>}
         </div>
         <div className="scene-footer"><div className="legend"><span className="legend-swatch"/><span>Office departments</span><span className="legend-glass"/><span>Glass partitions</span></div><span className="scene-footer-right"><CheckCircle2 size={14}/> {summary.roomCount} rooms · {state.layout.furniture.length} furniture items</span></div>

@@ -67,7 +67,7 @@
   ```ts
   export type FurnitureType = 'desk' | 'chair' | 'monitor' | 'plant' | 'meeting-table' | 'meeting-chair' | 'storage-cabinet' | 'shelf'
   ```
-- `FURNITURE_SPECS` (width × depth, `planColor`):
+- `FURNITURE_SPECS` (width × depth, `planColor`; cabinet colour later changed to `#9c968c` for floor-plan contrast):
   - desk 1.4 × 0.72 `#c49a6c`
   - chair 0.62 × 0.62 `#3b3f45`
   - monitor 0.56 × 0.22 `#1c1e21`

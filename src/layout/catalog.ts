@@ -21,7 +21,7 @@ export const FURNITURE_SPECS: Record<FurnitureType, { label: string; width: numb
   plant: { label: 'Plant', width: 0.56, depth: 0.56, planColor: '#53775d' },
   'meeting-table': { label: 'Meeting table', width: 2.7, depth: 1.15, planColor: '#6b4a33' },
   'meeting-chair': { label: 'Meeting chair', width: 0.56, depth: 0.56, planColor: '#5a5e66' },
-  'storage-cabinet': { label: 'Storage cabinet', width: 0.8, depth: 0.45, planColor: '#d9d6d0' },
+  'storage-cabinet': { label: 'Storage cabinet', width: 0.8, depth: 0.45, planColor: '#9c968c' },
   shelf: { label: 'Shelf', width: 0.9, depth: 0.35, planColor: '#8b6a4f' },
 }
 

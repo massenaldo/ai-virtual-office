@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Bot, Boxes, Building2, CheckCircle2, ChevronDown, CircleHelp, Code2, LayoutGrid, Maximize2, Save, Settings2, Users, X } from 'lucide-react'
 import OfficeScene from './scene/OfficeScene'
 import { canRedo, canUndo } from './layout/history'
@@ -8,6 +8,7 @@ import EditorToolbar from './editor/EditorToolbar'
 import OutlinerPanel from './editor/OutlinerPanel'
 import PropertiesPanel from './editor/PropertiesPanel'
 import { useEditorShortcuts } from './editor/shortcuts'
+import { hasUnsavedChanges } from './editor/status'
 import { summarizeLayout } from './editor/summary'
 import { useEditorActions, type DialogRequest } from './editor/useEditorActions'
 import { useLayoutEditor } from './editor/useLayoutEditor'
@@ -39,6 +40,28 @@ export default function App() {
     message: 'This replaces the current rooms and furniture with the default office. You can undo it until you leave the page.',
     actions: [{ label: 'Reset layout', tone: 'danger', onClick: editor.resetToDefault }],
   })
+  const unsaved = hasUnsavedChanges(editor.status)
+  const leaveEditing = () => { setEditing(false); actions.select(null) }
+  // Leaving edit mode never silently drops work: unsaved edits get an explicit save / discard / keep editing choice.
+  const toggleEditing = () => {
+    if (!editing) return setEditing(true)
+    if (!unsaved) return leaveEditing()
+    setDialog({
+      title: 'You have unsaved layout changes',
+      message: 'Save them before leaving edit mode, or discard them and go back to the last saved layout. Discarding can be undone.',
+      cancelLabel: 'Keep editing',
+      actions: [
+        { label: 'Discard changes', tone: 'danger', onClick: () => { editor.discardToSaved(); leaveEditing() } },
+        { label: 'Save and exit', tone: 'primary', onClick: () => { if (editor.save()) leaveEditing() } },
+      ],
+    })
+  }
+  useEffect(() => {
+    if (!unsaved) return
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault()
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [unsaved])
   useEditorShortcuts(editing && !dialog, { undo, redo, delete: actions.requestDelete, escape: actions.escape })
 
   return <main className="app-shell">
@@ -59,7 +82,7 @@ export default function App() {
       <section className="page-heading"><div><div className="eyebrow">YOUR DIGITAL HEADQUARTERS</div><h1>Office Designer</h1><p>Shape the place where your AI engineering team will work.</p></div><button className="primary-button" onClick={editor.save} disabled={editor.status === 'saved'}><Save size={16}/>{editor.status === 'saved' ? 'Saved' : 'Save layout'}</button></section>
       <section className={editing ? 'scene-card editing' : 'scene-card'}><div className="scene-toolbar"><div className="scene-title"><span className="live-dot"/><strong>HQ — Main Office</strong><span className="scene-separator">/</span><span>{floorPlan ? 'Floor plan' : '3D overview'}{editing && ' · Editing'}</span></div>
         <EditorToolbar editing={editing} floorPlan={floorPlan} snap={snap} canUndo={canUndo(state)} canRedo={canRedo(state)} status={editor.status}
-          onToggleEditing={() => { setEditing(!editing); actions.select(null) }} onFloorPlan={setFloorPlan} onToggleSnap={() => setSnap(!snap)} onUndo={undo} onRedo={redo}
+          onToggleEditing={toggleEditing} onFloorPlan={setFloorPlan} onToggleSnap={() => setSnap(!snap)} onUndo={undo} onRedo={redo}
           onSave={editor.save} onResetLayout={confirmResetLayout} onResetView={() => setViewKey((k) => k + 1)}/></div>
         <div className="editor-body">
         {editing && <OutlinerPanel layout={state.layout} selection={state.selection} issues={issues} onSelect={actions.select} onAddRoom={actions.addRoom} onAddFurniture={actions.addFurniture}/>}
@@ -74,6 +97,6 @@ export default function App() {
       <section className="bottom-grid"><div className="info-card"><div className="card-icon purple"><Building2 size={18}/></div><div><span className="card-label">OFFICE AREAS</span><strong>{summary.roomCount} <small>rooms</small></strong><p>Departments, meeting rooms, and shared areas.</p></div></div><div className="info-card"><div className="card-icon blue"><Users size={18}/></div><div><span className="card-label">TEAM CAPACITY</span><strong>{summary.deskCount} <small>desks</small></strong><p>Seating plan for your engineering team.</p></div></div><div className="info-card"><div className="card-icon amber"><Settings2 size={18}/></div><div><span className="card-label">NEXT MILESTONE</span><strong>Layout editor</strong><p>Editable rooms, furniture placement, and saved geometry.</p></div></div></section>
       <footer className="page-footer"><span>AI Virtual Office <span className="footer-sep">·</span> Local prototype v0.1.0</span><span>Designed for your team, built by you.</span></footer>
     </section>
-    <ConfirmDialog open={!!dialog} title={dialog?.title ?? ''} message={dialog?.message ?? ''} actions={dialog?.actions ?? []} onClose={() => setDialog(null)}/>
+    <ConfirmDialog open={!!dialog} title={dialog?.title ?? ''} message={dialog?.message ?? ''} actions={dialog?.actions ?? []} cancelLabel={dialog?.cancelLabel} onClose={() => setDialog(null)}/>
   </main>
 }

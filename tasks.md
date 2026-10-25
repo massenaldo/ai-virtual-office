@@ -1,7 +1,7 @@
 # Milestone 2 — Realistic Office Builder: Tasks
 
 **Spec:** [`plan.md`](plan.md) (Milestone 2 brief). This file is my working task list for that spec.
-**Status:** Draft. Implementation starts after the open questions at the end are answered.
+**Status:** Approved 2026-10-25. All open questions answered (see the end); the user may raise concerns later.
 
 ## What this milestone is
 
@@ -28,7 +28,7 @@ A visual upgrade of the existing 3D office, not a rewrite. The office should loo
 - **Each stage ends with the editor regression checklist below,** run in the browser, plus `npm test` and `npm run build`.
 - **Decisions follow your direction over plan.md §10.** plan.md says "do not stop after producing a plan", but you asked to discuss first and review each stage, so I'll stop for review after each PR.
 
-## Proposed decisions (mine, not yet agreed)
+## Decisions (proposed by me, agreed 2026-10-25)
 
 1. **Lighting without downloads:** replace the remote HDR with lighting built in code (drei `Environment` with `Lightformer` panels, plus sun and soft fill lights). No network requests and no new dependency.
 2. **No new rendering dependencies:** no post-processing library. Soft shadows come from tuned shadow maps plus the existing `ContactShadows`, and "ambient occlusion" is faked cheaply (darker contact areas, baked gradients) rather than a real-time AO pass.
@@ -42,7 +42,7 @@ A visual upgrade of the existing 3D office, not a rewrite. The office should loo
 - [ ] Lighting built in code instead of the remote HDR; balanced daylight plus soft interior fill; tuned tone mapping and exposure
 - [ ] Shared material library (oak/walnut, graphite metal, warm-white and warm-grey wall paint, glass, concrete, carpet)
 - [ ] Office floor finish plus per-room floors (by department), with clear room boundaries
-- [ ] Walls with real thickness, clean corners and baseboards; ceiling handling per **Q1**
+- [ ] Walls with real thickness, clean corners and baseboards; ceilings removed (cutaway view, Q1)
 - [ ] Clean background and a default overview camera that shows the whole office
 - [ ] Floor plan stays clear: readable room colours, boundaries and labels
 - [ ] PR with before/after screenshots
@@ -56,10 +56,9 @@ A visual upgrade of the existing 3D office, not a rewrite. The office should loo
 - [ ] Footprints in `catalog.ts` match the new models, so selection, overlap checks and snapping stay accurate
 - [ ] PR with before/after screenshots
 
-## Stage C: Glass, doors, plants, details
+## Stage C: Glass, plants, details
 
 - [ ] Glass partitions with slim graphite frames for meeting rooms and offices; walls and glass never catch clicks
-- [ ] Doors where they make sense, per **Q1**
 - [ ] Plants with leaf clusters in a proper planter, in a couple of sizes
 - [ ] A few restrained details (wall art, a whiteboard in meeting rooms) that never block editing
 - [ ] Default office updated with the new furniture (meeting chairs, storage)
@@ -86,8 +85,14 @@ A visual upgrade of the existing 3D office, not a rewrite. The office should loo
 - Selection outlines and labels stay readable over the new materials
 - No console errors
 
-## Open questions (need your answer before Stage A)
+## Open questions (all answered)
 
-- **Q1: Ceilings and front walls.** Should the 3D overview be a cutaway (no ceilings, so you see into every room from above)? Should rooms get a front wall with a door, or keep the open front?
-- **Q2: Reference look.** Is there an image, a real office or a product you want it to resemble?
-- **Q3:** Are the proposed decisions 1–6 above OK?
+- **Q1: Ceilings — answered:** cutaway. No ceilings, so every room is visible from above.
+- **Q1b: Front walls — answered:** no doors. Each room's front side stays open, so the interior is visible from any angle. This overrides plan.md §3 "doors where they make sense".
+- **Q2: Reference look — answered:** no reference; use my design judgment. My call for the look:
+  - **Floors:** light polished concrete in open areas; warm-grey carpet tiles in offices and team rooms; light oak in the meeting room and executive office; dark epoxy in the server room.
+  - **Walls:** warm-white walls with thin graphite baseboards; frameless or slim-framed glass toward circulation areas.
+  - **Furniture:** natural oak desktops on matte graphite frames; charcoal mesh chairs; black monitors with soft blue-grey screen glow; walnut for the executive office and meeting table.
+  - **Lighting:** soft late-morning daylight from one side with gentle, not crushed, shadows; warm interior fill.
+  - **Colour:** department colours become subtle accents (floor inlay or label tint) instead of fully coloured rooms, to keep the palette restrained.
+- **Q3: Decisions 1–6 — answered:** agreed.

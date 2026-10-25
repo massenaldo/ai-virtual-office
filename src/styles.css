@@ -71,3 +71,6 @@ kbd{background:#18212d;border:1px solid #303948;border-radius:4px;padding:1px 5p
 .room-label.editable:hover{border-color:#9cc2ff}
 .room-label.selected{border-color:#4f8cff;box-shadow:0 0 0 2px #4f8cff55}
 @media(max-width:1000px){.scene-card.editing .editor-body{grid-template-columns:1fr}.scene-card.editing .canvas-wrap{order:-1;height:480px}.editor-panel{max-height:none}.editor-panel.outliner,.editor-panel.properties{border:0;border-top:1px solid #29323e}}
+.room-label-layer{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:10}
+.room-label-layer .room-label{position:absolute;left:0;top:0;white-space:nowrap;visibility:hidden;will-change:transform}
+.room-label-layer .room-label.editable{pointer-events:auto}

@@ -26,27 +26,27 @@ const PAINTERS: Record<FloorFinish, Painter> = {
   concrete: (ctx, rand) => {
     ctx.fillStyle = '#ffffff'
     ctx.fillRect(0, 0, SIZE, SIZE)
-    for (let i = 0; i < 70; i++) {
+    for (let i = 0; i < 40; i++) {
       const g = ctx.createRadialGradient(rand() * SIZE, rand() * SIZE, 0, rand() * SIZE, rand() * SIZE, 20 + rand() * 60)
-      g.addColorStop(0, `rgba(0,0,0,${0.03 + rand() * 0.04})`)
+      g.addColorStop(0, `rgba(0,0,0,${0.012 + rand() * 0.018})`)
       g.addColorStop(1, 'rgba(0,0,0,0)')
       ctx.fillStyle = g
       ctx.fillRect(0, 0, SIZE, SIZE)
     }
-    speckle(ctx, rand, 1400, 1, 0.12, false)
-    speckle(ctx, rand, 500, 1, 0.25, true)
+    speckle(ctx, rand, 1400, 1, 0.07, false)
+    speckle(ctx, rand, 500, 1, 0.18, true)
   },
   // Carpet tiles: 4 × 4 tiles with alternating pile direction and fine fibre speckle.
   carpet: (ctx, rand) => {
     const tile = SIZE / 4
     for (let y = 0; y < 4; y++) {
       for (let x = 0; x < 4; x++) {
-        ctx.fillStyle = (x + y) % 2 ? '#f4f4f4' : '#e8e8e8'
+        ctx.fillStyle = (x + y) % 2 ? '#f2f2f2' : '#ececec'
         ctx.fillRect(x * tile, y * tile, tile, tile)
       }
     }
-    speckle(ctx, rand, 6000, 1, 0.18, false)
-    ctx.strokeStyle = 'rgba(0,0,0,0.12)'
+    speckle(ctx, rand, 6000, 1, 0.12, false)
+    ctx.strokeStyle = 'rgba(0,0,0,0.07)'
     ctx.lineWidth = 1
     for (let i = 0; i <= 4; i++) {
       ctx.beginPath(); ctx.moveTo(i * tile, 0); ctx.lineTo(i * tile, SIZE); ctx.stroke()
@@ -100,4 +100,19 @@ export function proceduralTexture(kind: FloorFinish): THREE.CanvasTexture | null
   texture.colorSpace = THREE.SRGBColorSpace
   texture.anisotropy = 4
   return texture
+}
+
+/** Real-world size, in metres, covered by one repeat of each floor texture. */
+export const TEXTURE_METRES: Record<FloorFinish, number> = { concrete: 4, carpet: 2, oak: 1.1, epoxy: 2 }
+
+/**
+ * Scales a geometry's UVs so the floor texture keeps its real-world size whatever the surface size.
+ * Shared materials can't each carry a different texture repeat, so the scale lives in the geometry instead.
+ */
+export function scaleFloorUvs<T extends THREE.BufferGeometry>(geometry: T, width: number, depth: number, finish: FloorFinish): T {
+  const uv = geometry.getAttribute('uv') as THREE.BufferAttribute
+  const metres = TEXTURE_METRES[finish]
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) * width) / metres, (uv.getY(i) * depth) / metres)
+  uv.needsUpdate = true
+  return geometry
 }

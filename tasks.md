@@ -39,13 +39,15 @@ A visual upgrade of the existing 3D office, not a rewrite. The office should loo
 
 ## Stage A: Lighting, materials, floor, walls, structure
 
-- [ ] Lighting built in code instead of the remote HDR; balanced daylight plus soft interior fill; tuned tone mapping and exposure
-- [ ] Shared material library (oak/walnut, graphite metal, warm-white and warm-grey wall paint, glass, concrete, carpet)
-- [ ] Office floor finish plus per-room floors (by department), with clear room boundaries
-- [ ] Walls with real thickness, clean corners and baseboards; ceilings removed (cutaway view, Q1)
-- [ ] Clean background and a default overview camera that shows the whole office
-- [ ] Floor plan stays clear: readable room colours, boundaries and labels
-- [ ] PR with before/after screenshots
+- [x] Lighting built in code instead of the remote HDR; balanced daylight plus soft interior fill; tuned tone mapping and exposure
+- [x] Shared material library (oak, graphite metal, warm-white wall paint, glass, concrete, carpet, epoxy); walnut comes with the Stage B furniture
+- [x] Office floor finish plus per-room floors (by department), with clear room boundaries
+- [x] Walls with real thickness, clean corners and baseboards; ceilings removed (cutaway view, Q1)
+- [x] Clean background and a default overview camera that shows the whole office (fitted to the canvas, including edit mode)
+- [x] Floor plan stays clear: readable room colours, boundaries and labels
+- [x] PR with before/after screenshots
+- Also fixed in Stage A: one room label could render empty (labels now live in one DOM layer); open-floor furniture floated 8 cm above the floor.
+- Found, not fixed: `src/styles.css` loads the DM Sans and Manrope fonts from Google Fonts at runtime (needs the user's OK to download and self-host the font files).
 
 ## Stage B: Furniture models
 

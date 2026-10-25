@@ -1,14 +1,37 @@
-import { useState } from 'react'
-import { Html } from '@react-three/drei'
+import { useEffect, useMemo, useState } from 'react'
 import type { ThreeEvent } from '@react-three/fiber'
+import * as THREE from 'three'
 import type { Room, Selection } from '../layout/types'
 import type { TransformIntent } from '../editor/transform'
+import { roomBaseboards, roomWalls, WALL_THICKNESS, type Box } from './architecture'
+import { floorFinishFor } from './finishes'
 import FootprintOutline from './FootprintOutline'
 import { highlightFor } from './highlight'
+import { accentMaterial, floorMaterial, sharedMaterials } from './materials'
+import { scaleFloorUvs } from './textures'
 import { useFloorDrag } from './useFloorDrag'
 
-// Walls and ceilings never take clicks, so objects inside a room stay selectable from any angle.
+// Walls, glass and trim never take clicks, so objects inside a room stay selectable from any angle.
 const noRaycast = () => null
+
+const FLOOR_THICKNESS = 0.02
+const FLOOR_TOP = 0.025
+const ACCENT_DEPTH = 0.06
+const PLAN_BOUNDARY = '#56616b'
+
+// One unit box scaled per mesh, so every wall, pane and baseboard shares a single geometry.
+const unitBox = new THREE.BoxGeometry(1, 1, 1)
+let wallFaces: THREE.Material[] | null = null
+// Box face order is +X, −X, +Y, −Y, +Z, −Z: the top (+Y) gets the dark cut colour of a cutaway drawing.
+const wallMaterials = () => {
+  const m = sharedMaterials()
+  wallFaces ??= [m.wallPaint, m.wallPaint, m.wallCap, m.wallPaint, m.wallPaint, m.wallPaint]
+  return wallFaces
+}
+
+function Part({ box, material, castShadow = false }: { box: Box; material: THREE.Material | THREE.Material[]; castShadow?: boolean }) {
+  return <mesh geometry={unitBox} material={material} position={[box.x, box.y, box.z]} scale={[box.w, box.h, box.d]} castShadow={castShadow} receiveShadow raycast={noRaycast} />
+}
 
 export type RoomMeshProps = {
   room: Room
@@ -32,23 +55,33 @@ export default function RoomMesh({ room, floorPlan, editing, selected, invalid, 
     onMove: (p) => onTransform({ kind: 'move', target, x: p.x, z: p.z }),
     onEnd: onTransformEnd,
   })
-  const h = room.wallHeight
+  const finish = floorFinishFor(room.department)
+  const floorGeometry = useMemo(() => scaleFloorUvs(new THREE.BoxGeometry(room.width, FLOOR_THICKNESS, room.depth), room.width, room.depth, finish), [room.width, room.depth, finish])
+  useEffect(() => () => floorGeometry.dispose(), [floorGeometry])
+  const walls = useMemo(() => roomWalls(room), [room.width, room.depth, room.wallHeight])
+  const baseboards = useMemo(() => roomBaseboards(room), [room.width, room.depth, room.wallHeight])
   const highlight = highlightFor({ editing, selected, hovered, invalid })
   const pointer = editing ? {
     onClick: (e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); onSelect() },
     onPointerOver: (e: ThreeEvent<PointerEvent>) => { e.stopPropagation(); setHovered(true) },
     onPointerOut: () => setHovered(false),
   } : {}
+  const m = sharedMaterials()
+  const floorY = FLOOR_TOP - FLOOR_THICKNESS / 2
   return <group position={[room.x, 0, room.z]}>
-    <mesh receiveShadow position={[0, 0.015, 0]} {...pointer} {...drag}><boxGeometry args={[room.width, 0.04, room.depth]} /><meshStandardMaterial color={room.color} roughness={0.9} transparent opacity={floorPlan ? 0.95 : 0.45} /></mesh>
+    {floorPlan
+      ? <mesh key="plan-floor" position={[0, floorY, 0]} {...pointer} {...drag}><boxGeometry args={[room.width, FLOOR_THICKNESS, room.depth]} /><meshStandardMaterial color={room.color} roughness={0.9} transparent opacity={0.95} /></mesh>
+      : <mesh key="floor" receiveShadow geometry={floorGeometry} material={floorMaterial(finish)} position={[0, floorY, 0]} {...pointer} {...drag} />}
     {!floorPlan && <>
-      {([-room.width / 2, room.width / 2] as const).map((x) => <mesh key={x} castShadow raycast={noRaycast} position={[x, h / 2, 0]}><boxGeometry args={[0.09, h, room.depth]} /><meshStandardMaterial color="#d4d8d9" roughness={0.3} metalness={0.1} /></mesh>)}
-      <mesh castShadow raycast={noRaycast} position={[0, h / 2, -room.depth / 2]}><boxGeometry args={[room.width, h, 0.08]} /><meshStandardMaterial color="#d9e6e8" transparent opacity={0.38} roughness={0.18} metalness={0.15} /></mesh>
-      <mesh castShadow raycast={noRaycast} position={[0, h - 0.02, 0]}><boxGeometry args={[room.width, 0.08, room.depth]} /><meshStandardMaterial color="#d2d4d2" roughness={0.5} /></mesh>
+      <mesh raycast={noRaycast} rotation={[-Math.PI / 2, 0, 0]} position={[0, FLOOR_TOP + 0.001, room.depth / 2 - ACCENT_DEPTH / 2]} material={accentMaterial(room.color)}>
+        <planeGeometry args={[room.width - 2 * WALL_THICKNESS, ACCENT_DEPTH]} />
+      </mesh>
+      {walls.solid.map((box, i) => <Part key={`wall-${i}`} box={box} material={wallMaterials()} castShadow />)}
+      {walls.glass.map((box, i) => <Part key={`glass-${i}`} box={box} material={m.glass} />)}
+      {baseboards.map((box, i) => <Part key={`base-${i}`} box={box} material={m.baseboard} />)}
     </>}
-    {highlight && <FootprintOutline width={room.width} depth={room.depth} color={highlight.color} lineWidth={highlight.width} y={0.05} />}
-    <Html position={[0, floorPlan ? 0.3 : h + 0.22, 0]} center zIndexRange={[10, 0]} style={{ pointerEvents: editing ? 'auto' : 'none', whiteSpace: 'nowrap' }}>
-      <div className={`room-label${editing ? ' editable' : ''}${selected ? ' selected' : ''}`} onClick={editing ? onSelect : undefined}>{room.name}</div>
-    </Html>
+    {highlight
+      ? <FootprintOutline width={room.width} depth={room.depth} color={highlight.color} lineWidth={highlight.width} y={0.05} />
+      : floorPlan && <FootprintOutline width={room.width} depth={room.depth} color={PLAN_BOUNDARY} lineWidth={1.2} y={0.05} />}
   </group>
 }

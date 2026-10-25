@@ -2,11 +2,20 @@ import { useLayoutEffect, useMemo } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
 import { ContactShadows, Environment, OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
-import type { OfficeLayout, OfficeSettings } from '../layout/types'
+import type { OfficeLayout, OfficeSettings, Selection } from '../layout/types'
+import type { Issue } from '../layout/validation'
 import FurnitureItem from './FurnitureItem'
 import RoomMesh from './RoomMesh'
 
-export type OfficeSceneProps = { layout: OfficeLayout; floorPlan: boolean; viewKey: number }
+export type OfficeSceneProps = {
+  layout: OfficeLayout
+  floorPlan: boolean
+  viewKey: number
+  editing: boolean
+  selection: Selection
+  issues: Map<string, Issue[]>
+  onSelect(selection: Selection): void
+}
 
 function Floor({ office, floorPlan }: { office: OfficeSettings; floorPlan: boolean }) {
   const floorMaterial = useMemo(() => new THREE.MeshStandardMaterial({ color: floorPlan ? '#d8dce0' : '#b8a58d', roughness: 0.78 }), [floorPlan])
@@ -57,15 +66,16 @@ function ViewCameras({ office, floorPlan, viewKey }: { office: OfficeSettings; f
     : <OrbitControls key={`3d-${viewKey}`} camera={camera} makeDefault target={PERSPECTIVE_TARGET} minDistance={7} maxDistance={32} maxPolarAngle={Math.PI / 2.08} />
 }
 
-function OfficeContents({ layout, floorPlan, viewKey }: OfficeSceneProps) {
+function OfficeContents({ layout, floorPlan, viewKey, editing, selection, issues, onSelect }: OfficeSceneProps) {
+  const isSelected = (kind: 'room' | 'furniture', id: string) => selection?.kind === kind && selection.id === id
   return <>
     <color attach="background" args={[floorPlan ? '#e9edf0' : '#dbe3e5']} />
     <ambientLight intensity={floorPlan ? 1.6 : 1.15} />
     <directionalLight position={[6, 13, 7]} intensity={floorPlan ? 0.5 : 2.2} castShadow shadow-mapSize-width={2048} shadow-mapSize-height={2048} />
     <pointLight position={[-6, 5, -3]} intensity={18} color="#ffdfb0" distance={18} />
     <Floor office={layout.office} floorPlan={floorPlan} />
-    {layout.rooms.map((room) => <RoomMesh key={room.id} room={room} floorPlan={floorPlan} />)}
-    {layout.furniture.map((item) => <FurnitureItem key={item.id} item={item} floorPlan={floorPlan} />)}
+    {layout.rooms.map((room) => <RoomMesh key={room.id} room={room} floorPlan={floorPlan} editing={editing} selected={isSelected('room', room.id)} invalid={issues.has(room.id)} onSelect={() => onSelect({ kind: 'room', id: room.id })} />)}
+    {layout.furniture.map((item) => <FurnitureItem key={item.id} item={item} floorPlan={floorPlan} editing={editing} selected={isSelected('furniture', item.id)} invalid={issues.has(item.id)} onSelect={() => onSelect({ kind: 'furniture', id: item.id })} />)}
     <ContactShadows position={[0, -0.055, 0]} opacity={floorPlan ? 0.12 : 0.3} scale={30} blur={2.5} far={8} />
     {!floorPlan && <Environment preset="apartment" />}
     <ViewCameras office={layout.office} floorPlan={floorPlan} viewKey={viewKey} />
@@ -73,7 +83,13 @@ function OfficeContents({ layout, floorPlan, viewKey }: OfficeSceneProps) {
 }
 
 export default function OfficeScene(props: OfficeSceneProps) {
-  return <Canvas shadows dpr={[1, 1.7]} gl={{ antialias: true }}>
+  // A click that hits no room or furniture clears the selection. Room labels live in the same DOM container,
+  // so clicks on them also reach R3F as misses and must be ignored here.
+  const onPointerMissed = (e: MouseEvent) => {
+    if (!props.editing || (e.target as Element | null)?.closest?.('.room-label')) return
+    props.onSelect(null)
+  }
+  return <Canvas shadows dpr={[1, 1.7]} gl={{ antialias: true }} onPointerMissed={onPointerMissed}>
     <OfficeContents {...props} />
   </Canvas>
 }

@@ -10,7 +10,7 @@ export default function RoomMesh({ room, floorPlan }: { room: Room; floorPlan: b
       <mesh castShadow position={[0, h / 2, -room.depth / 2]}><boxGeometry args={[room.width, h, 0.08]} /><meshStandardMaterial color="#d9e6e8" transparent opacity={0.38} roughness={0.18} metalness={0.15} /></mesh>
       <mesh castShadow position={[0, h - 0.02, 0]}><boxGeometry args={[room.width, 0.08, room.depth]} /><meshStandardMaterial color="#d2d4d2" roughness={0.5} /></mesh>
     </>}
-    <Html position={[0, floorPlan ? 0.3 : h + 0.22, 0]} center style={{ pointerEvents: 'none', whiteSpace: 'nowrap' }}>
+    <Html position={[0, floorPlan ? 0.3 : h + 0.22, 0]} center zIndexRange={[10, 0]} style={{ pointerEvents: 'none', whiteSpace: 'nowrap' }}>
       <div className="room-label">{room.name}</div>
     </Html>
   </group>

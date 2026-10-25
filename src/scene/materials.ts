@@ -2,7 +2,10 @@ import * as THREE from 'three'
 import type { FloorFinish } from './finishes'
 import { proceduralTexture } from './textures'
 
-export type SharedMaterials = Record<FloorFinish | 'wallPaint' | 'wallCap' | 'baseboard' | 'glass' | 'graphite', THREE.MeshStandardMaterial>
+type ArchitectureKey = FloorFinish | 'wallPaint' | 'wallCap' | 'baseboard' | 'glass' | 'graphite'
+type FurnitureKey = 'oakVeneer' | 'walnut' | 'fabric' | 'plastic' | 'screen' | 'chrome' | 'cabinetWhite'
+export type SharedMaterials = Record<ArchitectureKey | FurnitureKey, THREE.MeshStandardMaterial>
+export type MaterialKey = keyof SharedMaterials
 
 let shared: SharedMaterials | null = null
 const accents = new Map<string, THREE.MeshStandardMaterial>()
@@ -29,6 +32,13 @@ export function sharedMaterials(): SharedMaterials {
     baseboard: new THREE.MeshStandardMaterial({ color: '#2f3236', roughness: 0.6 }),
     glass: new THREE.MeshStandardMaterial({ color: '#dfe9ec', transparent: true, opacity: 0.28, roughness: 0.1, metalness: 0.1, depthWrite: false }),
     graphite: new THREE.MeshStandardMaterial({ color: '#2b2e33', roughness: 0.45, metalness: 0.4 }),
+    oakVeneer: new THREE.MeshStandardMaterial({ color: '#c49a6c', roughness: 0.5 }),
+    walnut: new THREE.MeshStandardMaterial({ color: '#6b4a33', roughness: 0.45 }),
+    fabric: new THREE.MeshStandardMaterial({ color: '#3b3f45', roughness: 0.95 }),
+    plastic: new THREE.MeshStandardMaterial({ color: '#1c1e21', roughness: 0.5 }),
+    screen: new THREE.MeshStandardMaterial({ color: '#0f1720', roughness: 0.2, emissive: '#24485a', emissiveIntensity: 0.55 }),
+    chrome: new THREE.MeshStandardMaterial({ color: '#b9bdc2', roughness: 0.25, metalness: 0.85 }),
+    cabinetWhite: new THREE.MeshStandardMaterial({ color: '#ecebe7', roughness: 0.6 }),
   }
   return shared
 }

@@ -31,3 +31,14 @@ describe('findIssues', () => {
     expect(findIssues(withFurniture(item('p', 'plant', 12.4, 0))).get('p')?.[0].code).toBe('out-of-bounds')
   })
 })
+
+describe('meeting furniture', () => {
+  it('lets meeting chairs tuck under a meeting table', () => {
+    expect(findIssues(withFurniture(item('t', 'meeting-table'), item('c', 'meeting-chair', 0.5, 0.3))).size).toBe(0)
+  })
+
+  it('still flags two cabinets on the same spot', () => {
+    const issues = findIssues(withFurniture(item('a', 'storage-cabinet'), item('b', 'storage-cabinet')))
+    expect(issues.get('a')?.[0].code).toBe('furniture-overlap')
+  })
+})

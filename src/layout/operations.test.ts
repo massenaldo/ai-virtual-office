@@ -114,3 +114,10 @@ describe('addRoom', () => {
     expect(room(layout, id)).toMatchObject({ width: 4.6, depth: 3.6, department: 'meeting', wallHeight: 2.5 })
   })
 })
+
+describe('new furniture types', () => {
+  it('adds a storage cabinet into the room under it', () => {
+    const { layout, id } = addFurniture(fresh(), 'storage-cabinet', { x: -7, z: -4 })
+    expect(item(layout, id)).toMatchObject({ type: 'storage-cabinet', roomId: CEO })
+  })
+})

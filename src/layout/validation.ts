@@ -1,13 +1,15 @@
 import { FURNITURE_SPECS } from './catalog'
 import { furnitureRect, rectInsideOffice, rectsOverlap, roomRect } from './geometry'
-import type { Furniture, OfficeLayout } from './types'
+import type { Furniture, FurnitureType, OfficeLayout } from './types'
 
 export type Issue = { code: 'room-overlap' | 'furniture-overlap' | 'out-of-bounds'; otherId?: string; message: string }
 
-/** Pairs that are meant to share floor space: monitors sit on desks, chairs tuck under them. */
+// Pairs that are meant to share floor space: monitors sit on desks, chairs tuck under desks and meeting tables.
+const TUCKS_UNDER: [FurnitureType, FurnitureType][] = [['chair', 'desk'], ['meeting-chair', 'meeting-table']]
+
 function mayShareSpace(a: Furniture, b: Furniture): boolean {
   if (a.type === 'monitor' || b.type === 'monitor') return true
-  return (a.type === 'chair' && b.type === 'desk') || (a.type === 'desk' && b.type === 'chair')
+  return TUCKS_UNDER.some(([x, y]) => (a.type === x && b.type === y) || (a.type === y && b.type === x))
 }
 
 /** Placement warnings keyed by object id. Warnings never block editing or saving. */

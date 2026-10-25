@@ -14,10 +14,14 @@ const MODELS: Record<FurnitureType, ComponentType> = {
   monitor: MonitorModel,
   plant: PlantModel,
   'meeting-table': MeetingTableModel,
+  // Placeholders until the Stage B models land in the next commit.
+  'meeting-chair': ChairModel,
+  'storage-cabinet': DeskModel,
+  shelf: DeskModel,
 }
 
 // Stacking order for floor-plan tiles so monitors and chairs stay visible on top of desks.
-const PLAN_HEIGHT: Record<FurnitureType, number> = { desk: 0.06, 'meeting-table': 0.06, plant: 0.06, chair: 0.07, monitor: 0.08 }
+const PLAN_HEIGHT: Record<FurnitureType, number> = { desk: 0.06, 'meeting-table': 0.06, plant: 0.06, 'storage-cabinet': 0.06, shelf: 0.06, chair: 0.07, 'meeting-chair': 0.07, monitor: 0.08 }
 
 function PlanTile({ type }: { type: FurnitureType }) {
   const spec = FURNITURE_SPECS[type]

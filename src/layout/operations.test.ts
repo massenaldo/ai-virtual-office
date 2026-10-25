@@ -44,6 +44,16 @@ describe('resizeRoomEdge', () => {
     expect(next.x - next.width / 2).toBeCloseTo(west)
   })
 
+  it('never drifts the fixed edge across repeated resizes', () => {
+    let l = fresh()
+    const r = room(l)
+    const west = r.x - r.width / 2
+    for (const east of [-3.33, -2.13, -4.07, -3.9]) l = resizeRoomEdge(l, CEO, 'e', east)
+    const next = room(l)
+    expect(next.x - next.width / 2).toBeCloseTo(west, 9)
+    expect(next.x + next.width / 2).toBeCloseTo(-3.9, 9)
+  })
+
   it('stops at the minimum size without moving the opposite edge', () => {
     const l = fresh()
     const r = room(l)

@@ -27,14 +27,42 @@ The project command is defined in `.claude/commands/vo.md`. It invokes `scripts/
 
 You can also run `./scripts/vo.sh` directly without Claude Code.
 
-## Current prototype
+## Features
 
 - Realistic-inspired 3D office shell with glass-style partitions, desks, monitors, chairs, plants, and team labels
-- Orbit, zoom, and pan camera controls
-- Toggle between 3D overview and top-down floor-plan view
-- Basic Save layout action (currently saves view metadata locally; editable geometry and full layout serialization are planned next)
+- Orbit, zoom, and pan camera controls; a true top-down floor plan (orthographic, pan and zoom only)
+- **Layout editor** (click **Edit layout**):
+  - Select rooms and furniture in the scene or in the left-hand list; edit them in the properties panel
+  - Drag rooms and furniture on the floor; resize rooms with edge handles in floor plan
+  - Grid with snap-to-grid (0.25 m) in floor plan
+  - Add rooms from templates and furniture from the palette; rotate (90°), duplicate, delete
+  - Overlapping or out-of-bounds placement is outlined in red and listed in the properties panel (a warning, not a block)
+  - Undo/redo (⌘/Ctrl+Z, ⌘/Ctrl+Shift+Z), Delete/Backspace, and Esc to clear the selection or cancel a drag
+- **Saving:** the complete layout (rooms, furniture, office settings) is stored in the browser's `localStorage` under `ai-virtual-office:layout:v1` and restored on the next start. The status shows Saved, Unsaved changes, or Save failed. You're asked before leaving edit mode or closing the tab with unsaved changes
 - Local-only development server bound to 127.0.0.1
+
+## Layout data
+
+The scene renders a typed, versioned `OfficeLayout` (`src/layout/types.ts`). It is the single source of truth.
+
+- World units are metres. A room or furniture item's `x`/`z` is the **centre of its footprint** on the floor plane; `width` runs along X and `depth` along Z. Vertical values (`wallHeight`, model heights) are kept separate.
+- Rooms are 2–12 m wide and 2–10 m deep and stay inside the 25 × 20 m office.
+- Saved data that can't be read (damaged, or from a newer version) is never overwritten silently: the app shows the default layout and copies the old value to `ai-virtual-office:layout:v1:backup` before the next save.
+- **Reset layout** restores the default office after a confirmation and can be undone.
+
+## Development
+
+```bash
+npm test        # unit tests (Vitest) for the layout model, storage, history and editor logic
+npm run build   # type-check and production build
+```
+
+## Known limitations
+
+- A desk, its chair and its monitor are separate items, so they move independently.
+- Resize handles are available in floor plan only; in 3D, resize rooms from the properties panel.
+- Layouts are stored per browser and per origin (for example `localhost:5173`); there is no export or sync yet.
 
 ## Next milestone
 
-Implement editable room geometry and furniture placement, then persist the complete layout in local storage. AI agent runtimes and task orchestration will be added after the office editor is stable.
+AI agent runtimes and task orchestration, built on top of the saved office layout.

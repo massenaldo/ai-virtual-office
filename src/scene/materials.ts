@@ -3,7 +3,7 @@ import type { FloorFinish } from './finishes'
 import { proceduralTexture } from './textures'
 
 type ArchitectureKey = FloorFinish | 'wallPaint' | 'wallCap' | 'baseboard' | 'glass' | 'graphite'
-type FurnitureKey = 'oakVeneer' | 'walnut' | 'fabric' | 'plastic' | 'screen' | 'chrome' | 'cabinetWhite'
+type FurnitureKey = 'oakVeneer' | 'walnut' | 'fabric' | 'plastic' | 'screen' | 'chrome' | 'cabinetWhite' | 'terracotta' | 'foliage'
 export type SharedMaterials = Record<ArchitectureKey | FurnitureKey, THREE.MeshStandardMaterial>
 export type MaterialKey = keyof SharedMaterials
 
@@ -39,6 +39,8 @@ export function sharedMaterials(): SharedMaterials {
     screen: new THREE.MeshStandardMaterial({ color: '#0f1720', roughness: 0.2, emissive: '#24485a', emissiveIntensity: 0.55 }),
     chrome: new THREE.MeshStandardMaterial({ color: '#b9bdc2', roughness: 0.25, metalness: 0.85 }),
     cabinetWhite: new THREE.MeshStandardMaterial({ color: '#ecebe7', roughness: 0.6 }),
+    terracotta: new THREE.MeshStandardMaterial({ color: '#a87955', roughness: 0.8 }),
+    foliage: new THREE.MeshStandardMaterial({ color: '#5a7d5c', roughness: 0.9 }),
   }
   return shared
 }

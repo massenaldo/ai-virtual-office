@@ -15,11 +15,14 @@ export const DEPARTMENTS: Record<DepartmentId, { label: string; color: string }>
 
 /** width runs along X and depth along Z at rotation 0. */
 export const FURNITURE_SPECS: Record<FurnitureType, { label: string; width: number; depth: number; planColor: string }> = {
-  desk: { label: 'Desk', width: 1.35, depth: 0.72, planColor: '#b78d61' },
-  chair: { label: 'Chair', width: 0.48, depth: 0.48, planColor: '#303842' },
-  monitor: { label: 'Monitor', width: 0.48, depth: 0.1, planColor: '#222a33' },
+  desk: { label: 'Desk', width: 1.4, depth: 0.72, planColor: '#c49a6c' },
+  chair: { label: 'Office chair', width: 0.62, depth: 0.62, planColor: '#3b3f45' },
+  monitor: { label: 'Monitor', width: 0.56, depth: 0.22, planColor: '#1c1e21' },
   plant: { label: 'Plant', width: 0.56, depth: 0.56, planColor: '#53775d' },
-  'meeting-table': { label: 'Meeting table', width: 2.7, depth: 1.15, planColor: '#b88e61' },
+  'meeting-table': { label: 'Meeting table', width: 2.7, depth: 1.15, planColor: '#6b4a33' },
+  'meeting-chair': { label: 'Meeting chair', width: 0.56, depth: 0.56, planColor: '#5a5e66' },
+  'storage-cabinet': { label: 'Storage cabinet', width: 0.8, depth: 0.45, planColor: '#9c968c' },
+  shelf: { label: 'Shelf', width: 0.9, depth: 0.35, planColor: '#8b6a4f' },
 }
 
 export type RoomTemplateId = 'office' | 'team-room' | 'meeting-room'

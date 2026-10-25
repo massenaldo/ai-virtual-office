@@ -5,7 +5,7 @@ export type Rotation = 0 | 90 | 180 | 270
 
 export type DepartmentId = 'executive' | 'project-management' | 'tech-lead' | 'backend' | 'frontend' | 'data' | 'design' | 'qa' | 'meeting' | 'devops'
 
-export type FurnitureType = 'desk' | 'chair' | 'monitor' | 'plant' | 'meeting-table'
+export type FurnitureType = 'desk' | 'chair' | 'monitor' | 'plant' | 'meeting-table' | 'meeting-chair' | 'storage-cabinet' | 'shelf'
 
 /** Footprint fields (x, z, width, depth) live on the floor plane; wallHeight is the only vertical value. */
 export type Room = { id: string; name: string; department: DepartmentId; x: number; z: number; width: number; depth: number; wallHeight: number; color: string }

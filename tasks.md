@@ -51,19 +51,20 @@ A visual upgrade of the existing 3D office, not a rewrite. The office should loo
 
 ## Stage B: Furniture models
 
-- [ ] Desk: proper top thickness, graphite frame, optional drawer unit or cable tray, keyboard and mouse
-- [ ] Monitor: slim dark bezel, screen surface, stand and base
-- [ ] Ergonomic chair: seat, backrest, armrests, gas lift, 5-star base with wheels; low polygon count
-- [ ] Meeting table refresh, plus **new** meeting chair, storage cabinet and shelf (schema, palette, catalog footprints, floor-plan tiles, tests)
-- [ ] Footprints in `catalog.ts` match the new models, so selection, overlap checks and snapping stay accurate
-- [ ] PR with before/after screenshots
+- [x] Desk: proper top thickness, graphite frame, optional drawer unit or cable tray, keyboard and mouse
+- [x] Monitor: slim dark bezel, screen surface, stand and base
+- [x] Ergonomic chair: seat, backrest, armrests, gas lift, 5-star base with wheels; low polygon count
+- [x] Meeting table refresh, plus **new** meeting chair, storage cabinet and shelf (schema, palette, catalog footprints, floor-plan tiles, tests)
+- [x] Footprints in `catalog.ts` match the new models, so selection, overlap checks and snapping stay accurate
+- [x] PR with before/after screenshots
+- Plants were only shrunk to fit their footprint (the old foliage was 0.96 m wide); the leafy redesign is in Stage C.
 
 ## Stage C: Glass, plants, details
 
 - [ ] Glass partitions with slim graphite frames for meeting rooms and offices; walls and glass never catch clicks
 - [ ] Plants with leaf clusters in a proper planter, in a couple of sizes
 - [ ] A few restrained details (wall art, a whiteboard in meeting rooms) that never block editing
-- [ ] Default office updated with the new furniture (meeting chairs, storage)
+- [ ] Default office updated with the new furniture (meeting chairs, storage); move the default meeting table fully inside the meeting room (it currently sticks through the room's east wall)
 - [ ] PR with before/after screenshots
 
 ## Stage D: Optimize and verify
@@ -71,6 +72,7 @@ A visual upgrade of the existing 3D office, not a rewrite. The office should loo
 - [ ] Count draw calls and meshes before and after; limit shadow casters; check frame rate while dragging
 - [ ] Full editor regression checklist in 3D and floor plan
 - [ ] Production build (`vite preview`) checked in the browser; `/vo` end to end
+- [ ] Self-host the DM Sans / Manrope fonts only if necessary (user, 2026-10-25: "include it in a later stage if necessary")
 - [ ] README updated (visuals, assets and licences if any, limitations)
 - [ ] Final report per plan.md §10
 

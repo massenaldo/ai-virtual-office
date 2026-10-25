@@ -22,3 +22,15 @@ describe('shared materials', () => {
     expect(sharedMaterials().concrete.map).toBeNull()
   })
 })
+
+describe('furniture materials', () => {
+  it('provides every furniture material once', () => {
+    const m = sharedMaterials()
+    for (const key of ['oakVeneer', 'walnut', 'fabric', 'plastic', 'screen', 'chrome', 'cabinetWhite'] as const) expect(m[key]).toBeDefined()
+    expect(m.walnut).not.toBe(m.oakVeneer)
+  })
+
+  it('gives screens a soft glow', () => {
+    expect(sharedMaterials().screen.emissiveIntensity).toBeGreaterThan(0)
+  })
+})

@@ -109,3 +109,24 @@ describe('parseLayout', () => {
     expect(parseLayout(l)).toBeNull()
   })
 })
+
+describe('furniture types', () => {
+  it('round-trips the new meeting chair, storage cabinet and shelf types', () => {
+    const s = memoryStorage()
+    const layout = createDefaultLayout()
+    layout.furniture.push(
+      { id: 'shelf-x', type: 'shelf', x: 0, z: 7, rotation: 90, roomId: null },
+      { id: 'mchair-x', type: 'meeting-chair', x: 2, z: 7, rotation: 0, roomId: null },
+      { id: 'cabinet-x', type: 'storage-cabinet', x: 4, z: 7, rotation: 180, roomId: null },
+    )
+    expect(saveLayout(s, layout).ok).toBe(true)
+    const loaded = loadLayout(s)
+    expect(loaded.problem).toBeNull()
+    expect(loaded.layout.furniture.slice(-3).map((f) => f.type)).toEqual(['shelf', 'meeting-chair', 'storage-cabinet'])
+  })
+
+  it('still loads layouts saved before the new types existed', () => {
+    const s = memoryStorage({ [LAYOUT_STORAGE_KEY]: serializeLayout(createDefaultLayout()) })
+    expect(loadLayout(s).problem).toBeNull()
+  })
+})

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createDefaultLayout } from './defaultLayout'
+import { FURNITURE_SPECS } from './catalog'
 import { clampFurniture, clampRoom, furnitureRect, nextRotation, rectsOverlap, roomAt, rotateOffset, snap } from './geometry'
 import type { Furniture } from './types'
 
@@ -33,8 +34,8 @@ describe('footprints', () => {
   it('swaps width and depth for quarter-turned furniture', () => {
     const desk: Furniture = { id: 'd', type: 'desk', x: 0, z: 0, rotation: 90, roomId: null }
     const r = furnitureRect(desk)
-    expect(r.maxX - r.minX).toBeCloseTo(0.72)
-    expect(r.maxZ - r.minZ).toBeCloseTo(1.35)
+    expect(r.maxX - r.minX).toBeCloseTo(FURNITURE_SPECS.desk.depth)
+    expect(r.maxZ - r.minZ).toBeCloseTo(FURNITURE_SPECS.desk.width)
   })
 
   it('does not count touching edges as overlap', () => {
@@ -76,8 +77,9 @@ describe('clampFurniture', () => {
   it('keeps furniture inside the office and finite', () => {
     const desk = layout.furniture[0]
     const out = clampFurniture({ ...desk, x: 99, z: NaN }, layout.office, desk)
-    expect(out.x + 1.35 / 2).toBeLessThanOrEqual(12.5)
-    expect(out.x).toBeGreaterThan(12.5 - 1.35 / 2 - 0.011)
+    const half = FURNITURE_SPECS.desk.width / 2
+    expect(out.x + half).toBeLessThanOrEqual(12.5)
+    expect(out.x).toBeGreaterThan(12.5 - half - 0.011)
     expect(out.z).toBe(desk.z)
   })
 })

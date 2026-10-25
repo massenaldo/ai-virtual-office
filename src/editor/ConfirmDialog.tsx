@@ -2,10 +2,10 @@ import { useEffect, useRef } from 'react'
 
 export type ConfirmAction = { label: string; tone?: 'danger' | 'primary'; onClick(): void }
 
-export type ConfirmDialogProps = { open: boolean; title: string; message: string; actions: ConfirmAction[]; onClose(): void }
+export type ConfirmDialogProps = { open: boolean; title: string; message: string; actions: ConfirmAction[]; cancelLabel?: string; onClose(): void }
 
 /** In-app modal used instead of window.confirm so it matches the UI and never blocks the page. */
-export default function ConfirmDialog({ open, title, message, actions, onClose }: ConfirmDialogProps) {
+export default function ConfirmDialog({ open, title, message, actions, cancelLabel = 'Cancel', onClose }: ConfirmDialogProps) {
   const firstButton = useRef<HTMLButtonElement>(null)
   useEffect(() => {
     if (!open) return
@@ -24,7 +24,7 @@ export default function ConfirmDialog({ open, title, message, actions, onClose }
       <h2 id="dialog-title">{title}</h2>
       <p id="dialog-message">{message}</p>
       <div className="dialog-actions">
-        <button ref={firstButton} className="dialog-button" onClick={onClose}>Cancel</button>
+        <button ref={firstButton} className="dialog-button" onClick={onClose}>{cancelLabel}</button>
         {actions.map((a) => <button key={a.label} className={`dialog-button ${a.tone ?? ''}`} onClick={() => { a.onClick(); onClose() }}>{a.label}</button>)}
       </div>
     </div>

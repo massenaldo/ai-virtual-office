@@ -31,7 +31,7 @@ export function furnitureInRoom(l: OfficeLayout, roomId: string): Furniture[] {
 export function addRoom(l: OfficeLayout, templateId: RoomTemplateId, at: Point = { x: 0, z: 0 }): { layout: OfficeLayout; id: string } {
   const template = ROOM_TEMPLATES.find((t) => t.id === templateId) ?? ROOM_TEMPLATES[0]
   const id = createId('room', allIds(l))
-  const room = clampRoom({ id, name: template.label.toUpperCase(), department: template.department, x: at.x, z: at.z, width: template.width, depth: template.depth, wallHeight: DEFAULT_WALL_HEIGHT, color: DEPARTMENTS[template.department].color }, l.office)
+  const room = clampRoom({ id, name: template.label.toUpperCase(), department: template.department, x: at.x, z: at.z, width: template.width, depth: template.depth, wallHeight: DEFAULT_WALL_HEIGHT, color: DEPARTMENTS[template.department].color, rotation: 0 }, l.office)
   return { layout: { ...l, rooms: [...l.rooms, room] }, id }
 }
 

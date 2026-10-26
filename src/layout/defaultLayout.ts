@@ -40,7 +40,7 @@ const pad = (n: number) => String(n).padStart(2, '0')
 const round = (n: number) => Math.round(n * 100) / 100
 
 export function createDefaultLayout(): OfficeLayout {
-  const rooms: Room[] = ROOMS.map(([id, name, department, x, z, width, depth]) => ({ id, name, department, x, z, width, depth, wallHeight: DEFAULT_WALL_HEIGHT, color: DEPARTMENTS[department].color }))
+  const rooms: Room[] = ROOMS.map(([id, name, department, x, z, width, depth]) => ({ id, name, department, x, z, width, depth, wallHeight: DEFAULT_WALL_HEIGHT, color: DEPARTMENTS[department].color, rotation: 0 }))
   const furniture: Furniture[] = []
   DESKS.forEach(([x, z, rotation, roomId], i) => {
     const n = pad(i + 1)

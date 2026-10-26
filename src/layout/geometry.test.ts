@@ -66,6 +66,11 @@ describe('clampRoom', () => {
     expect(clampRoom({ ...ceo, depth: 0.5 }, layout.office).depth).toBe(2)
   })
 
+  it('allows rooms up to 12 m deep', () => {
+    expect(clampRoom({ ...ceo, depth: 12 }, layout.office).depth).toBe(12)
+    expect(clampRoom({ ...ceo, depth: 13 }, layout.office).depth).toBe(12)
+  })
+
   it('keeps the footprint inside the office', () => {
     const r = clampRoom({ ...ceo, x: 100, z: -100 }, layout.office)
     expect(r.x).toBeCloseTo(12.5 - ceo.width / 2)

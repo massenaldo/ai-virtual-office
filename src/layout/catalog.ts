@@ -33,6 +33,6 @@ export const ROOM_TEMPLATES: { id: RoomTemplateId; label: string; width: number;
   { id: 'meeting-room', label: 'Meeting room', width: 4.6, depth: 3.6, department: 'meeting' },
 ]
 
-export const ROOM_LIMITS = { minWidth: 2, maxWidth: 12, minDepth: 2, maxDepth: 10 }
+export const ROOM_LIMITS = { minWidth: 2, maxWidth: 12, minDepth: 2, maxDepth: 12 }
 
 export const DEFAULT_WALL_HEIGHT = 2.5

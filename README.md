@@ -52,7 +52,7 @@ You can also run `./scripts/vo.sh` directly without Claude Code.
 The scene renders a typed, versioned `OfficeLayout` (`src/layout/types.ts`). It is the single source of truth.
 
 - World units are metres. A room or furniture item's `x`/`z` is the **centre of its footprint** on the floor plane; `width` runs along X and `depth` along Z. Vertical values (`wallHeight`, model heights) are kept separate.
-- Rooms are 2–12 m wide and 2–10 m deep and stay inside the 25 × 20 m office.
+- Rooms are 2–12 m wide and 2–12 m deep and stay inside the 25 × 20 m office.
 - Saved data that can't be read (damaged, or from a newer version) is never overwritten silently: the app shows the default layout and copies the old value to `ai-virtual-office:layout:v1:backup` before the next save.
 - **Reset layout** restores the default office after a confirmation and can be undone.
 

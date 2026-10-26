@@ -1,9 +1,10 @@
 /// <reference types="vitest/config" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { voAutoExit } from './scripts/voAutoExit'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), voAutoExit(process.env.VO_AUTO_EXIT === '1')],
   server: {
     host: '127.0.0.1',
     port: 5173,

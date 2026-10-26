@@ -13,7 +13,6 @@ type Pieces = Partial<Record<MaterialKey, THREE.BufferGeometry[]>>
 const box = (w: number, h: number, d: number, x = 0, y = 0, z = 0) => new THREE.BoxGeometry(w, h, d).translate(x, y, z)
 const cylinder = (radiusTop: number, radiusBottom: number, h: number, x = 0, y = 0, z = 0, segments = 12) =>
   new THREE.CylinderGeometry(radiusTop, radiusBottom, h, segments).translate(x, y, z)
-const sphere = (r: number, x = 0, y = 0, z = 0) => new THREE.SphereGeometry(r, 14, 10).translate(x, y, z)
 
 function desk(): Pieces {
   const legs = [-0.62, 0.62].flatMap((x) => [
@@ -87,15 +86,54 @@ function shelf(): Pieces {
   }
 }
 
-// Ported from the prototype and shrunk to its footprint; Stage C replaces it with a leafy plant.
-function plant(): Pieces {
+export type PlantVariant = 0 | 1
+
+/** Stable per-id plant size (0 = bushy, 1 = tall), so the office gets variety without storing anything new. */
+export function plantVariant(id: string): PlantVariant {
+  let hash = 2166136261
+  for (let i = 0; i < id.length; i++) hash = Math.imul(hash ^ id.charCodeAt(i), 16777619)
+  return ((hash >>> 0) % 2) as PlantVariant
+}
+
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5))
+
+/** A single leaf: a flattened, elongated ellipsoid tilted up by `elevation`, pointing outward at `heading`. */
+function leaf(length: number, elevation: number, heading: number, y: number, offset: number) {
+  return new THREE.SphereGeometry(1, 8, 6)
+    .scale(0.035, 0.012, length / 2)
+    .translate(0, 0, length / 2)
+    .rotateX(-elevation)
+    .translate(0, y, offset)
+    .rotateY(heading)
+}
+
+// Matte charcoal planter with soil and a leafy crown; leaves alternate between two greens for depth.
+function plant(variant: number): Pieces {
+  const tall = variant === 1
+  const potHeight = tall ? 0.42 : 0.36
+  const tiers = tall ? [[0.78, 0.5], [0.95, 0.75], [1.12, 0.95], [1.27, 1.15]] : [[0.5, 0.35], [0.64, 0.6], [0.78, 0.85]]
+  const perTier = tall ? 5 : 6
+  const length = tall ? 0.24 : 0.22
+  const offset = tall ? 0.04 : 0.06
+  const dark: THREE.BufferGeometry[] = []
+  const light: THREE.BufferGeometry[] = []
+  tiers.forEach(([y, elevation], t) => {
+    for (let i = 0; i < perTier; i++) {
+      const n = t * perTier + i
+      ;(n % 2 ? light : dark).push(leaf(length, elevation, n * GOLDEN_ANGLE, y, offset))
+    }
+  })
+  const soil = [cylinder(0.18, 0.18, 0.02, 0, potHeight - 0.03, 0, 16)]
+  if (tall) soil.push(cylinder(0.015, 0.02, 0.9, 0, potHeight + 0.43, 0, 6))
   return {
-    terracotta: [cylinder(0.2, 0.16, 0.42, 0, 0.21, 0, 16)],
-    foliage: [sphere(0.28, 0, 0.7, 0), sphere(0.2, 0.06, 0.92, 0.03)],
+    planter: [cylinder(0.2, 0.16, potHeight, 0, potHeight / 2, 0, 20)],
+    terracotta: soil,
+    foliage: dark,
+    foliageLight: light,
   }
 }
 
-const BUILDERS: Record<FurnitureType, () => Pieces> = {
+const BUILDERS: Record<FurnitureType, (variant: number) => Pieces> = {
   desk,
   chair,
   monitor,
@@ -110,13 +148,18 @@ const BUILDERS: Record<FurnitureType, () => Pieces> = {
 const NO_SHADOW = new Set<MaterialKey>(['plastic', 'screen', 'chrome'])
 const SHADOWLESS_TYPES = new Set<FurnitureType>(['monitor'])
 
-const cache = new Map<FurnitureType, ModelPart[]>()
+const cache = new Map<string, ModelPart[]>()
 
-/** One merged geometry per material for each furniture type, built once and shared by every instance. */
-export function modelParts(type: FurnitureType): ModelPart[] {
-  let parts = cache.get(type)
+/**
+ * One merged geometry per material for each furniture type, built once and shared by every instance.
+ * `variant` only applies to plants (see plantVariant); other types ignore it.
+ */
+export function modelParts(type: FurnitureType, variant = 0): ModelPart[] {
+  const v = type === 'plant' ? variant : 0
+  const key = `${type}:${v}`
+  let parts = cache.get(key)
   if (!parts) {
-    parts = Object.entries(BUILDERS[type]()).map(([material, geometries]) => {
+    parts = Object.entries(BUILDERS[type](v)).map(([material, geometries]) => {
       const merged = mergeGeometries(geometries.map((g) => g.toNonIndexed()), false)
       if (!merged) throw new Error(`Could not merge ${type} ${material} geometry`)
       geometries.forEach((g) => g.dispose())
@@ -124,7 +167,7 @@ export function modelParts(type: FurnitureType): ModelPart[] {
       const castShadow = !SHADOWLESS_TYPES.has(type) && (!NO_SHADOW.has(key) || type === 'chair')
       return { material: key, geometry: merged, castShadow }
     })
-    cache.set(type, parts)
+    cache.set(key, parts)
   }
   return parts
 }

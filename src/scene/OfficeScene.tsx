@@ -11,6 +11,8 @@ import { floorMaterial } from './materials'
 import ResizeHandles from './ResizeHandles'
 import { RoomLabelLayer, RoomLabelTracker, type LabelRegistry } from './RoomLabels'
 import RoomMesh from './RoomMesh'
+import { RenderStatsPanel, RenderStatsProbe } from './StatsOverlay'
+import { statsEnabled } from './renderStats'
 import { scaleFloorUvs } from './textures'
 
 export type OfficeSceneProps = {
@@ -42,6 +44,8 @@ function StudioEnvironment({ floorPlan }: { floorPlan: boolean }) {
     <Lightformer form="rect" intensity={0.4} color="#dfe9ff" position={[0, 5, 16]} rotation-y={Math.PI} scale={[24, 6, 1]} />
   </Environment>
 }
+
+const SHOW_STATS = typeof window !== 'undefined' && statsEnabled(window.location.search)
 
 // Top-down view has no rotation, so the left button pans like a map.
 const PLAN_MOUSE_BUTTONS = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }
@@ -113,6 +117,7 @@ function OfficeContents({ layout, floorPlan, viewKey, editing, selection, issues
 
 export default function OfficeScene(props: OfficeSceneProps) {
   const labels = useRef<LabelRegistry>(new Map()).current
+  const statsPanel = useRef<HTMLDivElement>(null)
   // A click that hits no room or furniture clears the selection.
   const onPointerMissed = () => {
     if (props.editing) props.onSelect(null)
@@ -120,7 +125,9 @@ export default function OfficeScene(props: OfficeSceneProps) {
   return <>
   <Canvas shadows="soft" dpr={[1, 1.7]} gl={{ antialias: true }} onCreated={({ gl }) => { gl.toneMappingExposure = 0.95 }} onPointerMissed={onPointerMissed}>
     <OfficeContents {...props} labels={labels} />
+    {SHOW_STATS && <RenderStatsProbe panel={statsPanel} />}
   </Canvas>
+  {SHOW_STATS && <RenderStatsPanel panel={statsPanel} />}
   <RoomLabelLayer rooms={props.layout.rooms} editing={props.editing} selection={props.selection} registry={labels} onSelect={props.onSelect} />
   </>
 }

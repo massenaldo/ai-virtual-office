@@ -74,3 +74,4 @@ kbd{background:#18212d;border:1px solid #303948;border-radius:4px;padding:1px 5p
 .room-label-layer{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:10}
 .room-label-layer .room-label{position:absolute;left:0;top:0;white-space:nowrap;visibility:hidden;will-change:transform}
 .room-label-layer .room-label.editable{pointer-events:auto}
+.render-stats{position:absolute;top:12px;right:12px;font:500 10px ui-monospace,SFMono-Regular,Menlo,monospace;color:#e9edf4;background:#0c1119d9;border:1px solid #2b3441;border-radius:6px;padding:6px 8px;pointer-events:none;z-index:15}

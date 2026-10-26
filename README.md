@@ -25,7 +25,11 @@ Open http://localhost:5173.
 
 The project command is defined in `.claude/commands/vo.md`. It invokes `scripts/vo.sh`, which starts the Vite server only if the local URL is not already responding, then opens the browser on macOS or Linux desktop environments.
 
-You can also run `./scripts/vo.sh` directly without Claude Code.
+`/vo` opens the office at `http://localhost:5173/sessionID=<ID>`, where `<ID>` is the Claude Code session's ID, and shows that link as a note in the reply. The ID only appears in the link; the app ignores it.
+
+**Auto-stop:** a server started by `/vo` stops immediately when the last browser page is closed, and removes `.vo-server.pid`. A page reload also closes the page's connection, so it stops the server too; run `/vo` again. Anything you haven't saved is discarded, and the next start loads your last saved layout. A server you start yourself with `npm run dev` is never stopped this way.
+
+You can also run `./scripts/vo.sh [sessionID]` directly without Claude Code.
 
 ## Features
 

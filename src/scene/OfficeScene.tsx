@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
 import { ContactShadows, Environment, Grid, Lightformer, OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
@@ -7,7 +7,7 @@ import type { Issue } from '../layout/validation'
 import type { TransformIntent } from '../editor/transform'
 import { OVERVIEW_DIRECTION, OVERVIEW_FOV, fitOverview } from './camera'
 import FurnitureItem from './FurnitureItem'
-import { floorMaterial } from './materials'
+import { sharedMaterials } from './materials'
 import ResizeHandles from './ResizeHandles'
 import { RoomLabelLayer, RoomLabelTracker, type LabelRegistry } from './RoomLabels'
 import RoomMesh from './RoomMesh'
@@ -30,10 +30,28 @@ export type OfficeSceneProps = {
 
 const planFloorMaterial = new THREE.MeshStandardMaterial({ color: '#d8dce0', roughness: 0.9 })
 
-/** Office floor at y = 0, the level furniture stands on: polished concrete in 3D, a plain sheet in floor plan. */
+export const SLAB_THICKNESS = 0.3
+
+let slabFaces: THREE.Material[] | null = null
+// Box face order is +X, −X, +Y, −Y, +Z, −Z: concrete on top, the darker cut edge everywhere else.
+const slabMaterials = () => {
+  const m = sharedMaterials()
+  slabFaces ??= [m.slabEdge, m.slabEdge, m.slabTop, m.slabEdge, m.slabEdge, m.slabEdge]
+  return slabFaces
+}
+
+/**
+ * The office floor, whose top is y = 0 where furniture stands. In 3D it is a tower storey: a concrete slab with a
+ * visible edge. Floor plan keeps a plain sheet.
+ */
 function Floor({ office, floorPlan }: { office: OfficeSettings; floorPlan: boolean }) {
-  const geometry = useMemo(() => scaleFloorUvs(new THREE.PlaneGeometry(office.width, office.depth), office.width, office.depth, 'concrete'), [office.width, office.depth])
-  return <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} geometry={geometry} material={floorPlan ? planFloorMaterial : floorMaterial('concrete')} />
+  const plan = useMemo(() => new THREE.PlaneGeometry(office.width, office.depth), [office.width, office.depth])
+  const slab = useMemo(() => scaleFloorUvs(new THREE.BoxGeometry(office.width, SLAB_THICKNESS, office.depth), office.width, office.depth, 'concrete'), [office.width, office.depth])
+  useEffect(() => () => plan.dispose(), [plan])
+  useEffect(() => () => slab.dispose(), [slab])
+  return floorPlan
+    ? <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} geometry={plan} material={planFloorMaterial} />
+    : <mesh receiveShadow geometry={slab} material={slabMaterials()} position={[0, -SLAB_THICKNESS / 2, 0]} />
 }
 
 /** Daylight from a large soft overhead panel, warm window light from −X and a cool bounce from +Z; built in code, no downloads. */

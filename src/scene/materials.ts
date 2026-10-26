@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import type { FloorFinish } from './finishes'
 import { proceduralTexture } from './textures'
 
-type ArchitectureKey = FloorFinish | 'wallPaint' | 'wallCap' | 'baseboard' | 'glass' | 'graphite'
+type ArchitectureKey = FloorFinish | 'wallPaint' | 'wallCap' | 'baseboard' | 'glass' | 'graphite' | 'slabTop' | 'slabEdge'
 type FurnitureKey = 'oakVeneer' | 'walnut' | 'fabric' | 'plastic' | 'screen' | 'chrome' | 'cabinetWhite' | 'terracotta' | 'foliage' | 'foliageLight' | 'planter' | 'whiteboard'
 export type SharedMaterials = Record<ArchitectureKey | FurnitureKey, THREE.MeshStandardMaterial>
 export type MaterialKey = keyof SharedMaterials
@@ -27,6 +27,9 @@ export function sharedMaterials(): SharedMaterials {
     carpet: floor('carpet', '#8d8a86', 0.95),
     oak: floor('oak', '#c49a6c', 0.55),
     epoxy: floor('epoxy', '#3b4046', 0.35),
+    // The tower storey the office stands on: warm concrete, darker than the background, with a darker cut edge.
+    slabTop: floor('concrete', '#a09a91', 0.7),
+    slabEdge: new THREE.MeshStandardMaterial({ color: '#77726b', roughness: 0.85 }),
     wallPaint: new THREE.MeshStandardMaterial({ color: '#f1eee8', roughness: 0.9 }),
     wallCap: new THREE.MeshStandardMaterial({ color: '#3a3d42', roughness: 0.8 }),
     baseboard: new THREE.MeshStandardMaterial({ color: '#2f3236', roughness: 0.6 }),

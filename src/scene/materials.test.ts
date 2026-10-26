@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import * as THREE from 'three'
 import { accentMaterial, floorMaterial, sharedMaterials } from './materials'
 
 describe('shared materials', () => {
@@ -32,5 +33,18 @@ describe('furniture materials', () => {
 
   it('gives screens a soft glow', () => {
     expect(sharedMaterials().screen.emissiveIntensity).toBeGreaterThan(0)
+  })
+})
+
+describe('tower floor slab', () => {
+  const lightness = (c: THREE.Color) => c.getHSL({ h: 0, s: 0, l: 0 }).l
+
+  it('the slab top is clearly darker than the 3D background', () => {
+    expect(lightness(sharedMaterials().slabTop.color)).toBeLessThan(lightness(new THREE.Color('#e6e3de')) - 0.08)
+  })
+
+  it('the slab edge is darker than its top', () => {
+    const m = sharedMaterials()
+    expect(lightness(m.slabEdge.color)).toBeLessThan(lightness(m.slabTop.color))
   })
 })

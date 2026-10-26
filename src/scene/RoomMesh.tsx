@@ -3,11 +3,12 @@ import type { ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { Room, Selection } from '../layout/types'
 import type { TransformIntent } from '../editor/transform'
-import { roomBaseboards, roomDetails, roomWalls, WALL_THICKNESS, type Box, type DetailKind } from './architecture'
-import { floorFinishFor, partitionStyle } from './finishes'
+import { roomBaseboards, roomDetails, roomWalls, WALL_THICKNESS, type DetailKind } from './architecture'
+import { floorFinishFor, partitionStyle, type PartitionStyle } from './finishes'
 import FootprintOutline from './FootprintOutline'
 import { highlightFor } from './highlight'
 import { accentMaterial, floorMaterial, sharedMaterials } from './materials'
+import { mergeBoxes } from './roomGeometry'
 import { scaleFloorUvs } from './textures'
 import { useFloorDrag } from './useFloorDrag'
 
@@ -19,25 +20,29 @@ const FLOOR_TOP = 0.025
 const ACCENT_DEPTH = 0.06
 const PLAN_BOUNDARY = '#56616b'
 
-// One unit box scaled per mesh, so every wall, pane and baseboard shares a single geometry.
-const unitBox = new THREE.BoxGeometry(1, 1, 1)
-let wallFaces: THREE.Material[] | null = null
-// Box face order is +X, −X, +Y, −Y, +Z, −Z: the top (+Y) gets the dark cut colour of a cutaway drawing.
-const wallMaterials = () => {
-  const m = sharedMaterials()
-  wallFaces ??= [m.wallPaint, m.wallPaint, m.wallCap, m.wallPaint, m.wallPaint, m.wallPaint]
-  return wallFaces
-}
+type MaterialName = 'wallPaint' | 'wallCap' | 'glass' | 'graphite' | 'baseboard' | 'whiteboard' | 'accent'
+type MergedPart = { name: MaterialName; geometry: THREE.BufferGeometry; castShadow: boolean }
 
-function detailMaterial(kind: DetailKind, color: string): THREE.Material {
-  const m = sharedMaterials()
-  if (kind === 'art-canvas') return accentMaterial(color)
-  if (kind === 'whiteboard') return m.whiteboard
-  return m.graphite
-}
+const GRAPHITE_DETAILS: DetailKind[] = ['art-frame', 'whiteboard-frame', 'whiteboard-tray']
 
-function Part({ box, material, castShadow = false }: { box: Box; material: THREE.Material | THREE.Material[]; castShadow?: boolean }) {
-  return <mesh geometry={unitBox} material={material} position={[box.x, box.y, box.z]} scale={[box.w, box.h, box.d]} castShadow={castShadow} receiveShadow raycast={noRaycast} />
+/**
+ * The room shell merged into one geometry per material, so a room costs a handful of draw calls however many
+ * panes, mullions and trims it has. Solid walls are split into painted sides and a dark top (the cutaway cut colour).
+ */
+function mergedRoomParts(room: Room, style: PartitionStyle): MergedPart[] {
+  const walls = roomWalls(room, style)
+  const details = roomDetails(room, style)
+  const detailBoxes = (kinds: DetailKind[]) => details.filter((d) => kinds.includes(d.kind)).map((d) => d.box)
+  const parts: [MaterialName, THREE.BufferGeometry | null, boolean][] = [
+    ['wallPaint', mergeBoxes(walls.solid, 'sides'), true],
+    ['wallCap', mergeBoxes(walls.solid, 'top'), true],
+    ['glass', mergeBoxes(walls.glass), false],
+    ['graphite', mergeBoxes([...walls.frames, ...detailBoxes(GRAPHITE_DETAILS)]), false],
+    ['baseboard', mergeBoxes(roomBaseboards(room, style)), false],
+    ['whiteboard', mergeBoxes(detailBoxes(['whiteboard'])), false],
+    ['accent', mergeBoxes(detailBoxes(['art-canvas'])), false],
+  ]
+  return parts.flatMap(([name, geometry, castShadow]) => (geometry ? [{ name, geometry, castShadow }] : []))
 }
 
 export type RoomMeshProps = {
@@ -66,9 +71,8 @@ export default function RoomMesh({ room, floorPlan, editing, selected, invalid, 
   const floorGeometry = useMemo(() => scaleFloorUvs(new THREE.BoxGeometry(room.width, FLOOR_THICKNESS, room.depth), room.width, room.depth, finish), [room.width, room.depth, finish])
   useEffect(() => () => floorGeometry.dispose(), [floorGeometry])
   const style = partitionStyle(room.department)
-  const walls = useMemo(() => roomWalls(room, style), [room.width, room.depth, room.wallHeight, style])
-  const baseboards = useMemo(() => roomBaseboards(room, style), [room.width, room.depth, room.wallHeight, style])
-  const details = useMemo(() => roomDetails(room, style), [room.width, room.depth, room.wallHeight, room.department, style])
+  const parts = useMemo(() => mergedRoomParts(room, style), [room.width, room.depth, room.wallHeight, room.department, style])
+  useEffect(() => () => parts.forEach((part) => part.geometry.dispose()), [parts])
   const highlight = highlightFor({ editing, selected, hovered, invalid })
   const pointer = editing ? {
     onClick: (e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); onSelect() },
@@ -85,11 +89,7 @@ export default function RoomMesh({ room, floorPlan, editing, selected, invalid, 
       <mesh raycast={noRaycast} rotation={[-Math.PI / 2, 0, 0]} position={[0, FLOOR_TOP + 0.001, room.depth / 2 - ACCENT_DEPTH / 2]} material={accentMaterial(room.color)}>
         <planeGeometry args={[room.width - 2 * WALL_THICKNESS, ACCENT_DEPTH]} />
       </mesh>
-      {walls.solid.map((box, i) => <Part key={`wall-${i}`} box={box} material={wallMaterials()} castShadow />)}
-      {walls.glass.map((box, i) => <Part key={`glass-${i}`} box={box} material={m.glass} />)}
-      {walls.frames.map((box, i) => <Part key={`frame-${i}`} box={box} material={m.graphite} />)}
-      {baseboards.map((box, i) => <Part key={`base-${i}`} box={box} material={m.baseboard} />)}
-      {details.map(({ kind, box }, i) => <Part key={`detail-${i}`} box={box} material={detailMaterial(kind, room.color)} />)}
+      {parts.map(({ name, geometry, castShadow }) => <mesh key={name} geometry={geometry} material={name === 'accent' ? accentMaterial(room.color) : m[name]} castShadow={castShadow} receiveShadow raycast={noRaycast} />)}
     </>}
     {highlight
       ? <FootprintOutline width={room.width} depth={room.depth} color={highlight.color} lineWidth={highlight.width} y={0.05} />

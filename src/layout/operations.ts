@@ -1,5 +1,5 @@
 import { DEFAULT_WALL_HEIGHT, DEPARTMENTS, ROOM_LIMITS, ROOM_TEMPLATES, type RoomTemplateId } from './catalog'
-import { clampFurniture, clampRoom, nextRotation, roomAt } from './geometry'
+import { clampFurniture, clampRoom, nextRotation, roomAt, rotateOffset } from './geometry'
 import type { Furniture, FurnitureType, OfficeLayout, Room } from './types'
 
 // Every operation returns a new layout, or the same reference when nothing changed so history can skip no-ops.
@@ -73,6 +73,22 @@ export function resizeRoomEdge(l: OfficeLayout, id: string, edge: Edge, coordina
     z = edge === 's' ? north + depth / 2 : south - depth / 2
   }
   return replaceRoom(l, prev, clampRoom({ ...prev, x, z, width, depth }, l.office, prev), false)
+}
+
+/**
+ * Turns a room a quarter turn around its centre: the footprint swaps width and depth, the room slides back inside
+ * the office if needed, and its furniture swings around the same centre and turns with it.
+ */
+export function rotateRoom(l: OfficeLayout, id: string): OfficeLayout {
+  const prev = l.rooms.find((r) => r.id === id)
+  if (!prev) return l
+  const next = clampRoom({ ...prev, width: prev.depth, depth: prev.width, rotation: nextRotation(prev.rotation) }, l.office, prev)
+  const furniture = l.furniture.map((f) => {
+    if (f.roomId !== id) return f
+    const o = rotateOffset(f.x - prev.x, f.z - prev.z, 90)
+    return clampFurniture({ ...f, x: next.x + o.dx, z: next.z + o.dz, rotation: nextRotation(f.rotation) }, l.office, f)
+  })
+  return { ...l, rooms: l.rooms.map((r) => (r.id === id ? next : r)), furniture }
 }
 
 export function deleteRoom(l: OfficeLayout, id: string): OfficeLayout {

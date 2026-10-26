@@ -1,5 +1,5 @@
 import type { RoomTemplateId } from '../layout/catalog'
-import { addFurniture, addRoom, deleteFurniture, deleteRoom, duplicateFurniture, rotateFurniture, updateFurniture, updateRoom } from '../layout/operations'
+import { addFurniture, addRoom, deleteFurniture, deleteRoom, duplicateFurniture, rotateFurniture, rotateRoom, updateFurniture, updateRoom } from '../layout/operations'
 import type { Furniture, FurnitureType, Room, Selection } from '../layout/types'
 import { applyTransform, type TransformIntent } from './transform'
 import type { ConfirmDialogProps } from './ConfirmDialog'
@@ -44,6 +44,7 @@ export function useEditorActions({ state, dispatch }: LayoutEditor, openDialog: 
     roomChange: (id: string, patch: Partial<Omit<Room, 'id'>>) => dispatch({ type: 'edit', update: (l) => updateRoom(l, id, patch) }),
     furnitureChange: (id: string, patch: Partial<Omit<Furniture, 'id' | 'type'>>) => dispatch({ type: 'edit', update: (l) => updateFurniture(l, id, patch) }),
     rotate: (id: string) => dispatch({ type: 'edit', update: (l) => rotateFurniture(l, id) }),
+    rotateRoom: (id: string) => dispatch({ type: 'edit', update: (l) => rotateRoom(l, id) }),
     transformStart: (target: NonNullable<Selection>) => {
       dispatch({ type: 'select', selection: target })
       dispatch({ type: 'drag-start' })

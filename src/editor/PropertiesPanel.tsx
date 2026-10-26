@@ -12,6 +12,7 @@ export type PropertiesPanelProps = {
   onRoomChange(id: string, patch: Partial<Omit<Room, 'id'>>): void
   onFurnitureChange(id: string, patch: Partial<Omit<Furniture, 'id' | 'type'>>): void
   onRotate(id: string): void
+  onRotateRoom(id: string): void
   onDuplicate(id: string): void
   onDelete(): void
 }
@@ -65,7 +66,10 @@ export default function PropertiesPanel(p: PropertiesPanelProps) {
     <div className="field-row"><NumberField label="Width" value={room.width} onCommit={(width) => p.onRoomChange(room.id, { width })}/><NumberField label="Depth" value={room.depth} onCommit={(depth) => p.onRoomChange(room.id, { depth })}/></div>
     <div className="field-static"><span>Wall height</span><strong>{format(room.wallHeight)} m</strong></div>
     <Issues list={p.issues.get(room.id)}/>
-    <div className="panel-actions"><button className="panel-button danger" onClick={p.onDelete}><Trash2 size={13}/> Delete room</button></div>
+    <div className="panel-actions">
+      <button className="panel-button" onClick={() => p.onRotateRoom(room.id)}><RotateCw size={13}/> Rotate 90°</button>
+      <button className="panel-button danger" onClick={p.onDelete}><Trash2 size={13}/> Delete room</button>
+    </div>
   </aside>
 
   if (item) return <aside className="editor-panel properties" aria-label="Furniture properties">

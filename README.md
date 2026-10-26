@@ -35,6 +35,7 @@ You can also run `./scripts/vo.sh` directly without Claude Code.
   - Cutaway rooms (no ceilings, open front) with warm-white walls, graphite baseboards, and slim-framed glass partitions
   - Oak desks on graphite frames with keyboard and mouse, ergonomic chairs, slim monitors, a walnut meeting table with meeting chairs, storage cabinets, shelves, and leafy plants in two sizes
   - A few restrained wall details: framed art in the executive office, a whiteboard in the meeting room
+- The office stands on one storey of a tower: a warm-concrete floor slab with a visible edge
 - Team labels that stay readable in 3D and floor plan
 - Orbit, zoom, and pan camera controls; a true top-down floor plan (orthographic, pan and zoom only)
 - **Layout editor** (click **Edit layout**):
@@ -42,6 +43,7 @@ You can also run `./scripts/vo.sh` directly without Claude Code.
   - Drag rooms and furniture on the floor; resize rooms with edge handles in floor plan
   - Grid with snap-to-grid (0.25 m) in floor plan
   - Add rooms from templates and furniture from the palette; rotate (90°), duplicate, delete
+  - Rotate a room in 90° steps: its walls, glass, details and furniture turn with it around the room's centre
   - Overlapping or out-of-bounds placement is outlined in red and listed in the properties panel (a warning, not a block)
   - Undo/redo (⌘/Ctrl+Z, ⌘/Ctrl+Shift+Z), Delete/Backspace, and Esc to clear the selection or cancel a drag
 - **Saving:** the complete layout (rooms, furniture, office settings) is stored in the browser's `localStorage` under `ai-virtual-office:layout:v1` and restored on the next start. The status shows Saved, Unsaved changes, or Save failed. You're asked before leaving edit mode or closing the tab with unsaved changes

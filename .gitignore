@@ -4,3 +4,4 @@ dist/
 .vo-server.pid
 .DS_Store
 .env
+.superpowers/

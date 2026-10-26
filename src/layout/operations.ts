@@ -1,5 +1,5 @@
 import { DEFAULT_WALL_HEIGHT, DEPARTMENTS, ROOM_LIMITS, ROOM_TEMPLATES, type RoomTemplateId } from './catalog'
-import { clampFurniture, clampRoom, nextRotation, roomAt } from './geometry'
+import { clampFurniture, clampRoom, nextRotation, roomAt, rotateOffset } from './geometry'
 import type { Furniture, FurnitureType, OfficeLayout, Room } from './types'
 
 // Every operation returns a new layout, or the same reference when nothing changed so history can skip no-ops.
@@ -31,7 +31,7 @@ export function furnitureInRoom(l: OfficeLayout, roomId: string): Furniture[] {
 export function addRoom(l: OfficeLayout, templateId: RoomTemplateId, at: Point = { x: 0, z: 0 }): { layout: OfficeLayout; id: string } {
   const template = ROOM_TEMPLATES.find((t) => t.id === templateId) ?? ROOM_TEMPLATES[0]
   const id = createId('room', allIds(l))
-  const room = clampRoom({ id, name: template.label.toUpperCase(), department: template.department, x: at.x, z: at.z, width: template.width, depth: template.depth, wallHeight: DEFAULT_WALL_HEIGHT, color: DEPARTMENTS[template.department].color }, l.office)
+  const room = clampRoom({ id, name: template.label.toUpperCase(), department: template.department, x: at.x, z: at.z, width: template.width, depth: template.depth, wallHeight: DEFAULT_WALL_HEIGHT, color: DEPARTMENTS[template.department].color, rotation: 0 }, l.office)
   return { layout: { ...l, rooms: [...l.rooms, room] }, id }
 }
 
@@ -73,6 +73,25 @@ export function resizeRoomEdge(l: OfficeLayout, id: string, edge: Edge, coordina
     z = edge === 's' ? north + depth / 2 : south - depth / 2
   }
   return replaceRoom(l, prev, clampRoom({ ...prev, x, z, width, depth }, l.office, prev), false)
+}
+
+/**
+ * Turns a room a quarter turn around its centre: the footprint swaps width and depth, the room slides back inside
+ * the office if needed, and its furniture swings around the same centre and turns with it.
+ */
+export function rotateRoom(l: OfficeLayout, id: string): OfficeLayout {
+  const prev = l.rooms.find((r) => r.id === id)
+  if (!prev) return l
+  const next = clampRoom({ ...prev, width: prev.depth, depth: prev.width, rotation: nextRotation(prev.rotation) }, l.office, prev)
+  // Furniture sits on a 1 cm grid but room centres on 0.5 cm, so turn around the centre rounded to the furniture grid:
+  // turns then stay exact and four of them bring every item back instead of drifting by rounding.
+  const pivot = { x: Math.round(prev.x * 100) / 100, z: Math.round(prev.z * 100) / 100 }
+  const furniture = l.furniture.map((f) => {
+    if (f.roomId !== id) return f
+    const o = rotateOffset(f.x - pivot.x, f.z - pivot.z, 90)
+    return clampFurniture({ ...f, x: pivot.x + (next.x - prev.x) + o.dx, z: pivot.z + (next.z - prev.z) + o.dz, rotation: nextRotation(f.rotation) }, l.office, f)
+  })
+  return { ...l, rooms: l.rooms.map((r) => (r.id === id ? next : r)), furniture }
 }
 
 export function deleteRoom(l: OfficeLayout, id: string): OfficeLayout {

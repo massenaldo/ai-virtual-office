@@ -35,6 +35,7 @@ You can also run `./scripts/vo.sh` directly without Claude Code.
   - Cutaway rooms (no ceilings, open front) with warm-white walls, graphite baseboards, and slim-framed glass partitions
   - Oak desks on graphite frames with keyboard and mouse, ergonomic chairs, slim monitors, a walnut meeting table with meeting chairs, storage cabinets, shelves, and leafy plants in two sizes
   - A few restrained wall details: framed art in the executive office, a whiteboard in the meeting room
+- The office stands on one storey of a tower: a warm-concrete floor slab with a visible edge
 - Team labels that stay readable in 3D and floor plan
 - Orbit, zoom, and pan camera controls; a true top-down floor plan (orthographic, pan and zoom only)
 - **Layout editor** (click **Edit layout**):
@@ -42,6 +43,7 @@ You can also run `./scripts/vo.sh` directly without Claude Code.
   - Drag rooms and furniture on the floor; resize rooms with edge handles in floor plan
   - Grid with snap-to-grid (0.25 m) in floor plan
   - Add rooms from templates and furniture from the palette; rotate (90°), duplicate, delete
+  - Rotate a room in 90° steps: its walls, glass, details and furniture turn with it around the room's centre
   - Overlapping or out-of-bounds placement is outlined in red and listed in the properties panel (a warning, not a block)
   - Undo/redo (⌘/Ctrl+Z, ⌘/Ctrl+Shift+Z), Delete/Backspace, and Esc to clear the selection or cancel a drag
 - **Saving:** the complete layout (rooms, furniture, office settings) is stored in the browser's `localStorage` under `ai-virtual-office:layout:v1` and restored on the next start. The status shows Saved, Unsaved changes, or Save failed. You're asked before leaving edit mode or closing the tab with unsaved changes
@@ -52,7 +54,7 @@ You can also run `./scripts/vo.sh` directly without Claude Code.
 The scene renders a typed, versioned `OfficeLayout` (`src/layout/types.ts`). It is the single source of truth.
 
 - World units are metres. A room or furniture item's `x`/`z` is the **centre of its footprint** on the floor plane; `width` runs along X and `depth` along Z. Vertical values (`wallHeight`, model heights) are kept separate.
-- Rooms are 2–12 m wide and 2–10 m deep and stay inside the 25 × 20 m office.
+- Rooms are 2–12 m wide and 2–12 m deep and stay inside the 25 × 20 m office.
 - Saved data that can't be read (damaged, or from a newer version) is never overwritten silently: the app shows the default layout and copies the old value to `ai-virtual-office:layout:v1:backup` before the next save.
 - **Reset layout** restores the default office after a confirmation and can be undone.
 

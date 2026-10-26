@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { createDefaultLayout } from './defaultLayout'
-import { addFurniture, addRoom, deleteFurniture, deleteRoom, duplicateFurniture, furnitureInRoom, resizeRoomEdge, rotateFurniture, updateFurniture, updateRoom } from './operations'
+import { addFurniture, addRoom, deleteFurniture, deleteRoom, duplicateFurniture, furnitureInRoom, resizeRoomEdge, rotateFurniture, rotateRoom, updateFurniture, updateRoom } from './operations'
+import { nextRotation, rotateOffset } from './geometry'
+import type { OfficeLayout } from './types'
 
 const CEO = 'room-ceo-office'
 const fresh = () => createDefaultLayout()
@@ -119,5 +121,70 @@ describe('new furniture types', () => {
   it('adds a storage cabinet into the room under it', () => {
     const { layout, id } = addFurniture(fresh(), 'storage-cabinet', { x: -7, z: -4 })
     expect(item(layout, id)).toMatchObject({ type: 'storage-cabinet', roomId: CEO })
+  })
+})
+
+describe('rotateRoom', () => {
+  it('swaps the footprint and steps the rotation', () => {
+    const before = room()
+    const after = room(rotateRoom(fresh(), CEO))
+    expect(after).toMatchObject({ width: before.depth, depth: before.width, rotation: 90, x: before.x, z: before.z })
+  })
+
+  it("carries the room's furniture around its centre", () => {
+    const l = fresh()
+    const centre = room(l)
+    const turned = rotateRoom(l, CEO)
+    const inRoom = furnitureInRoom(l, CEO)
+    expect(inRoom.length).toBeGreaterThan(0)
+    for (const f of inRoom) {
+      const o = rotateOffset(f.x - centre.x, f.z - centre.z, 90)
+      const g = item(turned, f.id)
+      expect(g.x).toBeCloseTo(centre.x + o.dx, 2)
+      expect(g.z).toBeCloseTo(centre.z + o.dz, 2)
+      expect(g.rotation).toBe(nextRotation(f.rotation))
+      expect(g.roomId).toBe(CEO)
+    }
+  })
+
+  it('leaves other rooms and open-floor furniture untouched', () => {
+    const l = fresh()
+    const turned = rotateRoom(l, CEO)
+    expect(turned.rooms.filter((r) => r.id !== CEO)).toEqual(l.rooms.filter((r) => r.id !== CEO))
+    expect(turned.furniture.filter((f) => f.roomId !== CEO)).toEqual(l.furniture.filter((f) => f.roomId !== CEO))
+  })
+
+  it('four turns restore the room and its furniture', () => {
+    const l = fresh()
+    let turned = l
+    for (let i = 0; i < 4; i++) turned = rotateRoom(turned, CEO)
+    expect(turned).toEqual(l)
+  })
+
+  it('four turns restore furniture even when the room centre is on a half centimetre', () => {
+    const c = room()
+    const l = updateRoom(fresh(), CEO, { x: c.x + 0.005 })
+    let turned = l
+    for (let i = 0; i < 4; i++) turned = rotateRoom(turned, CEO)
+    expect(turned).toEqual(l)
+  })
+
+  it('slides a room back inside the office', () => {
+    const base = fresh()
+    const l: OfficeLayout = {
+      ...base,
+      rooms: [{ ...room(base), id: 'edge-room', x: 0, z: -9, width: 6, depth: 2, rotation: 0 }],
+      furniture: [{ id: 'edge-plant', type: 'plant', x: 2, z: -9.5, rotation: 0, roomId: 'edge-room' }],
+    }
+    const turned = rotateRoom(l, 'edge-room')
+    expect(room(turned, 'edge-room')).toMatchObject({ x: 0, z: -7, width: 2, depth: 6, rotation: 90 })
+    const plant = item(turned, 'edge-plant')
+    expect(plant.x).toBeCloseTo(-0.5, 2)
+    expect(plant.z).toBeCloseTo(-9, 2)
+  })
+
+  it('returns the same layout for an unknown id', () => {
+    const l = fresh()
+    expect(rotateRoom(l, 'nope')).toBe(l)
   })
 })

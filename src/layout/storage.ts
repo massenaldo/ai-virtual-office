@@ -16,7 +16,7 @@ export function serializeLayout(l: OfficeLayout): string {
   return JSON.stringify({
     schemaVersion: l.schemaVersion,
     office: { width: l.office.width, depth: l.office.depth, gridSize: l.office.gridSize },
-    rooms: l.rooms.map((r) => ({ id: r.id, name: r.name, department: r.department, x: r.x, z: r.z, width: r.width, depth: r.depth, wallHeight: r.wallHeight, color: r.color })),
+    rooms: l.rooms.map((r) => ({ id: r.id, name: r.name, department: r.department, x: r.x, z: r.z, width: r.width, depth: r.depth, wallHeight: r.wallHeight, color: r.color, rotation: r.rotation })),
     furniture: l.furniture.map((f) => ({ id: f.id, type: f.type, x: f.x, z: f.z, rotation: f.rotation, roomId: f.roomId })),
   })
 }
@@ -39,7 +39,10 @@ function parseOffice(v: unknown): OfficeSettings | null {
 function parseRoom(v: unknown): Room | null {
   if (!isObject(v) || !isText(v.id) || typeof v.name !== 'string' || typeof v.department !== 'string' || !(v.department in DEPARTMENTS)) return null
   if (!isFinite(v.x) || !isFinite(v.z) || !isPositive(v.width) || !isPositive(v.depth) || !isPositive(v.wallHeight) || !isText(v.color)) return null
-  return { id: v.id, name: v.name, department: v.department as Room['department'], x: v.x, z: v.z, width: v.width, depth: v.depth, wallHeight: v.wallHeight, color: v.color }
+  // Rooms saved before rotation existed have no field and load unturned.
+  const rotation = v.rotation === undefined ? 0 : v.rotation
+  if (!ROTATIONS.includes(rotation as number)) return null
+  return { id: v.id, name: v.name, department: v.department as Room['department'], x: v.x, z: v.z, width: v.width, depth: v.depth, wallHeight: v.wallHeight, color: v.color, rotation: rotation as Room['rotation'] }
 }
 
 function parseFurniture(v: unknown): Furniture | null {
@@ -90,7 +93,8 @@ export function loadLayout(storage: KV | null): LoadResult {
   }
   if (isObject(raw) && typeof raw.schemaVersion === 'number' && raw.schemaVersion > LAYOUT_SCHEMA_VERSION) return fallback('unsupported-version')
   const layout = parseLayout(migrateLayout(raw))
-  return layout ? { layout, savedJson: json, problem: null } : fallback('corrupt')
+  // savedJson is the normalized form, so a save from an older shape (e.g. rooms without rotation) doesn't load as unsaved.
+  return layout ? { layout, savedJson: serializeLayout(layout), problem: null } : fallback('corrupt')
 }
 
 export function saveLayout(storage: KV | null, l: OfficeLayout): { ok: true; json: string } | { ok: false; error: string } {

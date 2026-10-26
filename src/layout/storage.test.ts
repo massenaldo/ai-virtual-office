@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createDefaultLayout } from './defaultLayout'
+import { createEditorState, isDirty } from './history'
 import { LAYOUT_BACKUP_KEY, LAYOUT_STORAGE_KEY, loadLayout, parseLayout, saveLayout, serializeLayout } from './storage'
 
 function memoryStorage(initial: Record<string, string> = {}) {
@@ -29,6 +30,37 @@ describe('saveLayout + loadLayout', () => {
     const l = createDefaultLayout()
     const shuffled = { furniture: l.furniture, rooms: l.rooms, office: l.office, schemaVersion: l.schemaVersion }
     expect(serializeLayout(shuffled)).toBe(serializeLayout(l))
+  })
+})
+
+describe('room rotation', () => {
+  const withoutRoomRotation = () => {
+    const raw = JSON.parse(serializeLayout(createDefaultLayout()))
+    raw.rooms.forEach((r: Record<string, unknown>) => delete r.rotation)
+    return raw
+  }
+
+  it('round-trips room rotation', () => {
+    const l = createDefaultLayout()
+    l.rooms[0] = { ...l.rooms[0], rotation: 90 }
+    expect(parseLayout(JSON.parse(serializeLayout(l)))?.rooms[0].rotation).toBe(90)
+  })
+
+  it('treats a missing room rotation as 0', () => {
+    const loaded = loadLayout(memoryStorage({ [LAYOUT_STORAGE_KEY]: JSON.stringify(withoutRoomRotation()) }))
+    expect(loaded.problem).toBeNull()
+    expect(loaded.layout.rooms.every((r) => r.rotation === 0)).toBe(true)
+  })
+
+  it('rejects a room rotation that is not a quarter turn', () => {
+    const raw = JSON.parse(serializeLayout(createDefaultLayout()))
+    raw.rooms[0].rotation = 45
+    expect(parseLayout(raw)).toBeNull()
+  })
+
+  it('an old save without room rotation loads clean', () => {
+    const loaded = loadLayout(memoryStorage({ [LAYOUT_STORAGE_KEY]: JSON.stringify(withoutRoomRotation()) }))
+    expect(isDirty(createEditorState(loaded.layout, loaded.savedJson))).toBe(false)
   })
 })
 

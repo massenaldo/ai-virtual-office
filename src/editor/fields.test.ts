@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createDefaultLayout } from '../layout/defaultLayout'
+import { furnitureInRoom } from '../layout/operations'
 import { deletionPrompt, parseNumberInput } from './fields'
 
 describe('parseNumberInput', () => {
@@ -21,7 +22,7 @@ describe('deletionPrompt', () => {
   it('asks before deleting a room that still has furniture', () => {
     const p = deletionPrompt(layout, { kind: 'room', id: 'room-ceo-office' })
     expect(p?.needsConfirm).toBe(true)
-    expect(p?.message).toContain('6 furniture items')
+    expect(p?.message).toContain(`${furnitureInRoom(layout, 'room-ceo-office').length} furniture items`)
   })
 
   it('deletes empty rooms and single furniture items without asking', () => {

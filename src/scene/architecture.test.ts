@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { BASEBOARD, FRAME, GLASS_THICKNESS, WALL_THICKNESS, roomBaseboards, roomDetails, roomWalls, type Box } from './architecture'
+import { BASEBOARD, FRAME, GLASS_THICKNESS, WALL_THICKNESS, localSize, roomBaseboards, roomDetails, roomWalls, type Box } from './architecture'
+import { partitionStyle } from './finishes'
+import { rotateOffset } from '../layout/geometry'
+import type { Rotation } from '../layout/types'
 
 const big = { width: 4.5, depth: 3.6, wallHeight: 2.5 }
 const tiny = { width: 2, depth: 2, wallHeight: 2.5 }
@@ -139,6 +142,34 @@ describe('roomDetails', () => {
         expect(insideFootprint(box, r)).toBe(true)
         expect(box.y - box.h / 2).toBeGreaterThanOrEqual(0.9)
         expect(box.w).toBeLessThanOrEqual(0.04 + 1e-9)
+      }
+    }
+  })
+})
+
+describe('rotated rooms', () => {
+  const ROTATIONS: Rotation[] = [0, 90, 180, 270]
+
+  it('localSize swaps width and depth for quarter turns', () => {
+    expect(localSize({ width: 4, depth: 2, rotation: 0 })).toEqual({ width: 4, depth: 2 })
+    expect(localSize({ width: 4, depth: 2, rotation: 180 })).toEqual({ width: 4, depth: 2 })
+    expect(localSize({ width: 4, depth: 2, rotation: 90 })).toEqual({ width: 2, depth: 4 })
+    expect(localSize({ width: 4, depth: 2, rotation: 270 })).toEqual({ width: 2, depth: 4 })
+  })
+
+  it('walls, frames and details of a rotated glass room stay inside its footprint', () => {
+    for (const rotation of ROTATIONS) {
+      // The world footprint of a 4.6 × 3.6 meeting room after this many quarter turns.
+      const footprint = rotation % 180 === 0 ? { width: 4.6, depth: 3.6 } : { width: 3.6, depth: 4.6 }
+      const local = { ...localSize({ ...footprint, rotation }), wallHeight: 2.5 }
+      const style = partitionStyle('meeting')
+      const walls = roomWalls(local, style)
+      const boxes = [...walls.solid, ...walls.glass, ...walls.frames, ...roomDetails({ ...local, department: 'meeting' }, style).map((d) => d.box)]
+      for (const b of boxes) {
+        const o = rotateOffset(b.x, b.z, rotation)
+        const [w, d] = rotation % 180 === 0 ? [b.w, b.d] : [b.d, b.w]
+        expect(Math.abs(o.dx) + w / 2).toBeLessThanOrEqual(footprint.width / 2 + 1e-6)
+        expect(Math.abs(o.dz) + d / 2).toBeLessThanOrEqual(footprint.depth / 2 + 1e-6)
       }
     }
   })

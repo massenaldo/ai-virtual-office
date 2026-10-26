@@ -3,7 +3,7 @@ import type { ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { Room, Selection } from '../layout/types'
 import type { TransformIntent } from '../editor/transform'
-import { roomBaseboards, roomDetails, roomWalls, WALL_THICKNESS, type DetailKind } from './architecture'
+import { localSize, roomBaseboards, roomDetails, roomWalls, WALL_THICKNESS, type DetailKind } from './architecture'
 import { floorFinishFor, partitionStyle, type PartitionStyle } from './finishes'
 import FootprintOutline from './FootprintOutline'
 import { highlightFor } from './highlight'
@@ -68,10 +68,12 @@ export default function RoomMesh({ room, floorPlan, editing, selected, invalid, 
     onEnd: onTransformEnd,
   })
   const finish = floorFinishFor(room.department)
-  const floorGeometry = useMemo(() => scaleFloorUvs(new THREE.BoxGeometry(room.width, FLOOR_THICKNESS, room.depth), room.width, room.depth, finish), [room.width, room.depth, finish])
+  // The shell is built in the room's own frame (local size) and turned by its rotation; outlines stay on the world footprint.
+  const local = localSize(room)
+  const floorGeometry = useMemo(() => scaleFloorUvs(new THREE.BoxGeometry(local.width, FLOOR_THICKNESS, local.depth), local.width, local.depth, finish), [local.width, local.depth, finish])
   useEffect(() => () => floorGeometry.dispose(), [floorGeometry])
   const style = partitionStyle(room.department)
-  const parts = useMemo(() => mergedRoomParts(room, style), [room.width, room.depth, room.wallHeight, room.department, style])
+  const parts = useMemo(() => mergedRoomParts({ ...room, ...local }, style), [local.width, local.depth, room.wallHeight, room.department, style])
   useEffect(() => () => parts.forEach((part) => part.geometry.dispose()), [parts])
   const highlight = highlightFor({ editing, selected, hovered, invalid })
   const pointer = editing ? {
@@ -84,13 +86,13 @@ export default function RoomMesh({ room, floorPlan, editing, selected, invalid, 
   return <group position={[room.x, 0, room.z]}>
     {floorPlan
       ? <mesh key="plan-floor" position={[0, floorY, 0]} {...pointer} {...drag}><boxGeometry args={[room.width, FLOOR_THICKNESS, room.depth]} /><meshStandardMaterial color={room.color} roughness={0.9} transparent opacity={0.95} /></mesh>
-      : <mesh key="floor" receiveShadow geometry={floorGeometry} material={floorMaterial(finish)} position={[0, floorY, 0]} {...pointer} {...drag} />}
-    {!floorPlan && <>
-      <mesh raycast={noRaycast} rotation={[-Math.PI / 2, 0, 0]} position={[0, FLOOR_TOP + 0.001, room.depth / 2 - ACCENT_DEPTH / 2]} material={accentMaterial(room.color)}>
-        <planeGeometry args={[room.width - 2 * WALL_THICKNESS, ACCENT_DEPTH]} />
-      </mesh>
-      {parts.map(({ name, geometry, castShadow }) => <mesh key={name} geometry={geometry} material={name === 'accent' ? accentMaterial(room.color) : m[name]} castShadow={castShadow} receiveShadow raycast={noRaycast} />)}
-    </>}
+      : <group key="shell" rotation={[0, (room.rotation * Math.PI) / 180, 0]}>
+        <mesh receiveShadow geometry={floorGeometry} material={floorMaterial(finish)} position={[0, floorY, 0]} {...pointer} {...drag} />
+        <mesh raycast={noRaycast} rotation={[-Math.PI / 2, 0, 0]} position={[0, FLOOR_TOP + 0.001, local.depth / 2 - ACCENT_DEPTH / 2]} material={accentMaterial(room.color)}>
+          <planeGeometry args={[local.width - 2 * WALL_THICKNESS, ACCENT_DEPTH]} />
+        </mesh>
+        {parts.map(({ name, geometry, castShadow }) => <mesh key={name} geometry={geometry} material={name === 'accent' ? accentMaterial(room.color) : m[name]} castShadow={castShadow} receiveShadow raycast={noRaycast} />)}
+      </group>}
     {highlight
       ? <FootprintOutline width={room.width} depth={room.depth} color={highlight.color} lineWidth={highlight.width} y={0.05} />
       : floorPlan && <FootprintOutline width={room.width} depth={room.depth} color={PLAN_BOUNDARY} lineWidth={1.2} y={0.05} />}

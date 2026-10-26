@@ -10,6 +10,11 @@ export type Box = { x: number; y: number; z: number; w: number; h: number; d: nu
 
 type RoomShape = Pick<Room, 'width' | 'depth' | 'wallHeight'>
 
+/** The room's size in its own frame: room.width/depth are the world footprint, so a quarter turn swaps them back. */
+export function localSize({ width, depth, rotation }: Pick<Room, 'width' | 'depth' | 'rotation'>): { width: number; depth: number } {
+  return rotation % 180 === 0 ? { width, depth } : { width: depth, depth: width }
+}
+
 export const FRAME = { width: 0.05, depth: 0.06, maxSpan: 1.5 }
 
 const ALL_SOLID: PartitionStyle = { left: 'solid', right: 'solid' }

@@ -83,10 +83,13 @@ export function rotateRoom(l: OfficeLayout, id: string): OfficeLayout {
   const prev = l.rooms.find((r) => r.id === id)
   if (!prev) return l
   const next = clampRoom({ ...prev, width: prev.depth, depth: prev.width, rotation: nextRotation(prev.rotation) }, l.office, prev)
+  // Furniture sits on a 1 cm grid but room centres on 0.5 cm, so turn around the centre rounded to the furniture grid:
+  // turns then stay exact and four of them bring every item back instead of drifting by rounding.
+  const pivot = { x: Math.round(prev.x * 100) / 100, z: Math.round(prev.z * 100) / 100 }
   const furniture = l.furniture.map((f) => {
     if (f.roomId !== id) return f
-    const o = rotateOffset(f.x - prev.x, f.z - prev.z, 90)
-    return clampFurniture({ ...f, x: next.x + o.dx, z: next.z + o.dz, rotation: nextRotation(f.rotation) }, l.office, f)
+    const o = rotateOffset(f.x - pivot.x, f.z - pivot.z, 90)
+    return clampFurniture({ ...f, x: pivot.x + (next.x - prev.x) + o.dx, z: pivot.z + (next.z - prev.z) + o.dz, rotation: nextRotation(f.rotation) }, l.office, f)
   })
   return { ...l, rooms: l.rooms.map((r) => (r.id === id ? next : r)), furniture }
 }

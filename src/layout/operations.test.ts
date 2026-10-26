@@ -161,6 +161,14 @@ describe('rotateRoom', () => {
     expect(turned).toEqual(l)
   })
 
+  it('four turns restore furniture even when the room centre is on a half centimetre', () => {
+    const c = room()
+    const l = updateRoom(fresh(), CEO, { x: c.x + 0.005 })
+    let turned = l
+    for (let i = 0; i < 4; i++) turned = rotateRoom(turned, CEO)
+    expect(turned).toEqual(l)
+  })
+
   it('slides a room back inside the office', () => {
     const base = fresh()
     const l: OfficeLayout = {

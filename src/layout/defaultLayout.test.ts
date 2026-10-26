@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createDefaultLayout } from './defaultLayout'
+import { furnitureRect, roomRect } from './geometry'
 import type { FurnitureType } from './types'
 
 describe('createDefaultLayout', () => {
@@ -14,6 +15,24 @@ describe('createDefaultLayout', () => {
     const l = createDefaultLayout()
     const count = (t: FurnitureType) => l.furniture.filter((f) => f.type === t).length
     expect([count('desk'), count('chair'), count('monitor'), count('plant'), count('meeting-table')]).toEqual([14, 14, 14, 11, 1])
+  })
+
+  it('furnishes the meeting room and adds storage', () => {
+    const l = createDefaultLayout()
+    const count = (t: FurnitureType) => l.furniture.filter((f) => f.type === t).length
+    expect([count('meeting-chair'), count('storage-cabinet'), count('shelf')]).toEqual([6, 1, 1])
+  })
+
+  it('keeps the meeting table and its chairs fully inside the meeting room', () => {
+    const l = createDefaultLayout()
+    const room = roomRect(l.rooms.find((r) => r.id === 'room-meeting')!)
+    const meeting = l.furniture.filter((f) => f.type === 'meeting-table' || f.type === 'meeting-chair')
+    expect(meeting).toHaveLength(7)
+    for (const f of meeting) {
+      const r = furnitureRect(f)
+      expect([f.id, r.minX >= room.minX, r.maxX <= room.maxX, r.minZ >= room.minZ, r.maxZ <= room.maxZ]).toEqual([f.id, true, true, true, true])
+      expect(f.roomId).toBe('room-meeting')
+    }
   })
 
   it('uses unique stable ids', () => {

@@ -26,6 +26,13 @@ const DESKS: [x: number, z: number, rotation: 0 | 180, roomId: string | null][] 
 
 const PLANTS: [x: number, z: number][] = [[-8.7, -7.8], [-4.5, -7.8], [0, -7.8], [4.5, -7.8], [10.3, -5.9], [10.3, -3.1], [10.3, -0.3], [10.3, 2.5], [10.3, 5.3], [-9.8, 7.5], [1.2, 7.5]]
 
+// Meeting room (centre −3.9, 2.2): table in the middle, three chairs along each long side facing it.
+const MEETING_TABLE: [x: number, z: number] = [-3.9, 2.2]
+const MEETING_CHAIRS: [x: number, z: number, rotation: 0 | 180][] = [
+  [-4.8, 1.42, 180], [-3.9, 1.42, 180], [-3.0, 1.42, 180],
+  [-4.8, 2.98, 0], [-3.9, 2.98, 0], [-3.0, 2.98, 0],
+]
+
 const CHAIR_OFFSET_Z = 0.56
 const MONITOR_OFFSET_Z = -0.18
 
@@ -45,6 +52,12 @@ export function createDefaultLayout(): OfficeLayout {
     )
   })
   PLANTS.forEach(([x, z], i) => furniture.push({ id: `plant-${pad(i + 1)}`, type: 'plant', x, z, rotation: 0, roomId: null }))
-  furniture.push({ id: 'meeting-table-01', type: 'meeting-table', x: -1.2, z: 3.4, rotation: 0, roomId: null })
+  furniture.push({ id: 'meeting-table-01', type: 'meeting-table', x: MEETING_TABLE[0], z: MEETING_TABLE[1], rotation: 0, roomId: 'room-meeting' })
+  MEETING_CHAIRS.forEach(([x, z, rotation], i) => furniture.push({ id: `meeting-chair-${pad(i + 1)}`, type: 'meeting-chair', x, z, rotation, roomId: 'room-meeting' }))
+  // Storage along the solid left walls, turned to face into the room.
+  furniture.push(
+    { id: 'storage-cabinet-01', type: 'storage-cabinet', x: -9.0, z: -5.4, rotation: 90, roomId: 'room-ceo-office' },
+    { id: 'shelf-01', type: 'shelf', x: -4.0, z: -5.3, rotation: 90, roomId: 'room-project-management' },
+  )
   return { schemaVersion: LAYOUT_SCHEMA_VERSION, office: { width: 25, depth: 20, gridSize: 0.25 }, rooms, furniture }
 }

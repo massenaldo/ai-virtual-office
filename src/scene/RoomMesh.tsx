@@ -3,8 +3,8 @@ import type { ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { Room, Selection } from '../layout/types'
 import type { TransformIntent } from '../editor/transform'
-import { roomBaseboards, roomWalls, WALL_THICKNESS, type Box } from './architecture'
-import { floorFinishFor } from './finishes'
+import { roomBaseboards, roomDetails, roomWalls, WALL_THICKNESS, type Box, type DetailKind } from './architecture'
+import { floorFinishFor, partitionStyle } from './finishes'
 import FootprintOutline from './FootprintOutline'
 import { highlightFor } from './highlight'
 import { accentMaterial, floorMaterial, sharedMaterials } from './materials'
@@ -27,6 +27,13 @@ const wallMaterials = () => {
   const m = sharedMaterials()
   wallFaces ??= [m.wallPaint, m.wallPaint, m.wallCap, m.wallPaint, m.wallPaint, m.wallPaint]
   return wallFaces
+}
+
+function detailMaterial(kind: DetailKind, color: string): THREE.Material {
+  const m = sharedMaterials()
+  if (kind === 'art-canvas') return accentMaterial(color)
+  if (kind === 'whiteboard') return m.whiteboard
+  return m.graphite
 }
 
 function Part({ box, material, castShadow = false }: { box: Box; material: THREE.Material | THREE.Material[]; castShadow?: boolean }) {
@@ -58,8 +65,10 @@ export default function RoomMesh({ room, floorPlan, editing, selected, invalid, 
   const finish = floorFinishFor(room.department)
   const floorGeometry = useMemo(() => scaleFloorUvs(new THREE.BoxGeometry(room.width, FLOOR_THICKNESS, room.depth), room.width, room.depth, finish), [room.width, room.depth, finish])
   useEffect(() => () => floorGeometry.dispose(), [floorGeometry])
-  const walls = useMemo(() => roomWalls(room), [room.width, room.depth, room.wallHeight])
-  const baseboards = useMemo(() => roomBaseboards(room), [room.width, room.depth, room.wallHeight])
+  const style = partitionStyle(room.department)
+  const walls = useMemo(() => roomWalls(room, style), [room.width, room.depth, room.wallHeight, style])
+  const baseboards = useMemo(() => roomBaseboards(room, style), [room.width, room.depth, room.wallHeight, style])
+  const details = useMemo(() => roomDetails(room, style), [room.width, room.depth, room.wallHeight, room.department, style])
   const highlight = highlightFor({ editing, selected, hovered, invalid })
   const pointer = editing ? {
     onClick: (e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); onSelect() },
@@ -78,7 +87,9 @@ export default function RoomMesh({ room, floorPlan, editing, selected, invalid, 
       </mesh>
       {walls.solid.map((box, i) => <Part key={`wall-${i}`} box={box} material={wallMaterials()} castShadow />)}
       {walls.glass.map((box, i) => <Part key={`glass-${i}`} box={box} material={m.glass} />)}
+      {walls.frames.map((box, i) => <Part key={`frame-${i}`} box={box} material={m.graphite} />)}
       {baseboards.map((box, i) => <Part key={`base-${i}`} box={box} material={m.baseboard} />)}
+      {details.map(({ kind, box }, i) => <Part key={`detail-${i}`} box={box} material={detailMaterial(kind, room.color)} />)}
     </>}
     {highlight
       ? <FootprintOutline width={room.width} depth={room.depth} color={highlight.color} lineWidth={highlight.width} y={0.05} />

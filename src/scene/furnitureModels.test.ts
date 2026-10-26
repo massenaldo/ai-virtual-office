@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
 import { FURNITURE_SPECS } from '../layout/catalog'
 import type { FurnitureType } from '../layout/types'
-import { modelParts } from './furnitureModels'
+import { modelParts, plantVariant } from './furnitureModels'
 
 const TYPES = Object.keys(FURNITURE_SPECS) as FurnitureType[]
 
@@ -61,5 +61,33 @@ describe('modelParts', () => {
   it('only casts shadows from larger furniture, not monitors', () => {
     expect(modelParts('monitor').every((p) => !p.castShadow)).toBe(true)
     expect(modelParts('desk').some((p) => p.castShadow)).toBe(true)
+  })
+})
+
+describe('plants', () => {
+  const ids = Array.from({ length: 11 }, (_, i) => `plant-${String(i + 1).padStart(2, '0')}`)
+
+  it('picks a stable size per plant and uses both sizes across the default plants', () => {
+    expect(plantVariant('plant-01')).toBe(plantVariant('plant-01'))
+    expect(new Set(ids.map(plantVariant))).toEqual(new Set([0, 1]))
+  })
+
+  for (const [variant, lo, hi] of [[0, 0.9, 1.15], [1, 1.35, 1.6]] as const) {
+    it(`builds variant ${variant} within the footprint and ${lo}–${hi} m tall`, () => {
+      const parts = modelParts('plant', variant)
+      expect(parts.length).toBeLessThanOrEqual(4)
+      const box = new THREE.Box3()
+      for (const p of parts) { p.geometry.computeBoundingBox(); box.union(p.geometry.boundingBox!) }
+      const half = FURNITURE_SPECS.plant.width / 2 + 0.01
+      expect(Math.max(-box.min.x, box.max.x, -box.min.z, box.max.z)).toBeLessThanOrEqual(half)
+      expect(box.min.y).toBeGreaterThanOrEqual(-1e-6)
+      expect(box.max.y).toBeGreaterThanOrEqual(lo)
+      expect(box.max.y).toBeLessThanOrEqual(hi)
+    })
+  }
+
+  it('caches each plant size separately and ignores variants for other furniture', () => {
+    expect(modelParts('plant', 0)).not.toBe(modelParts('plant', 1))
+    expect(modelParts('desk', 1)).toBe(modelParts('desk'))
   })
 })

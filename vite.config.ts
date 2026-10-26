@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
@@ -8,4 +9,6 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
   },
+  // Let tests read stylesheets as text (Vitest replaces CSS with an empty string by default).
+  test: { css: true },
 })

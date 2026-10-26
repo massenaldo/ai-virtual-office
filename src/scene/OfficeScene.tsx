@@ -11,6 +11,8 @@ import { floorMaterial } from './materials'
 import ResizeHandles from './ResizeHandles'
 import { RoomLabelLayer, RoomLabelTracker, type LabelRegistry } from './RoomLabels'
 import RoomMesh from './RoomMesh'
+import { RenderStatsPanel, RenderStatsProbe } from './StatsOverlay'
+import { statsEnabled } from './renderStats'
 import { scaleFloorUvs } from './textures'
 
 export type OfficeSceneProps = {
@@ -43,6 +45,8 @@ function StudioEnvironment({ floorPlan }: { floorPlan: boolean }) {
   </Environment>
 }
 
+const SHOW_STATS = typeof window !== 'undefined' && statsEnabled(window.location.search)
+
 // Top-down view has no rotation, so the left button pans like a map.
 const PLAN_MOUSE_BUTTONS = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }
 
@@ -54,6 +58,7 @@ const PLAN_MOUSE_BUTTONS = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, R
 function ViewCameras({ layout, floorPlan, viewKey }: { layout: OfficeLayout; floorPlan: boolean; viewKey: number }) {
   const office = layout.office
   const set = useThree((s) => s.set)
+  const invalidate = useThree((s) => s.invalidate)
   const size = useThree((s) => s.size)
   const perspective = useMemo(() => new THREE.PerspectiveCamera(OVERVIEW_FOV, 1, 0.1, 1000), [])
   const ortho = useMemo(() => new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100), [])
@@ -81,6 +86,8 @@ function ViewCameras({ layout, floorPlan, viewKey }: { layout: OfficeLayout; flo
     }
     camera.updateProjectionMatrix()
     set({ camera })
+    // Rendering is on demand, so draw the new view now instead of waiting for the next pointer move.
+    invalidate()
     // fitZoom is read only when the view is (re)entered, so resizing doesn't undo the user's zoom.
   }, [camera, viewKey])
 
@@ -113,14 +120,17 @@ function OfficeContents({ layout, floorPlan, viewKey, editing, selection, issues
 
 export default function OfficeScene(props: OfficeSceneProps) {
   const labels = useRef<LabelRegistry>(new Map()).current
+  const statsPanel = useRef<HTMLDivElement>(null)
   // A click that hits no room or furniture clears the selection.
   const onPointerMissed = () => {
     if (props.editing) props.onSelect(null)
   }
   return <>
-  <Canvas shadows="soft" dpr={[1, 1.7]} gl={{ antialias: true }} onCreated={({ gl }) => { gl.toneMappingExposure = 0.95 }} onPointerMissed={onPointerMissed}>
+  <Canvas frameloop="demand" shadows="soft" dpr={[1, 1.7]} gl={{ antialias: true }} onCreated={({ gl }) => { gl.toneMappingExposure = 0.95 }} onPointerMissed={onPointerMissed}>
     <OfficeContents {...props} labels={labels} />
+    {SHOW_STATS && <RenderStatsProbe panel={statsPanel} />}
   </Canvas>
+  {SHOW_STATS && <RenderStatsPanel panel={statsPanel} />}
   <RoomLabelLayer rooms={props.layout.rooms} editing={props.editing} selection={props.selection} registry={labels} onSelect={props.onSelect} />
   </>
 }

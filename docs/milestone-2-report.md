@@ -1,6 +1,6 @@
 # Milestone 2 — Realistic Office Builder: Final Report
 
-**Spec:** [`plan.md`](../plan.md) · **Task list:** [`tasks.md`](../tasks.md) · **Stages:** A (#8), B (#9), C (#10), D (this PR)
+**Spec:** [`milestone-2-plan.md`](milestones/milestone-2-plan.md) · **Task list:** [`milestone-2-tasks.md`](milestones/milestone-2-tasks.md) · **Stages:** A (#8), B (#9), C (#10), D (this PR)
 
 ## Summary
 

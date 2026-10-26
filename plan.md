@@ -1,167 +1,234 @@
-# Milestone 2 — Realistic Office Builder
+# Milestone 3A — AI Agent Workforce UI and Mock Runtime
 
-We are continuing development of my existing self-hosted AI Virtual Office project.
-
+Project: AI Virtual Office  
 Repository: https://github.com/massenaldo/ai-virtual-office
 
-The Layout Editor milestone is complete. Your task is to implement Milestone 2: improve the visual quality of the existing 3D office until it looks like a professional, realistic modern technology office while preserving all existing layout-editing functionality.
+## Goal
 
-## 1. Inspect before changing anything
+Implement the AI Agent Workforce UI and a working mock runtime in the existing application.
 
-First inspect the actual project:
-- Read the project structure, package.json, existing 3D scene components, room and furniture models, layout schema, editor state, persistence, and camera controls.
-- Identify how rooms and furniture are currently rendered and how layout changes propagate between the 3D view and floor plan.
-- Run the current build and record any pre-existing errors.
-- Identify the smallest set of files that need changes.
+The previous milestones are complete:
+- Milestone 1: editable office layout.
+- Milestone 2: realistic 3D office.
 
-Do not assume file names or invent a new architecture before inspecting the code.
+Preserve both milestones. This milestone must introduce manageable AI agents, agent-to-desk mapping, task assignments, visible agent status, and activity history.
 
-## 2. Visual direction
+The runtime must initially be simulated. Prepare a clean interface for future Claude Code / Claude Agent runtime integration, but do not claim real AI execution is implemented.
 
-Design a realistic, premium architectural visualization of a modern technology office.
+## Phase 1 — Audit the actual project
 
-Style:
-- Modern startup / technology company.
-- Warm oak or walnut desks.
-- Matte black or dark graphite metal frames.
-- Neutral concrete, wood, or refined carpet flooring where appropriate.
-- White and warm-grey walls.
-- Glass meeting-room partitions with restrained frames.
-- Ergonomic office chairs.
-- Realistic monitors, keyboards, mice, desk accessories, plants, and subtle decorations.
-- Natural-looking daylight combined with soft interior lighting.
-- Professional, restrained colors; avoid a cartoon, toy, low-poly, or overly saturated appearance.
+Before coding:
 
-Maintain the existing dark application UI. The office scene itself should look like a real physical workplace.
+1. Inspect the repository structure and current branch.
+2. Review the layout schema, room and furniture IDs, 3D scene, editor interactions, persistence, and application routing.
+3. Identify how to extend the existing UI without replacing it.
+4. Run the existing production build and relevant tests.
+5. Record pre-existing errors.
+6. Propose a concise implementation plan based on actual files.
 
-## 3. Improve the environment first
+Do not rewrite the application or replace the 3D scene.
 
-Upgrade the existing scene with:
-- Better floor materials and room-specific visual differentiation.
-- More convincing wall thickness and corners.
-- Baseboards and clean architectural edges where appropriate.
-- Doors and glass partitions where they make sense.
-- More realistic room proportions and object scale.
-- Soft shadows, ambient occlusion where affordable, and balanced lighting.
-- A coherent lighting setup without excessive brightness or crushed shadows.
-- A clean background and a useful default camera angle.
-- Clear room boundaries in both 3D and floor-plan views.
+## Phase 2 — Agent domain model
 
-The scene must remain legible when zoomed out to view the entire office.
+Create or adapt typed domain models for:
 
-Do not add decorative details that make editing rooms or selecting furniture difficult.
+- Agent
+- AgentTask
+- AgentActivity
+- AgentStatus
+- RuntimeMode
 
-## 4. Upgrade furniture models
+Required agent statuses:
+`idle`, `working`, `thinking`, `waiting`, `error`, `completed`.
 
-Improve the existing procedural models first rather than replacing the whole scene.
+Every agent should have:
+- Stable ID
+- Display name
+- Role and department
+- Optional desk/workstation reference
+- Current status
+- Current task reference
+- Runtime mode: `mock` or `real`
+- Last activity timestamp
 
-Desks:
-- Proper desktop thickness, legs or frame, and consistent dimensions.
-- Realistic monitor stands, screens, keyboards, and mice.
-- Optional drawers or cable-management details when appropriate.
+Every task should have:
+- Stable ID and assigned agent ID
+- Title and description
+- Status
+- Created, started, and completed timestamps where applicable
+- Result summary or error message
 
-Chairs:
-- Seat, backrest, base, and wheels.
-- A convincing ergonomic silhouette without excessive polygon complexity.
+Every activity should have:
+- Stable ID
+- Agent and optional task references
+- Event type and human-readable message
+- Timestamp
+- Source: mock or real
 
-Other objects:
-- Meeting tables and chairs.
-- Plants with multiple leaves or a convincing foliage silhouette.
-- Storage cabinets, shelves, and subtle desk accessories.
-- Monitors with dark bezels and screen surfaces.
+Use discriminated unions or equivalent typed structures where useful. Follow the project's existing conventions.
 
-Use reusable model components, shared geometry, and shared materials where practical. Furniture must remain correctly positioned, scaled, rotated, duplicated, selected, and deleted through the existing editor.
+## Phase 3 — Agent management UI
 
-Avoid creating every object from dozens of independent meshes if a reusable component or grouped geometry would work better.
+Add an Agent Workforce view or panel that fits the current application design.
 
-## 5. Preserve the layout editor
+Users should be able to:
+- View all agents and filter by department or status.
+- Create an agent.
+- Edit its name, role, and department.
+- Assign or unassign a workstation.
+- View the agent's current task and recent activity.
+- Open an agent detail panel.
+- Remove an agent with appropriate confirmation when necessary.
 
-This is a visual upgrade, not a rewrite.
+Seed the initial experience with a small, realistic set of example agents across Project Management, Tech Lead, Backend, Frontend, QA, and DevOps.
 
-All of the following must continue to work:
-- Room selection, movement, resizing, and renaming.
-- Furniture selection, movement, rotation, duplication, creation, and deletion.
-- Undo and redo.
-- Save and reload persisted layouts.
-- Reset to the default layout with the existing confirmation behavior.
-- Floor-plan and 3D synchronization.
-- Existing grid and snapping behavior.
-- Keyboard shortcuts.
-- The current `/vo` startup workflow.
+Clearly label the initial agents and their activity as demo/mock data.
 
-Any new visual properties that affect saved layouts must be represented in the existing typed layout schema with sensible defaults and backward-compatible migration.
+Avoid duplicating agent records every time the application loads.
 
-Do not store transient Three.js objects or runtime references in persisted layout data.
+## Phase 4 — Connect agents to the 3D office
 
-Keep the existing layout schema and persistence format unless a concrete, necessary change is identified.
+Integrate with the existing 3D scene and layout model.
 
-## 6. Camera and editor usability
+Requirements:
+- An assigned agent is associated with a real existing workstation or furniture ID.
+- Selecting an agent highlights or focuses its workstation when practical.
+- Selecting an agent's workstation opens the corresponding agent details if an agent is assigned.
+- Provide a clear, unobtrusive status indicator or marker.
+- Handle unassigned agents and missing or deleted desks gracefully.
+- Do not modify the underlying furniture geometry just to display status.
+- Do not break room selection, furniture editing, transforms, undo/redo, save, reset, or floor-plan synchronization.
 
-- Preserve orbit, pan, and zoom in 3D view.
-- Keep the entire office visible at the default overview.
-- Ensure realistic shadows and materials do not obscure selection.
-- Maintain readable room labels and selection outlines.
-- Ensure top-down floor-plan editing remains practical and predictable.
-- Keep selection and transformation controls usable even when furniture becomes more detailed.
-- Avoid unnecessary changes to the existing UI.
+Use the existing selection and interaction patterns wherever possible. Do not let status indicators intercept essential editor interactions.
 
-## 7. Performance requirements
+## Phase 5 — Mock runtime and task simulation
 
-This must remain a responsive browser-based application.
+Implement a mock runtime behind a well-defined interface, for example:
 
-- Reuse geometries and materials wherever possible.
-- Avoid unnecessary per-frame React state updates.
-- Avoid expensive real-time effects unless justified.
-- Use sensible shadow-map settings and limit shadow-casting objects.
-- Avoid adding a large dependency for something the current stack can handle.
-- Do not load remote assets at runtime without a clear reason.
-- Prefer procedural models and local assets so the project remains self-hosted.
-- If external assets are genuinely needed, verify licensing and document their source and local installation requirements.
-- Do not sacrifice basic editor responsiveness for visual effects.
+- listAgents()
+- createAgent()
+- updateAgent()
+- removeAgent()
+- assignTask()
+- getTask()
+- listActivities()
+- startMockTask()
+- cancelTask()
 
-## 8. Implementation sequence
+Adapt these names to the existing architecture.
 
-Implement in small, testable stages:
+The mock runtime must support a believable task lifecycle:
+`idle -> working/thinking -> completed`
 
-Stage A: Improve lighting, materials, floor, walls, and architectural structure.
+It should also be possible to represent `waiting` and `error` states through controlled demo actions.
 
-Stage B: Upgrade desks, chairs, monitors, and other furniture.
+Requirements:
+- Users can create and assign a task to an agent.
+- Starting a task changes the UI state and adds activity events.
+- Task progress is explicitly simulated, not generated by a fake claim of AI execution.
+- Completing, failing, or cancelling a mock task updates task and agent state consistently.
+- Prevent duplicate concurrent tasks for one agent unless the domain model explicitly supports concurrency.
+- Clean up timers and subscriptions when components unmount.
+- Avoid race conditions and inconsistent task references.
+- Clearly label simulated progress and results.
 
-Stage C: Add glass partitions, doors, plants, and selected architectural details.
+Do not call an LLM or launch external processes in this milestone.
 
-Stage D: Optimize rendering and verify editor interactions.
+## Phase 6 — Runtime abstraction for future Claude integration
 
-After each stage, run the relevant checks and fix regressions before continuing.
+Define a runtime-provider interface that separates application logic from execution details.
 
-## 9. Acceptance criteria
+Provide a MockRuntimeProvider implementation now.
 
-The milestone is complete only when:
+Prepare a ClaudeRuntimeProvider boundary for future work, but do not implement or pretend to implement its execution functionality in this milestone.
 
-1. The office looks noticeably more realistic than the starting version.
-2. Furniture has coherent proportions and materials.
-3. The entire office still looks good in the overview camera.
-4. Floor-plan mode remains clear and usable.
-5. Moving or resizing rooms still updates the 3D scene correctly.
-6. Furniture editing and selection still work with the upgraded models.
-7. Save, refresh, and reload preserve the layout.
-8. Undo, redo, and reset continue to work.
-9. No unnecessary remote dependency is introduced.
-10. The production build passes, for example `npm run build`, using the project's existing scripts.
-11. The `/vo` command still starts the application correctly.
-12. Any pre-existing issues or limitations are explicitly reported.
+Future real runtime integration must be server-side. The browser must never receive Anthropic credentials, API keys, shell access, or unrestricted process-execution capabilities.
 
-Run the checks that are actually available in the project. Do not claim a test passed unless you ran it.
+Keep the interface capable of representing:
+- Starting a task
+- Receiving task events
+- Cancellation requests
+- Completion results
+- Runtime errors
+- Session or execution identifiers when applicable
 
-## 10. Final report
+Do not introduce a new backend or runtime dependency solely for this placeholder.
 
-When finished, report:
-- Files changed and why.
-- Visual improvements implemented.
-- Any new dependencies or assets and their licenses.
-- Build and test results.
-- Any known limitations.
-- The best way to inspect the improvements locally.
+## Phase 7 — Persistence
 
-Do not stop after producing a plan. Implement the changes in the existing project, verify them, and report the actual results.
+Persist agent definitions, assignments, tasks, and recent activities using the project's existing storage conventions where appropriate.
 
-Keep the scope limited to visual realism and the existing editor. Do not implement AI agents, authentication, backend services, multiplayer, or the video studio in this milestone.
+Requirements:
+- Stable IDs.
+- Versioned data where practical.
+- Validation when loading stored data.
+- Graceful recovery from malformed or outdated storage.
+- Consistent references between agents, tasks, activities, and desks.
+- A reasonable activity-history limit.
+- Avoid storing unnecessary duplicate state.
+
+Preserve the existing office layout persistence independently. Agent changes must never overwrite or corrupt the saved office geometry.
+
+If the existing architecture makes browser localStorage appropriate, use a separate namespaced key for workforce data. Do not silently replace the office layout's existing storage key.
+
+## Phase 8 — UX and error handling
+
+Include:
+- Empty states.
+- Loading or transition states where appropriate.
+- Form validation.
+- Confirmation for destructive operations.
+- Clear task status labels.
+- Human-readable error messages.
+- A visible mock-mode indicator.
+- A useful activity timeline.
+
+Keep the current visual style consistent with the realistic 3D office and dark dashboard.
+
+Do not introduce unnecessary animations or heavy rendering effects.
+
+## Phase 9 — Verification
+
+Verify the actual implementation.
+
+Test at minimum:
+1. Existing application builds successfully.
+2. Existing layout editor still works.
+3. Agent creation, editing, removal, and desk assignment work.
+4. Agent selection maps to the correct workstation.
+5. Task creation and mock execution work.
+6. Task completion and error states update consistently.
+7. Activity events are recorded correctly.
+8. Data survives a page refresh.
+9. Malformed persisted data does not crash the application.
+10. Deleted or unavailable workstations do not break agent records or rendering.
+11. Existing layout save, reload, undo, redo, and reset remain functional.
+12. The `/vo` workflow still works.
+
+Run relevant tests and the project's actual production build command. Do not report checks as passed unless they were executed.
+
+## Scope boundaries
+
+Do not implement:
+- Actual Claude API or Agent SDK execution.
+- Unrestricted shell execution.
+- VPS deployment.
+- Authentication or multi-user access.
+- A database or distributed job queue.
+- Multi-agent orchestration.
+- Video studio functionality.
+
+These are future milestones.
+
+## Final report
+
+Summarize:
+- Files changed.
+- Architecture and data model.
+- UI features implemented.
+- Persistence behavior.
+- Tests and build results.
+- Known limitations.
+- Explicit confirmation that runtime execution is simulated and no real Claude task execution has been implemented.
+
+Implement the changes in the existing repository; do not stop after producing a plan.

@@ -29,7 +29,13 @@ You can also run `./scripts/vo.sh` directly without Claude Code.
 
 ## Features
 
-- Realistic-inspired 3D office shell with glass-style partitions, desks, monitors, chairs, plants, and team labels
+- **Realistic 3D office**, all built in code with no downloaded models or textures:
+  - Soft daylight and interior fill lighting generated in the browser (no HDR download), with soft shadows
+  - Floor finishes by department: polished concrete in open areas, carpet tiles in team rooms, light oak in the meeting room and executive office, dark epoxy in the server room
+  - Cutaway rooms (no ceilings, open front) with warm-white walls, graphite baseboards, and slim-framed glass partitions
+  - Oak desks on graphite frames with keyboard and mouse, ergonomic chairs, slim monitors, a walnut meeting table with meeting chairs, storage cabinets, shelves, and leafy plants in two sizes
+  - A few restrained wall details: framed art in the executive office, a whiteboard in the meeting room
+- Team labels that stay readable in 3D and floor plan
 - Orbit, zoom, and pan camera controls; a true top-down floor plan (orthographic, pan and zoom only)
 - **Layout editor** (click **Edit layout**):
   - Select rooms and furniture in the scene or in the left-hand list; edit them in the properties panel
@@ -55,13 +61,25 @@ The scene renders a typed, versioned `OfficeLayout` (`src/layout/types.ts`). It 
 ```bash
 npm test        # unit tests (Vitest) for the layout model, storage, history and editor logic
 npm run build   # type-check and production build
+npm run preview # serve the production build at http://127.0.0.1:4173
 ```
+
+Add `?stats` to the URL (for example http://localhost:5173/?stats) to show a small render read-out over the 3D view: frames per second, CPU time per frame, draw calls and triangles. The 3D view only redraws when something changes, so it reads "idle" while nothing moves.
+
+## Assets and licences
+
+- All 3D geometry, materials and floor textures are generated in code. The project contains no external models, textures or HDR files.
+- Fonts: DM Sans and Manrope are bundled through the `@fontsource-variable/dm-sans` and `@fontsource-variable/manrope` packages (SIL Open Font License 1.1). Nothing is loaded from Google Fonts or any other remote host at runtime.
 
 ## Known limitations
 
 - A desk, its chair and its monitor are separate items, so they move independently.
 - Resize handles are available in floor plan only; in 3D, resize rooms from the properties panel.
 - Layouts are stored per browser and per origin (for example `localhost:5173`); there is no export or sync yet.
+- Rooms have no doors and no ceilings, by design: the cutaway keeps every room visible and editable from above.
+- Furniture is not instanced: each item draws one mesh per material, so very large layouts (hundreds of items) cost more draw calls. Room shells are merged into one mesh per material.
+- Lighting has no real-time ambient occlusion or post-processing; soft contact shadows stand in for it.
+- `npm run build` warns that the main JavaScript chunk is larger than 500 kB (three.js); the app is not code-split yet.
 
 ## Next milestone
 

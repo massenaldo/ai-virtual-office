@@ -47,7 +47,7 @@ A visual upgrade of the existing 3D office, not a rewrite. The office should loo
 - [x] Floor plan stays clear: readable room colours, boundaries and labels
 - [x] PR with before/after screenshots
 - Also fixed in Stage A: one room label could render empty (labels now live in one DOM layer); open-floor furniture floated 8 cm above the floor.
-- Found, not fixed: `src/styles.css` loads the DM Sans and Manrope fonts from Google Fonts at runtime (needs the user's OK to download and self-host the font files).
+- Found, not fixed: `src/styles.css` loads the DM Sans and Manrope fonts from Google Fonts at runtime (needs the user's OK to download and self-host the font files). Fixed in Stage D.
 
 ## Stage B: Furniture models
 
@@ -69,12 +69,13 @@ A visual upgrade of the existing 3D office, not a rewrite. The office should loo
 
 ## Stage D: Optimize and verify
 
-- [ ] Count draw calls and meshes before and after; limit shadow casters; check frame rate while dragging
-- [ ] Full editor regression checklist in 3D and floor plan
-- [ ] Production build (`vite preview`) checked in the browser; `/vo` end to end
-- [ ] Self-host the DM Sans / Manrope fonts only if necessary (user, 2026-10-25: "include it in a later stage if necessary")
-- [ ] README updated (visuals, assets and licences if any, limitations)
-- [ ] Final report per plan.md §10
+- [x] Count draw calls and meshes before and after; limit shadow casters; check frame rate while dragging
+- [x] Full editor regression checklist in 3D and floor plan
+- [x] Production build (`vite preview`) checked in the browser; `/vo` end to end
+- [x] Self-host the DM Sans / Manrope fonts only if necessary (user, 2026-10-25: "include it in a later stage if necessary")
+- [x] README updated (visuals, assets and licences if any, limitations)
+- [x] Final report per plan.md §10
+- Results: 1305 → 803 draw calls per frame in the 3D overview (room shells merged), and 60 → 0 frames per second while idle (render on demand). Shadow casters were already limited in Stage B (only walls and larger furniture), so they needed no change. Fonts self-hosted (user, 2026-10-26). Full report: [`docs/milestone-2-report.md`](docs/milestone-2-report.md).
 
 ## Editor regression checklist (every stage)
 

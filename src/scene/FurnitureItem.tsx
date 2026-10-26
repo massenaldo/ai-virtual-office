@@ -4,7 +4,7 @@ import { FURNITURE_SPECS } from '../layout/catalog'
 import type { Furniture, FurnitureType, Selection } from '../layout/types'
 import type { TransformIntent } from '../editor/transform'
 import FootprintOutline from './FootprintOutline'
-import { modelParts } from './furnitureModels'
+import { modelParts, plantVariant } from './furnitureModels'
 import { highlightFor } from './highlight'
 import { sharedMaterials } from './materials'
 import { useFloorDrag } from './useFloorDrag'
@@ -21,9 +21,9 @@ function PlanTile({ type }: { type: FurnitureType }) {
 }
 
 /** Shared, merged model geometry: one mesh per material, reused by every item of this type. */
-function Model({ type }: { type: FurnitureType }) {
+function Model({ type, variant }: { type: FurnitureType; variant: number }) {
   const materials = sharedMaterials()
-  return <>{modelParts(type).map((part) => <mesh key={part.material} geometry={part.geometry} material={materials[part.material]} castShadow={part.castShadow} receiveShadow />)}</>
+  return <>{modelParts(type, variant).map((part) => <mesh key={part.material} geometry={part.geometry} material={materials[part.material]} castShadow={part.castShadow} receiveShadow />)}</>
 }
 
 export type FurnitureItemProps = {
@@ -56,7 +56,7 @@ export default function FurnitureItem({ item, floorPlan, editing, selected, inva
     onPointerOut: () => setHovered(false),
   } : {}
   return <group position={[item.x, 0, item.z]} rotation={[0, (item.rotation * Math.PI) / 180, 0]} {...pointer} {...drag}>
-    {floorPlan ? <PlanTile type={item.type} /> : <Model type={item.type} />}
+    {floorPlan ? <PlanTile type={item.type} /> : <Model type={item.type} variant={item.type === 'plant' ? plantVariant(item.id) : 0} />}
     {highlight && <FootprintOutline width={spec.width} depth={spec.depth} color={highlight.color} lineWidth={highlight.width} y={PLAN_HEIGHT[item.type] + 0.02} />}
   </group>
 }

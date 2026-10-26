@@ -61,11 +61,11 @@ A visual upgrade of the existing 3D office, not a rewrite. The office should loo
 
 ## Stage C: Glass, plants, details
 
-- [ ] Glass partitions with slim graphite frames for meeting rooms and offices; walls and glass never catch clicks
-- [ ] Plants with leaf clusters in a proper planter, in a couple of sizes
-- [ ] A few restrained details (wall art, a whiteboard in meeting rooms) that never block editing
-- [ ] Default office updated with the new furniture (meeting chairs, storage); move the default meeting table fully inside the meeting room (it currently sticks through the room's east wall)
-- [ ] PR with before/after screenshots
+- [x] Glass partitions with slim graphite frames for meeting rooms and offices; walls and glass never catch clicks
+- [x] Plants with leaf clusters in a proper planter, in a couple of sizes
+- [x] A few restrained details (wall art, a whiteboard in meeting rooms) that never block editing
+- [x] Default office updated with the new furniture (meeting chairs, storage); move the default meeting table fully inside the meeting room (it currently sticks through the room's east wall)
+- [x] PR with before/after screenshots
 
 ## Stage D: Optimize and verify
 

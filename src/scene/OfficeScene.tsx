@@ -58,6 +58,7 @@ const PLAN_MOUSE_BUTTONS = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, R
 function ViewCameras({ layout, floorPlan, viewKey }: { layout: OfficeLayout; floorPlan: boolean; viewKey: number }) {
   const office = layout.office
   const set = useThree((s) => s.set)
+  const invalidate = useThree((s) => s.invalidate)
   const size = useThree((s) => s.size)
   const perspective = useMemo(() => new THREE.PerspectiveCamera(OVERVIEW_FOV, 1, 0.1, 1000), [])
   const ortho = useMemo(() => new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100), [])
@@ -85,6 +86,8 @@ function ViewCameras({ layout, floorPlan, viewKey }: { layout: OfficeLayout; flo
     }
     camera.updateProjectionMatrix()
     set({ camera })
+    // Rendering is on demand, so draw the new view now instead of waiting for the next pointer move.
+    invalidate()
     // fitZoom is read only when the view is (re)entered, so resizing doesn't undo the user's zoom.
   }, [camera, viewKey])
 
@@ -123,7 +126,7 @@ export default function OfficeScene(props: OfficeSceneProps) {
     if (props.editing) props.onSelect(null)
   }
   return <>
-  <Canvas shadows="soft" dpr={[1, 1.7]} gl={{ antialias: true }} onCreated={({ gl }) => { gl.toneMappingExposure = 0.95 }} onPointerMissed={onPointerMissed}>
+  <Canvas frameloop="demand" shadows="soft" dpr={[1, 1.7]} gl={{ antialias: true }} onCreated={({ gl }) => { gl.toneMappingExposure = 0.95 }} onPointerMissed={onPointerMissed}>
     <OfficeContents {...props} labels={labels} />
     {SHOW_STATS && <RenderStatsProbe panel={statsPanel} />}
   </Canvas>

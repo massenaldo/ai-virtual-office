@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BASEBOARD, GLASS_THICKNESS, WALL_THICKNESS, roomBaseboards, roomWalls, type Box } from './architecture'
+import { BASEBOARD, FRAME, GLASS_THICKNESS, WALL_THICKNESS, roomBaseboards, roomWalls, type Box } from './architecture'
 
 const big = { width: 4.5, depth: 3.6, wallHeight: 2.5 }
 const tiny = { width: 2, depth: 2, wallHeight: 2.5 }
@@ -58,5 +58,53 @@ describe('roomBaseboards', () => {
 
   it('stops at the glass so baseboards never poke through it', () => {
     for (const b of roomBaseboards(tiny)) expect(b.z - b.d / 2).toBeGreaterThanOrEqual(-tiny.depth / 2 + GLASS_THICKNESS - EPS)
+  })
+})
+
+describe('glass partitions', () => {
+  const meeting = { width: 4.6, depth: 3.6, wallHeight: 2.5 }
+  const glassRight = { left: 'solid', right: 'glass' } as const
+
+  it('swaps the right wall for glass', () => {
+    const { solid, glass } = roomWalls(meeting, glassRight)
+    expect(solid).toHaveLength(1)
+    expect(glass).toHaveLength(2)
+  })
+
+  it('frames every pane inside the footprint with positive sizes', () => {
+    const { frames } = roomWalls(meeting, glassRight)
+    expect(frames.length).toBeGreaterThan(0)
+    for (const b of frames) {
+      expect(insideFootprint(b, meeting)).toBe(true)
+      expect(Math.min(b.w, b.h, b.d)).toBeGreaterThan(0)
+    }
+  })
+
+  it('spaces mullions no more than FRAME.maxSpan apart along the back pane', () => {
+    const { frames } = roomWalls(meeting, glassRight)
+    const backMullions = frames
+      .filter((b) => b.h > 1 && Math.abs(b.z - (-meeting.depth / 2 + GLASS_THICKNESS / 2)) < 0.05)
+      .map((b) => b.x)
+      .sort((a, b) => a - b)
+    expect(backMullions.length).toBeGreaterThanOrEqual(4)
+    for (let i = 1; i < backMullions.length; i++) expect(backMullions[i] - backMullions[i - 1]).toBeLessThanOrEqual(FRAME.maxSpan + 1e-9)
+  })
+
+  it('stays valid for a small fully framed room', () => {
+    const { frames, glass } = roomWalls(tiny, glassRight)
+    for (const b of [...frames, ...glass]) {
+      expect(Math.min(b.w, b.h, b.d)).toBeGreaterThan(0)
+      expect(insideFootprint(b, tiny)).toBe(true)
+    }
+  })
+
+  it('only runs baseboards along solid sides', () => {
+    expect(roomBaseboards(meeting, glassRight)).toHaveLength(1)
+    expect(roomBaseboards(meeting)).toHaveLength(2)
+  })
+
+  it('keeps the default all-solid shell', () => {
+    const { solid, glass } = roomWalls(meeting)
+    expect([solid.length, glass.length]).toEqual([2, 1])
   })
 })

@@ -66,3 +66,37 @@ export function roomBaseboards({ width, depth }: RoomShape, style: PartitionStyl
     .filter(([side]) => side === 'solid')
     .map(([, sign]) => ({ x: sign * x, y: BASEBOARD.height / 2, z, w: BASEBOARD.depth, h: BASEBOARD.height, d: length }))
 }
+
+export type DetailKind = 'art-frame' | 'art-canvas' | 'whiteboard' | 'whiteboard-frame' | 'whiteboard-tray'
+
+const DETAIL_MARGIN = 0.3
+const MIN_DETAIL = 0.6
+
+/**
+ * A few restrained wall details on the inner face of a solid left wall: framed art in the executive office and a
+ * whiteboard in the meeting room. They shrink to fit short walls (skipped below MIN_DETAIL) and hang above furniture.
+ */
+export function roomDetails({ width, depth, department }: RoomShape & Pick<Room, 'department'>, style: PartitionStyle): { kind: DetailKind; box: Box }[] {
+  if (style.left !== 'solid' || (department !== 'executive' && department !== 'meeting')) return []
+  const face = -width / 2 + WALL_THICKNESS
+  const onWall = (proud: number, y: number, h: number, d: number): Box => ({ x: face + proud / 2, y, z: 0, w: proud, h, d })
+  const art = department === 'executive'
+  const nominal = art ? 0.9 : 1.6
+  const size = Math.min(nominal, depth - 2 * DETAIL_MARGIN)
+  if (size < MIN_DETAIL) return []
+  const scale = size / nominal
+  if (art) {
+    const h = 0.6 * scale
+    return [
+      { kind: 'art-frame', box: onWall(0.03, 1.5, h + 0.06, size + 0.06) },
+      { kind: 'art-canvas', box: onWall(0.035, 1.5, h, size) },
+    ]
+  }
+  const h = 0.9 * scale
+  const y = 1.45
+  return [
+    { kind: 'whiteboard-frame', box: onWall(0.03, y, h + 0.04, size + 0.04) },
+    { kind: 'whiteboard', box: onWall(0.035, y, h, size) },
+    { kind: 'whiteboard-tray', box: onWall(0.04, y - h / 2 - 0.035, 0.03, size * 0.6) },
+  ]
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BASEBOARD, FRAME, GLASS_THICKNESS, WALL_THICKNESS, roomBaseboards, roomWalls, type Box } from './architecture'
+import { BASEBOARD, FRAME, GLASS_THICKNESS, WALL_THICKNESS, roomBaseboards, roomDetails, roomWalls, type Box } from './architecture'
 
 const big = { width: 4.5, depth: 3.6, wallHeight: 2.5 }
 const tiny = { width: 2, depth: 2, wallHeight: 2.5 }
@@ -106,5 +106,40 @@ describe('glass partitions', () => {
   it('keeps the default all-solid shell', () => {
     const { solid, glass } = roomWalls(meeting)
     expect([solid.length, glass.length]).toEqual([2, 1])
+  })
+})
+
+describe('roomDetails', () => {
+  const glassRight = { left: 'solid', right: 'glass' } as const
+  const allSolid = { left: 'solid', right: 'solid' } as const
+  const room = (department: 'executive' | 'meeting' | 'backend', width = 4.5, depth = 3.6) => ({ width, depth, wallHeight: 2.5, department })
+
+  it('hangs framed art on the executive office left wall', () => {
+    const details = roomDetails(room('executive'), glassRight)
+    expect(details.map((d) => d.kind).sort()).toEqual(['art-canvas', 'art-frame'])
+    for (const { box } of details) expect(box.x).toBeLessThan(-4.5 / 2 + WALL_THICKNESS + 0.05)
+  })
+
+  it('puts a framed whiteboard with a tray in the meeting room', () => {
+    expect(roomDetails(room('meeting', 4.6), glassRight).map((d) => d.kind).sort()).toEqual(['whiteboard', 'whiteboard-frame', 'whiteboard-tray'])
+  })
+
+  it('leaves team rooms bare', () => {
+    expect(roomDetails(room('backend'), allSolid)).toEqual([])
+  })
+
+  it('skips details when the left wall is glass or too short', () => {
+    expect(roomDetails(room('executive'), { left: 'glass', right: 'solid' })).toEqual([])
+    expect(roomDetails(room('meeting', 4.6, 1.0), glassRight)).toEqual([])
+  })
+
+  it('keeps every detail on the wall, inside the room and above furniture height', () => {
+    for (const r of [room('executive'), room('meeting', 4.6), room('meeting', 3, 2)]) {
+      for (const { box } of roomDetails(r, glassRight)) {
+        expect(insideFootprint(box, r)).toBe(true)
+        expect(box.y - box.h / 2).toBeGreaterThanOrEqual(0.9)
+        expect(box.w).toBeLessThanOrEqual(0.04 + 1e-9)
+      }
+    }
   })
 })

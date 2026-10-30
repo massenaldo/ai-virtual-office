@@ -177,7 +177,7 @@ The app gets a small **local backend**. It owns agents, tasks and activity, runs
 
 - [ ] Workspaces by id plus `resolveWorkspace` (traversal, absolute paths, symlink escape, NUL), with rejections audited.
 - [ ] Tool catalogue plus `decideToolUse` (allow / deny / ask), with no bypass mode. Approvals go through the task manager (`waiting_for_approval`, approve / deny endpoint, and a timeout while waiting).
-- [ ] Origin allowlist, JSON-only state changes, CORS, and binding to `127.0.0.1`. Credential handling (server env only, `credentialsConfigured` flag, tests that the bundle and responses carry no key).
+- [ ] Origin allowlist, JSON-only state changes (**including routes with no body**, such as cancel and the demo POSTs, which a plain `text/plain` cross-origin POST can reach today), a **Host-header allowlist** against DNS rebinding (an Origin check alone doesn't stop a rebinding page reading `/api/state` and `/api/events`), CORS, and binding to `127.0.0.1`. Credential handling (server env only, `credentialsConfigured` flag, tests that the bundle and responses carry no key).
 - [ ] Structured audit log (JSON Lines) and a guard test against process execution and credential leaks.
 - [ ] `ClaudeAgentRuntimeProvider` boundary (unavailable, documented integration points) and a PR.
 

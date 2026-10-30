@@ -48,32 +48,37 @@ export function createApp(config: ServerConfig, deps: AppDeps = {}): App {
   }
 }
 
-export function startServer(config: ServerConfig, deps: AppDeps = {}): Promise<RunningServer> {
+export async function startServer(config: ServerConfig, deps: AppDeps = {}): Promise<RunningServer> {
+  // Bind the port first: a second launch on a busy port must fail before it opens (and possibly rewrites) the data file.
+  let handler: App['handler'] = (_req, res) => { res.writeHead(503).end() }
+  const server = createServer((req, res) => handler(req, res))
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(config.port, config.host, () => { server.off('error', reject); resolve() })
+  })
+  const stop = () => new Promise<void>((done) => {
+    server.close(() => done())
+    server.closeAllConnections()
+  })
+
   let app: App
   try {
     app = createApp(config, deps)
   } catch (error) {
-    return Promise.reject(error)
+    await stop()
+    throw error
   }
-  const server = createServer(app.handler)
-  return new Promise((resolve, reject) => {
-    server.once('error', (error) => { void app.manager.dispose(); reject(error) })
-    server.listen(config.port, config.host, () => {
-      const port = (server.address() as AddressInfo).port
-      const host = config.host.includes(':') ? `[${config.host}]` : config.host
-      resolve({
-        url: `http://${host}:${port}`,
-        port,
-        app,
-        close: async () => {
-          app.closeStreams()
-          await app.manager.dispose()
-          await new Promise<void>((done) => {
-            server.close(() => done())
-            server.closeAllConnections()
-          })
-        },
-      })
-    })
-  })
+  handler = app.handler
+  const port = (server.address() as AddressInfo).port
+  const host = config.host.includes(':') ? `[${config.host}]` : config.host
+  return {
+    url: `http://${host}:${port}`,
+    port,
+    app,
+    close: async () => {
+      app.closeStreams()
+      await app.manager.dispose()
+      await stop()
+    },
+  }
 }

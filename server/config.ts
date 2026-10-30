@@ -11,6 +11,7 @@ export type Env = Record<string, string | undefined>
 type Parsed = { ok: true; config: ServerConfig } | { ok: false; errors: string[] }
 
 const LOOPBACK = ['127.0.0.1', '::1', 'localhost']
+const MAX_TIMER_MS = 2147483647
 
 /** Empty strings count as unset, so a copied .env.example gives the defaults. */
 const read = (env: Env, name: string): string | undefined => {
@@ -40,16 +41,21 @@ export function parseConfig(env: Env, cwd: string = process.cwd()): Parsed {
   const rawRuntime = read(env, 'RUNTIME') ?? 'mock'
   if (rawRuntime !== 'mock' && rawRuntime !== 'claude') errors.push(`RUNTIME must be "mock" or "claude" (got "${rawRuntime}").`)
 
-  const positive = (name: string, fallback: number): number => {
+  // `max` is for values that become timers: Node treats a setTimeout above 2^31-1 ms as 1 ms, which would end every task at once.
+  const positive = (name: string, fallback: number, max?: number): number => {
     const raw = read(env, name)
     if (raw === undefined) return fallback
-    if (/^\d+$/.test(raw) && Number(raw) > 0) return Number(raw)
+    if (/^\d+$/.test(raw) && Number(raw) > 0) {
+      if (max === undefined || Number(raw) <= max) return Number(raw)
+      errors.push(`${name} must be at most ${max} ms, about 24 days (got "${raw.length > 24 ? `${raw.slice(0, 24)}…` : raw}").`)
+      return fallback
+    }
     errors.push(`${name} must be a positive integer (got "${raw}").`)
     return fallback
   }
-  const taskTimeoutMs = positive('TASK_TIMEOUT_MS', 600000)
-  const cancelGraceMs = positive('CANCEL_GRACE_MS', 5000)
-  const approvalTimeoutMs = positive('APPROVAL_TIMEOUT_MS', 300000)
+  const taskTimeoutMs = positive('TASK_TIMEOUT_MS', 600000, MAX_TIMER_MS)
+  const cancelGraceMs = positive('CANCEL_GRACE_MS', 5000, MAX_TIMER_MS)
+  const approvalTimeoutMs = positive('APPROVAL_TIMEOUT_MS', 300000, MAX_TIMER_MS)
   const errorsBeforeBytes = errors.length
   const maxMessageBytes = positive('MAX_MESSAGE_BYTES', 32768)
   const maxTaskOutputBytes = positive('MAX_TASK_OUTPUT_BYTES', 262144)

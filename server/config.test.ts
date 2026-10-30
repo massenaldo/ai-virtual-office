@@ -42,6 +42,15 @@ describe('parseConfig', () => {
     expect(parseConfig({ PORT: '0' }, '/repo').ok).toBe(true)
   })
 
+  it('rejects a timer longer than Node can schedule', () => {
+    const max = 2147483647
+    for (const name of ['TASK_TIMEOUT_MS', 'CANCEL_GRACE_MS', 'APPROVAL_TIMEOUT_MS']) {
+      expect(parseConfig({ [name]: String(max) }, '/repo').ok).toBe(true)
+      expect(parseConfig({ [name]: String(max + 1) }, '/repo')).toEqual({ ok: false, errors: [`${name} must be at most 2147483647 ms, about 24 days (got "${max + 1}").`] })
+    }
+    expect(parseConfig({ TASK_TIMEOUT_MS: '9'.repeat(400) }, '/repo').ok).toBe(false)
+  })
+
   it('keeps only a flag for the API key', () => {
     const r = parseConfig({ ANTHROPIC_API_KEY: 'sk-test-123' }, '/repo')
     expect(r.ok && r.config.credentialsConfigured).toBe(true)

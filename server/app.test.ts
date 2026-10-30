@@ -1,7 +1,9 @@
-import { rmSync } from 'node:fs'
+import { readFileSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { startServer } from './app'
 import { silentLogger } from './log'
+import { WORKFORCE_FILE } from './store'
 import { startTestServer, testConfig, type TestServer } from './test/helpers'
 
 let running: { close(): Promise<void> } | null = null
@@ -76,6 +78,25 @@ describe('restarts', () => {
       const state = (await call(second.url, 'GET', '/api/state')).body.state
       expect(state.tasks[0]).toMatchObject({ status: 'failed', errorMessage: 'Interrupted by a server restart', endedReason: 'failed' })
       await second.close()
+    } finally {
+      rmSync(config.dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it('a second launch on a busy port fails before it touches the data file', async () => {
+    const config = testConfig()
+    try {
+      const first = await startServer(config, { log: silentLogger, mockTimings: { thinkingMs: 60000, workingMs: 60000 } })
+      const started = await call(first.url, 'POST', '/api/agents/agent-demo-backend/tasks', { title: 'Build API' })
+      expect(started.status).toBe(202)
+      await new Promise((r) => setTimeout(r, 20))
+      const file = join(config.dataDir, WORKFORCE_FILE)
+      const before = readFileSync(file, 'utf8')
+
+      await expect(startServer({ ...config, port: first.port }, { log: silentLogger })).rejects.toMatchObject({ code: 'EADDRINUSE' })
+      expect(readFileSync(file, 'utf8')).toBe(before)
+      expect(JSON.parse(before).tasks[0].status).not.toBe('failed')
+      await first.close()
     } finally {
       rmSync(config.dataDir, { recursive: true, force: true })
     }

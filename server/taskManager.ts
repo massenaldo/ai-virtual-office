@@ -94,7 +94,7 @@ export class TaskManager {
     return this.state.tasks.find((t) => t.id === id)
   }
 
-  /** Builds the event without undefined keys, so consumers can tell "absent" from "empty". */
+  /** Builds the event without undefined keys, so a missing field is distinguishable from an empty one. */
   private report(action: LifecycleAction, task: AgentTask, x: { actor?: LifecycleActor; requestId?: string; tool?: string; decision?: string; reason?: string; detail?: string } = {}): void {
     const event: LifecycleEvent = { action, actor: x.actor ?? 'system', taskId: task.id, agentId: task.agentId }
     if (x.requestId !== undefined) event.requestId = x.requestId

@@ -1,7 +1,7 @@
 # Milestone 3B.1 — Real Agent Runtime Foundation: Tasks
 
 **Spec:** [`plan.md`](plan.md) (Milestone 3B.1 brief). This file is my working task list for that spec.
-**Status:** Approved, 2026-10-31. Q1–Q5 answered with the recommendations (see "Decisions" at the end). Stages A and B are done (B in review); Stage C is next.
+**Status:** Approved, 2026-10-31. Q1–Q5 answered with the recommendations (see "Decisions" at the end). Stages A–C are done (C in review); Stage D is next.
 **Earlier milestones:** [`milestone-3a-tasks.md`](docs/milestones/milestone-3a-tasks.md) ([report](docs/milestone-3a-report.md)), and [`milestone-2-tasks.md`](docs/milestones/milestone-2-tasks.md).
 
 ## What this milestone is
@@ -175,11 +175,11 @@ The app gets a small **local backend**. It owns agents, tasks and activity, runs
 
 ## Stage C — Security foundation
 
-- [ ] Workspaces by id plus `resolveWorkspace` (traversal, absolute paths, symlink escape, NUL), with rejections audited.
-- [ ] Tool catalogue plus `decideToolUse` (allow / deny / ask), with no bypass mode. Approvals go through the task manager (`waiting_for_approval`, approve / deny endpoint, and a timeout while waiting).
-- [ ] Origin allowlist, JSON-only state changes (**including routes with no body**, such as cancel and the demo POSTs, which a plain `text/plain` cross-origin POST can reach today), a **Host-header allowlist** against DNS rebinding (an Origin check alone doesn't stop a rebinding page reading `/api/state` and `/api/events`), CORS, and binding to `127.0.0.1`. Credential handling (server env only, `credentialsConfigured` flag, tests that the bundle and responses carry no key).
-- [ ] Structured audit log (JSON Lines) and a guard test against process execution and credential leaks.
-- [ ] `ClaudeAgentRuntimeProvider` boundary (unavailable, documented integration points) and a PR.
+- [x] Workspaces by id plus `resolveWorkspace` (traversal, absolute paths, symlink escape, NUL), with rejections audited.
+- [x] Tool catalogue plus `decideToolUse` (allow / deny / ask), with no bypass mode. Approvals go through the task manager (`waiting_for_approval`, approve / deny endpoint, and a timeout while waiting).
+- [x] Origin allowlist, JSON-only state changes (**including routes with no body**, such as cancel and the demo POSTs, which a plain `text/plain` cross-origin POST can reach today), a **Host-header allowlist** against DNS rebinding (an Origin check alone doesn't stop a rebinding page reading `/api/state` and `/api/events`), CORS, and binding to `127.0.0.1`. Credential handling (server env only, `credentialsConfigured` flag, tests that the bundle and responses carry no key).
+- [x] Structured audit log (JSON Lines) and a guard test against process execution and credential leaks.
+- [x] `ClaudeAgentRuntimeProvider` boundary (unavailable, documented integration points) and a PR.
 
 ## Stage D — Frontend integration
 

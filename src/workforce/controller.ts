@@ -3,13 +3,13 @@ import * as ops from './operations'
 import type { AgentInput, TaskInput } from './operations'
 import { MockRuntimeProvider } from './runtime/mockRuntime'
 import type { MockDemoControls, RuntimeProvider } from './runtime/types'
-import { loadWorkforce, saveWorkforce } from './storage'
-import type { WorkforceState } from './types'
+import { loadWorkforce, saveWorkforce, type Preserved } from './storage'
+import type { ApprovalDecision, WorkforceState } from './types'
 
 type KV = Pick<Storage, 'getItem' | 'setItem'>
 type Runtime = RuntimeProvider & Partial<MockDemoControls>
 
-export type WorkforceSnapshot = { state: WorkforceState; loadProblem: 'corrupt' | 'unsupported-version' | 'unavailable' | null; saveError: string | null }
+export type WorkforceSnapshot = { state: WorkforceState; loadProblem: 'corrupt' | 'unsupported-version' | 'unavailable' | null; preserved: Preserved | null; saveError: string | null }
 export type ActionResult = { ok: true } | { ok: false; error: string }
 
 export type WorkforceController = {
@@ -21,8 +21,8 @@ export type WorkforceController = {
   assignDesk(agentId: string, deskId: string | null): ActionResult
   startTask(agentId: string, input: TaskInput): ActionResult
   cancelTask(taskId: string): void
-  forceWaiting(taskId: string): void
-  resume(taskId: string): void
+  decideApproval(taskId: string, approvalId: string, decision: ApprovalDecision): void
+  requestApproval(taskId: string): void
   forceError(taskId: string): void
   restoreDemoAgents(): void
   dismissLoadProblem(): void
@@ -40,7 +40,7 @@ export function createWorkforceController(opts: { storage: KV | null; now?: () =
   const loaded = loadWorkforce(opts.storage, now())
   const listeners = new Set<() => void>()
   let current = loaded.state
-  let snapshot: WorkforceSnapshot = { state: current, loadProblem: loaded.problem, saveError: null }
+  let snapshot: WorkforceSnapshot = { state: current, loadProblem: loaded.problem, preserved: loaded.preserved, saveError: null }
   let disposed = false
 
   const publish = (patch: Partial<WorkforceSnapshot>) => {
@@ -90,6 +90,7 @@ export function createWorkforceController(opts: { storage: KV | null; now?: () =
       const r = ops.assignTask(current, agentId, input, now())
       if (!r.ok) return r
       commit(r.state)
+      commit(ops.markStarting(current, r.taskId, now()))
       const task = current.tasks.find((t) => t.id === r.taskId)
       const agent = current.agents.find((a) => a.id === agentId)
       if (!task || !agent) return { ok: true }
@@ -98,12 +99,18 @@ export function createWorkforceController(opts: { storage: KV | null; now?: () =
       if (!started.ok) commit(ops.applyRuntimeEvent(current, { type: 'failed', taskId: task.id, error: started.error }, now(), runtime.mode))
       return { ok: true }
     },
+    // cancelling → the runtime confirms with a cancelled event; a runtime that doesn't answer gets the task force-ended.
     cancelTask(taskId) {
+      commit(ops.requestCancel(current, taskId, now(), runtime.mode))
       runtime.cancel(taskId)
       commit(ops.cancelTask(current, taskId, now()))
     },
-    forceWaiting: (taskId) => runtime.forceWaiting?.(taskId),
-    resume: (taskId) => runtime.resume?.(taskId),
+    decideApproval(taskId, approvalId, decision) {
+      const before = current
+      commit(ops.decideApproval(current, taskId, approvalId, decision, now(), runtime.mode))
+      if (current !== before) runtime.respondToApproval(taskId, approvalId, decision)
+    },
+    requestApproval: (taskId) => runtime.requestApproval?.(taskId),
     forceError: (taskId) => runtime.forceError?.(taskId),
     restoreDemoAgents: () => commit(restoreDemoAgents(current, now())),
     dismissLoadProblem: () => { if (snapshot.loadProblem) publish({ loadProblem: null }) },

@@ -1,5 +1,5 @@
 import { createId } from '../../layout/operations'
-import type { Agent, AgentTask } from '../types'
+import type { Agent, AgentTask, ApprovalDecision } from '../types'
 import type { MockDemoControls, RuntimeEvent, RuntimeProvider, StartResult } from './types'
 
 /**
@@ -10,8 +10,10 @@ import type { MockDemoControls, RuntimeEvent, RuntimeProvider, StartResult } fro
 
 export const MOCK_TIMINGS = { thinkingMs: 2000, workingMs: 4000 }
 export const MOCK_ERROR_MESSAGE = 'Simulated error (demo control).'
+export const MOCK_DENIED_MESSAGE = 'Approval denied (simulated)'
 
-type Run = { title: string; waiting: boolean; timers: ReturnType<typeof setTimeout>[] }
+// approvalId is set while the run waits for a decision on a simulated tool request.
+type Run = { title: string; approvalId: string | null; started: boolean; timers: ReturnType<typeof setTimeout>[] }
 
 export class MockRuntimeProvider implements RuntimeProvider, MockDemoControls {
   readonly mode = 'mock' as const
@@ -31,8 +33,10 @@ export class MockRuntimeProvider implements RuntimeProvider, MockDemoControls {
   start(task: AgentTask, _agent: Agent): StartResult {
     if (this.runs.has(task.id)) return { ok: false, error: 'Task is already running.' }
     const executionId = createId('exec')
-    this.runs.set(task.id, { title: task.title, waiting: false, timers: [] })
+    this.runs.set(task.id, { title: task.title, approvalId: null, started: false, timers: [] })
     this.schedule(task.id, 0, () => {
+      const run = this.runs.get(task.id)
+      if (run) run.started = true
       this.emit({ type: 'started', taskId: task.id, executionId })
       this.emit({ type: 'progress', taskId: task.id, step: 'thinking', message: 'Thinking (simulated)' })
     })
@@ -45,18 +49,24 @@ export class MockRuntimeProvider implements RuntimeProvider, MockDemoControls {
     if (this.finish(taskId)) this.emit({ type: 'cancelled', taskId })
   }
 
-  forceWaiting(taskId: string): void {
+  /** Demo control: pause a running task on a simulated request to write a file. */
+  requestApproval(taskId: string): void {
     const run = this.runs.get(taskId)
-    if (!run || run.waiting) return
+    if (!run || !run.started || run.approvalId) return
     this.clearTimers(run)
-    run.waiting = true
-    this.emit({ type: 'waiting', taskId, message: 'Waiting for input (simulated)' })
+    run.approvalId = createId('approval')
+    this.emit({ type: 'approval_requested', taskId, approvalId: run.approvalId, tool: 'Write', summary: 'Simulated request to write a file' })
   }
 
-  resume(taskId: string): void {
+  /** Approve carries on to completion; deny ends the simulated run as failed. Answers for another approval id change nothing. */
+  respondToApproval(taskId: string, approvalId: string, decision: ApprovalDecision): void {
     const run = this.runs.get(taskId)
-    if (!run || !run.waiting) return
-    run.waiting = false
+    if (!run || run.approvalId === null || run.approvalId !== approvalId) return
+    run.approvalId = null
+    if (decision === 'deny') {
+      if (this.finish(taskId)) this.emit({ type: 'failed', taskId, error: MOCK_DENIED_MESSAGE })
+      return
+    }
     this.emit({ type: 'progress', taskId, step: 'working', message: 'Working (simulated)' })
     this.scheduleCompletion(taskId, this.timings.workingMs)
   }

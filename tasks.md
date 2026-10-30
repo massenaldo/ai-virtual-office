@@ -159,11 +159,11 @@ The app gets a small **local backend**. It owns agents, tasks and activity, runs
 
 ## Stage A — Shared lifecycle v2 and storage migration (browser only, no server)
 
-- [ ] `TaskStatus` v2, new task fields, the agent-status mapping, and the new activity types (approval requested / decided, cancelling, timeout).
-- [ ] `applyRuntimeEvent` and the operations updated for v2: starting, cancelling, approvals, timeout end, and no duplicate start.
-- [ ] Storage schema v2, the `:v2` key, and a one-time v1 → v2 migration, with the v1 key kept. Also fix the "was backed up" notice wording (an open 3A minor).
-- [ ] The mock runtime: approval request demo control, plus Approve / Deny in the agent detail (still browser-only).
-- [ ] Tests (migration, mapping, every transition, duplicate start), a browser regression of 3A's checks, and a PR.
+- [x] `TaskStatus` v2, new task fields, the agent-status mapping, and the new activity types (approval requested / decided, cancelling, timeout).
+- [x] `applyRuntimeEvent` and the operations updated for v2: starting, cancelling, approvals, timeout end, and no duplicate start.
+- [x] Storage schema v2, the `:v2` key, and a one-time v1 → v2 migration, with the v1 key kept. Also fix the "was backed up" notice wording (an open 3A minor).
+- [x] The mock runtime: approval request demo control, plus Approve / Deny in the agent detail (still browser-only).
+- [x] Tests (migration, mapping, every transition, duplicate start), a browser regression of 3A's checks, and a PR.
 
 ## Stage B — Backend service core (mock runtime)
 

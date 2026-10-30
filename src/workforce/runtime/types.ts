@@ -1,9 +1,10 @@
-import type { Agent, AgentTask, RuntimeMode } from '../types'
+import type { Agent, AgentTask, ApprovalDecision, RuntimeMode } from '../types'
 
 export type RuntimeEvent =
-  | { type: 'started'; taskId: string; executionId: string }
+  | { type: 'started'; taskId: string; executionId: string; sessionId?: string }
   | { type: 'progress'; taskId: string; step: 'thinking' | 'working'; message: string }
-  | { type: 'waiting'; taskId: string; message: string }
+  | { type: 'message'; taskId: string; text: string }
+  | { type: 'approval_requested'; taskId: string; approvalId: string; tool: string; summary: string }
   | { type: 'completed'; taskId: string; summary: string }
   | { type: 'failed'; taskId: string; error: string }
   | { type: 'cancelled'; taskId: string }
@@ -21,13 +22,13 @@ export interface RuntimeProvider {
   readonly availability: RuntimeAvailability
   start(task: AgentTask, agent: Agent): StartResult
   cancel(taskId: string): void
+  respondToApproval(taskId: string, approvalId: string, decision: ApprovalDecision): void
   subscribe(listener: (event: RuntimeEvent) => void): () => void
   dispose(): void
 }
 
-/** Demo-only controls for showing the waiting and error states on purpose. */
+/** Demo-only controls for showing the approval and error states on purpose. */
 export interface MockDemoControls {
-  forceWaiting(taskId: string): void
-  resume(taskId: string): void
+  requestApproval(taskId: string): void
   forceError(taskId: string, message?: string): void
 }

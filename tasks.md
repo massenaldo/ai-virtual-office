@@ -1,7 +1,7 @@
 # Milestone 3A — AI Agent Workforce UI and Mock Runtime: Tasks
 
 **Spec:** [`plan.md`](plan.md) (Milestone 3A brief). This file is my working task list for that spec.
-**Status:** Approved, 2026-10-30. Q1–Q4 answered (see "Decisions" at the end). Stage A is in review; Stage B is next.
+**Status:** Approved, 2026-10-30. Q1–Q4 answered (see "Decisions" at the end). Stages A and B are done (B in review); Stage C is next.
 **Earlier milestones:** [`docs/milestones/milestone-2-tasks.md`](docs/milestones/milestone-2-tasks.md) and [`milestone-2-plan.md`](docs/milestones/milestone-2-plan.md).
 
 ## What this milestone is
@@ -77,12 +77,12 @@ The office gets a staff of **AI agents** you can manage. You can create agents, 
 
 ## Stage B — Workforce panel and task UI
 
-- [ ] The sidebar **AI Agents** item becomes active and opens the Workforce panel beside the 3D office. A visible **Mock mode** badge.
-- [ ] Agent list with department and status filters, and an empty state.
-- [ ] Create and edit an agent (name, role, department) with form validation. Remove with confirmation when the agent has an active task or history.
-- [ ] Desk picker listing free desks by room. Unassign. "Workstation unavailable" state.
-- [ ] Agent detail panel: current task, task form (title, description), start, cancel, demo controls (waiting / error), and an activity timeline with timestamps and *Simulated* labels.
-- [ ] "Restore demo agents" action. Update the "Next milestone" card.
+- [x] The sidebar **AI Agents** item becomes active and opens the Workforce panel beside the 3D office. A visible **Mock mode** badge.
+- [x] Agent list with department and status filters, and an empty state.
+- [x] Create and edit an agent (name, role, department) with form validation. Remove with confirmation when the agent has an active task or history.
+- [x] Desk picker listing free desks by room. Unassign. "Workstation unavailable" state.
+- [x] Agent detail panel: current task, task form (title, description), start, cancel, demo controls (waiting / error), and an activity timeline with timestamps and *Simulated* labels.
+- [x] "Restore demo agents" action. Update the "Next milestone" card.
 - [ ] PR with screenshots
 
 ## Stage C — Agents in the 3D office

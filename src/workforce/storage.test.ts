@@ -77,6 +77,12 @@ describe('loadWorkforce', () => {
     expect(s.data.get(WORKFORCE_BACKUP_KEY)).toBe('{not json')
   })
 
+  it('reports backup-created when the backup already holds this exact data', () => {
+    const s = memoryStorage({ [WORKFORCE_STORAGE_KEY]: '{bad' })
+    expect(loadWorkforce(s, NOW).preserved).toBe('backup-created')
+    expect(loadWorkforce(s, NOW).preserved).toBe('backup-created')
+  })
+
   it('treats a newer schemaVersion as unsupported-version', () => {
     const json = JSON.stringify({ ...JSON.parse(serializeWorkforce(createDemoWorkforce(NOW))), schemaVersion: 3 })
     const s = memoryStorage({ [WORKFORCE_STORAGE_KEY]: json })

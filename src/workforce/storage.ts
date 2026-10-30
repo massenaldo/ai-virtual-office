@@ -188,8 +188,12 @@ export function loadWorkforce(storage: KV | null, now: string): WorkforceLoadRes
   if (state) return { state: recoverInterruptedTasks(state, now), seeded: false, migrated: false, problem: null, preserved: null }
   let preserved: Preserved = 'backup-exists'
   try {
-    if (storage.getItem(WORKFORCE_BACKUP_KEY) === null) {
+    const backup = storage.getItem(WORKFORCE_BACKUP_KEY)
+    if (backup === null) {
       storage.setItem(WORKFORCE_BACKUP_KEY, json)
+      preserved = 'backup-created'
+    } else if (backup === json) {
+      // This exact data is already the backup (an earlier load wrote it, e.g. StrictMode's first mount).
       preserved = 'backup-created'
     }
   } catch {

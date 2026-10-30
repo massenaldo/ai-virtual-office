@@ -3,7 +3,7 @@ import { createDefaultLayout } from '../layout/defaultLayout'
 import type { OfficeLayout } from '../layout/types'
 import { createDemoWorkforce } from './demo'
 import { addActivity, assignTask, cancelTask } from './operations'
-import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, removalPrompt, TASK_STATUS_LABEL } from './view'
+import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskClickTarget, deskMarkers, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, removalPrompt, TASK_STATUS_LABEL } from './view'
 
 const NOW = '2026-10-30T09:00:00.000Z'
 const layout = createDefaultLayout()
@@ -106,5 +106,41 @@ describe('removalPrompt', () => {
 describe('formatTime', () => {
   it('gives HH:MM:SS', () => {
     expect(formatTime(NOW)).toMatch(/^\d{2}:\d{2}:\d{2}$/)
+  })
+})
+
+describe('deskMarkers', () => {
+  it('lists agents on existing desks', () => {
+    const markers = deskMarkers(layout, demo, null)
+    expect(markers).toHaveLength(6)
+    expect(markers.find((m) => m.id === 'agent-demo-pm')).toEqual({ id: 'agent-demo-pm', label: 'Atlas', status: 'idle', x: -2.7, z: -4.4, selected: false })
+    const selected = deskMarkers(layout, demo, 'agent-demo-pm')
+    expect(selected.filter((m) => m.selected).map((m) => m.id)).toEqual(['agent-demo-pm'])
+  })
+
+  it('skips missing desks and agents without one', () => {
+    expect(deskMarkers(without(layout, 'desk-03'), demo, null)).toHaveLength(5)
+    const s = { ...demo, agents: demo.agents.map((a) => (a.id === 'agent-demo-qa' ? { ...a, deskId: null } : a.id === 'agent-demo-lead' ? { ...a, deskId: 'chair-03' } : a)) }
+    expect(deskMarkers(layout, s, null).map((m) => m.id).sort()).toEqual(['agent-demo-backend', 'agent-demo-devops', 'agent-demo-frontend', 'agent-demo-pm'])
+  })
+
+  it('carries the live status', () => {
+    const { state } = withTask('agent-demo-pm')
+    const running = { ...state, agents: state.agents.map((a) => (a.id === 'agent-demo-pm' ? { ...a, status: 'working' as const } : a)) }
+    expect(deskMarkers(layout, running, null).find((m) => m.id === 'agent-demo-pm')?.status).toBe('working')
+  })
+})
+
+describe('deskClickTarget', () => {
+  it('opens the agent at a desk or offers to assign', () => {
+    expect(deskClickTarget(demo, 'desk-03')).toEqual({ kind: 'open', agentId: 'agent-demo-pm' })
+    expect(deskClickTarget(demo, 'desk-04')).toEqual({ kind: 'assign', deskId: 'desk-04' })
+  })
+})
+
+describe('assignableAgents', () => {
+  it('puts agents without a desk first', () => {
+    const s = { ...demo, agents: demo.agents.map((a) => (a.id === 'agent-demo-qa' || a.id === 'agent-demo-lead' ? { ...a, deskId: null } : a)) }
+    expect(assignableAgents(s).map((a) => a.id)).toEqual(['agent-demo-lead', 'agent-demo-qa', 'agent-demo-pm', 'agent-demo-backend', 'agent-demo-frontend', 'agent-demo-devops'])
   })
 })

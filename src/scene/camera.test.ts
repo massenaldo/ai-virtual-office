@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
 import { createDefaultLayout } from '../layout/defaultLayout'
-import { LABEL_CLEARANCE, OVERVIEW_DIRECTION, OVERVIEW_FOV, fitOverview, overviewPoints } from './camera'
+import { FOCUS_DISTANCE, LABEL_CLEARANCE, OVERVIEW_DIRECTION, OVERVIEW_FOV, fitOverview, focusPose, overviewPoints } from './camera'
 
 const layout = createDefaultLayout()
 
@@ -54,5 +54,17 @@ describe('fitOverview', () => {
   it('keeps the target at floor level and the existing view angle', () => {
     expect(fitOverview(layout, 2.7).target[1]).toBeCloseTo(0.4, 9)
     expect(OVERVIEW_DIRECTION.toArray().map((v) => +v.toFixed(4))).toEqual(new THREE.Vector3(15, 17, 19).normalize().toArray().map((v) => +v.toFixed(4)))
+  })
+})
+
+describe('focusPose', () => {
+  it('aims at a point in 3D and plan', () => {
+    const pose = focusPose({ x: 1, z: 2 }, false)
+    expect(pose.target).toEqual([1, 0.4, 2])
+    const offset = new THREE.Vector3(...pose.position).sub(new THREE.Vector3(...pose.target))
+    expect(FOCUS_DISTANCE).toBe(9)
+    expect(offset.length()).toBeCloseTo(9)
+    expect(offset.normalize().dot(OVERVIEW_DIRECTION)).toBeCloseTo(1)
+    expect(focusPose({ x: 1, z: 2 }, true)).toEqual({ target: [1, 0, 2], position: [1, 40, 2.001] })
   })
 })

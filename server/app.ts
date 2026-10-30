@@ -4,6 +4,7 @@ import type { MOCK_TIMINGS } from '../src/workforce/runtime/mockRuntime'
 import type { ServerConfig } from './config'
 import { deriveEvents } from './deriveEvents'
 import { EventLog } from './eventLog'
+import { createSecurityGuards, securityHeaders } from './http/guards'
 import { createRoutes } from './http/routes'
 import { createRouter, type Guard } from './http/router'
 import { HEARTBEAT_MS } from './http/sse'
@@ -22,6 +23,7 @@ export type AppDeps = {
   provider?: ServerRuntimeProvider
   mockTimings?: typeof MOCK_TIMINGS
   heartbeatMs?: number
+  maxStreams?: number
   guards?: Guard[]
   responseHeaders?: (req: IncomingMessage) => Record<string, string>
 }
@@ -41,8 +43,10 @@ export function createApp(config: ServerConfig, deps: AppDeps = {}): App {
   const manager = new TaskManager({ store, provider, config, policy: toolPolicyFrom(config), now, log })
   const streams = new Set<ServerResponse>()
   const startedAt = now()
-  const routes = createRoutes({ config, store, events, provider, manager, now, startedAt, heartbeatMs: deps.heartbeatMs ?? HEARTBEAT_MS, streams })
-  const handler = createRouter({ routes, guards: deps.guards, responseHeaders: deps.responseHeaders, log })
+  const routes = createRoutes({ config, store, events, provider, manager, now, startedAt, heartbeatMs: deps.heartbeatMs ?? HEARTBEAT_MS, streams, log, maxStreams: deps.maxStreams })
+  const guards = [...createSecurityGuards({ allowedOrigins: config.allowedOrigins }), ...(deps.guards ?? [])]
+  const responseHeaders = (req: IncomingMessage) => ({ ...securityHeaders(req, config.allowedOrigins), ...(deps.responseHeaders?.(req) ?? {}) })
+  const handler = createRouter({ routes, guards, responseHeaders, log })
   return {
     config, store, events, provider, manager, startedAt, streams, handler,
     closeStreams: () => { for (const res of streams) res.end(); streams.clear() },

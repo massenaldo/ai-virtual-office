@@ -4,6 +4,7 @@ import type { StateResponse, WorkspacesResponse } from '../../src/workforce/api'
 import { restoreDemoAgents } from '../../src/workforce/demo'
 import { assignDesk, createAgent, updateAgent } from '../../src/workforce/operations'
 import type { ServerConfig } from '../config'
+import type { Logger } from '../log'
 import type { EventLog } from '../eventLog'
 import type { ServerRuntimeProvider } from '../runtime/types'
 import type { WorkforceStore } from '../store'
@@ -22,6 +23,8 @@ export type RouteDeps = {
   startedAt: string
   heartbeatMs: number
   streams: Set<ServerResponse>
+  log: Logger
+  maxStreams?: number
 }
 
 const STATUS: Record<ManagerError['code'], number> = { not_found: 404, invalid: 422, conflict: 409, unavailable: 503, bad_request: 400 }
@@ -66,7 +69,7 @@ export function createRoutes(deps: RouteDeps): Route[] {
         return { status: 200, body }
       },
     },
-    eventsRoute({ events, heartbeatMs: deps.heartbeatMs, streams: deps.streams, now }),
+    eventsRoute({ events, heartbeatMs: deps.heartbeatMs, streams: deps.streams, now, log: deps.log, maxStreams: deps.maxStreams }),
     {
       method: 'POST',
       path: '/api/agents',
@@ -94,8 +97,8 @@ export function createRoutes(deps: RouteDeps): Route[] {
     {
       method: 'DELETE',
       path: '/api/agents/:id',
-      handler: ({ params }) => {
-        const r = must(manager.removeAgent(params.id))
+      handler: ({ params, requestId }) => {
+        const r = must(manager.removeAgent(params.id, { requestId }))
         return { status: 200, body: { ok: true, cancelledTaskId: r.cancelledTaskId } }
       },
     },
@@ -115,24 +118,24 @@ export function createRoutes(deps: RouteDeps): Route[] {
       method: 'POST',
       path: '/api/agents/:id/tasks',
       body: 'json',
-      handler: ({ params, body }) => {
+      handler: ({ params, body, requestId }) => {
         const { workspaceId, ...input } = parseCreateTask(body as Record<string, unknown>)
-        return { status: 202, body: { task: must(manager.startTask(params.id, input, { workspaceId })).task } }
+        return { status: 202, body: { task: must(manager.startTask(params.id, input, { workspaceId, requestId })).task } }
       },
     },
     {
       method: 'POST',
       path: '/api/tasks/:id/cancel',
       body: 'none',
-      handler: ({ params }) => ({ status: 202, body: { task: must(manager.cancelTask(params.id)).task } }),
+      handler: ({ params, requestId }) => ({ status: 202, body: { task: must(manager.cancelTask(params.id, { requestId })).task } }),
     },
     {
       method: 'POST',
       path: '/api/tasks/:id/approval',
       body: 'json',
-      handler: ({ params, body }) => {
+      handler: ({ params, body, requestId }) => {
         const { approvalId, decision } = parseApproval(body as Record<string, unknown>)
-        return { status: 200, body: { task: must(manager.decideApproval(params.id, approvalId, decision)).task } }
+        return { status: 200, body: { task: must(manager.decideApproval(params.id, approvalId, decision, { requestId })).task } }
       },
     },
   ]

@@ -43,7 +43,7 @@ describe('app', () => {
 
 describe('restarts', () => {
   const call = async (url: string, method: string, path: string, body?: unknown) => {
-    const res = await fetch(`${url}${path}`, { method, headers: body === undefined ? {} : { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })
+    const res = await fetch(`${url}${path}`, { method, headers: method === 'GET' ? {} : { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })
     return { status: res.status, body: (await res.json()) as any }
   }
 

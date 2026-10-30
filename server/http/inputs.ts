@@ -1,16 +1,16 @@
 import type { AgentInput, TaskInput } from '../../src/workforce/operations'
 import type { ApprovalDecision } from '../../src/workforce/types'
-import { HttpError } from './router'
+import { HttpError, type RejectCode } from './router'
 
 // Strict parsing of what the browser sends. Unknown keys are rejected, so a path, working directory or command can
 // never ride along; business rules (name length, desk taken, one task per agent) stay with the operations and answer 422/409.
 
 type Body = Record<string, unknown>
 
-const bad = (message: string) => new HttpError(400, message)
+const bad = (message: string, code?: RejectCode) => new HttpError(400, message, code)
 
 function allow(b: Body, keys: string[]): void {
-  for (const key of Object.keys(b)) if (!keys.includes(key)) throw bad(`Unknown field "${key}".`)
+  for (const key of Object.keys(b)) if (!keys.includes(key)) throw bad(`Unknown field "${key}".`, 'unknown_field')
 }
 
 function text(b: Body, key: string): string {

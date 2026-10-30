@@ -1,4 +1,9 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { EventEmitter } from 'node:events'
+import type { ServerResponse } from 'node:http'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { EventLog } from '../eventLog'
+import { silentLogger } from '../log'
+import { eventsRoute } from './sse'
 import type { ChangeEvent } from '../../src/workforce/api'
 import { openEventStream, type SseStream } from '../test/sseClient'
 import { startTestServer, type TestServer } from '../test/helpers'
@@ -133,3 +138,41 @@ describe('GET /api/events', () => {
     expect(closed).toBe('closed')
   })
 })
+
+describe('stream limits and CORS', () => {
+  it('SSE gets CORS headers for an allowed origin', async () => {
+    s = await startTestServer()
+    const x = await stream({ headers: { origin: 'http://localhost:5173' } })
+    expect(x.response.headers.get('access-control-allow-origin')).toBe('http://localhost:5173')
+    expect(x.response.headers.get('x-request-id')).toMatch(/^[0-9a-f]{12}$/)
+  })
+
+  it('limits open event streams', async () => {
+    s = await startTestServer({}, { maxStreams: 2 })
+    const first = await stream()
+    await stream()
+    const third = await fetch(`${s.url}/api/events`)
+    expect(third.status).toBe(503)
+    expect(await third.json()).toEqual({ error: 'Too many open event streams (limit 2).' })
+    first.close()
+    await poll(() => s!.app.streams.size < 2)
+    const again = await fetch(`${s.url}/api/events`)
+    expect(again.status).toBe(200)
+    await again.body?.cancel()
+  })
+
+  it('ends a stream whose buffer passes the limit', () => {
+    const events = new EventLog({ capacity: 10, now: () => '2026-10-31T09:00:00.000Z', bootId: 'b', log: silentLogger })
+    const streams = new Set<ServerResponse>()
+    const warn = vi.fn()
+    const route = eventsRoute({ events, heartbeatMs: 60000, streams, now: () => 'x', log: { ...silentLogger, warn }, maxBufferBytes: 10 })
+    const req = Object.assign(new EventEmitter(), { headers: {} })
+    const res = Object.assign(new EventEmitter(), { writeHead: vi.fn(), write: vi.fn(() => false), writableLength: 11, end: vi.fn() })
+    void route.handler({ req: req as never, res: res as never, url: new URL('http://x/api/events'), params: {}, body: undefined, requestId: 'r' })
+    expect(res.end).toHaveBeenCalled()
+    expect(streams.size).toBe(0)
+    expect(warn).toHaveBeenCalledWith('Closed a slow event stream (over 1 MB buffered).')
+    expect(events.listenerCount()).toBe(0)
+  })
+})
+

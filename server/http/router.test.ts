@@ -1,8 +1,8 @@
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { silentLogger } from '../log'
-import { createRouter, type RouterOptions, type Route } from './router'
+import { createRouter, HttpError, type RouterOptions, type Route } from './router'
 
 let server: Server | null = null
 afterEach(async () => { await new Promise((r) => (server ? server.close(() => r(null)) : r(null))); server = null })
@@ -105,3 +105,55 @@ describe('createRouter', () => {
     expect((await fetch(`${url}/nope`)).headers.get('x-test')).toBe('yes')
   })
 })
+
+describe('request ids and rejection reports', () => {
+  it('adds a request id to every reply', async () => {
+    const url = await start()
+    const a = await fetch(`${url}/items/1`)
+    const b = await fetch(`${url}/nope`)
+    const ids = [a.headers.get('x-request-id'), b.headers.get('x-request-id')]
+    for (const id of ids) expect(id).toMatch(/^[0-9a-f]{12}$/)
+    expect(ids[0]).not.toBe(ids[1])
+  })
+
+  it('passes the request id to guards and handlers', async () => {
+    let seen = ''
+    let handled = ''
+    server = createServer(createRouter({
+      routes: [{ method: 'GET', path: '/x', handler: ({ requestId }) => { handled = requestId; return { status: 200, body: {} } } }],
+      guards: [(_req, _url, info) => { seen = info.requestId; return null }],
+      log: silentLogger,
+    }))
+    await new Promise<void>((r) => server!.listen(0, '127.0.0.1', r))
+    const res = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/x`)
+    expect(seen).toBe(res.headers.get('x-request-id'))
+    expect(handled).toBe(seen)
+  })
+
+  it('a 204 reply has no body or content type', async () => {
+    const url = await start({ guards: [() => ({ status: 204, body: null })] })
+    const res = await fetch(`${url}/items/1`)
+    expect(res.status).toBe(204)
+    expect(await res.text()).toBe('')
+    expect(res.headers.get('content-type')).toBeNull()
+  })
+
+  it('reports coded HttpErrors to onRejected', async () => {
+    const onRejected = vi.fn()
+    const url = await start({
+      onRejected,
+      routes: [...routes, { method: 'POST', path: '/coded', body: 'none', handler: () => { throw new HttpError(400, 'x', 'unknown_field') } }, { method: 'POST', path: '/uncoded', body: 'none', handler: () => { throw new HttpError(400, 'x') } }],
+    })
+    const coded = await fetch(`${url}/coded`, { method: 'POST' })
+    expect(onRejected).toHaveBeenCalledTimes(1)
+    expect(onRejected).toHaveBeenLastCalledWith({ status: 400, code: 'unknown_field', method: 'POST', path: '/coded', requestId: coded.headers.get('x-request-id') })
+    await post(url, '{}', 'text/plain')
+    expect(onRejected).toHaveBeenLastCalledWith(expect.objectContaining({ status: 415, code: 'content_type', path: '/echo' }))
+    await post(url, JSON.stringify({ big: 'x'.repeat(70000) }))
+    expect(onRejected).toHaveBeenLastCalledWith(expect.objectContaining({ status: 413, code: 'body_too_large' }))
+    const count = onRejected.mock.calls.length
+    await fetch(`${url}/uncoded`, { method: 'POST' })
+    expect(onRejected).toHaveBeenCalledTimes(count)
+  })
+})
+

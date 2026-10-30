@@ -7,14 +7,14 @@ import { parseWorkspaces, type WorkspaceEntry } from './workspaces'
 
 export type RuntimeKind = 'mock' | 'claude'
 
-export type ServerConfig = { host: string; port: number; dataDir: string; runtime: RuntimeKind; taskTimeoutMs: number; cancelGraceMs: number; approvalTimeoutMs: number; maxMessageBytes: number; maxTaskOutputBytes: number; eventBufferSize: number; auditLogMaxBytes: number; workspaceRoot: string | null; workspaces: WorkspaceEntry[]; allowedTools: string[]; credentialsConfigured: boolean }
+export type ServerConfig = { host: string; port: number; dataDir: string; runtime: RuntimeKind; taskTimeoutMs: number; cancelGraceMs: number; approvalTimeoutMs: number; maxMessageBytes: number; maxTaskOutputBytes: number; eventBufferSize: number; auditLogMaxBytes: number; workspaceRoot: string | null; workspaces: WorkspaceEntry[]; allowedTools: string[]; allowedOrigins: string[]; credentialsConfigured: boolean }
 
 export type Env = Record<string, string | undefined>
 
 type Parsed = { ok: true; config: ServerConfig } | { ok: false; errors: string[] }
 
 /** Every environment variable parseConfig reads, in .env.example order. */
-export const CONFIG_VARIABLES: readonly string[] = ['HOST', 'PORT', 'DATA_DIR', 'WORKSPACE_ROOT', 'WORKSPACES', 'RUNTIME', 'TASK_TIMEOUT_MS', 'CANCEL_GRACE_MS', 'APPROVAL_TIMEOUT_MS', 'ALLOWED_TOOLS', 'MAX_MESSAGE_BYTES', 'MAX_TASK_OUTPUT_BYTES', 'EVENT_BUFFER_SIZE', 'AUDIT_LOG_MAX_BYTES', 'ANTHROPIC_API_KEY']
+export const CONFIG_VARIABLES: readonly string[] = ['HOST', 'PORT', 'ALLOWED_ORIGINS', 'DATA_DIR', 'WORKSPACE_ROOT', 'WORKSPACES', 'RUNTIME', 'TASK_TIMEOUT_MS', 'CANCEL_GRACE_MS', 'APPROVAL_TIMEOUT_MS', 'ALLOWED_TOOLS', 'MAX_MESSAGE_BYTES', 'MAX_TASK_OUTPUT_BYTES', 'EVENT_BUFFER_SIZE', 'AUDIT_LOG_MAX_BYTES', 'ANTHROPIC_API_KEY']
 
 /** Environment names that suggest skipping permission checks. This server has no such switch, so their presence is an error rather than being ignored. */
 export const REFUSED_ENV_PATTERN = /DANGEROUSLY|BYPASS_?PERMISSIONS|SKIP_?PERMISSIONS|PERMISSION_MODE/i
@@ -46,6 +46,26 @@ export function parseConfig(env: Env, cwd: string = process.cwd()): Parsed {
   if (rawPort !== undefined) {
     if (/^\d+$/.test(rawPort) && Number(rawPort) <= 65535) port = Number(rawPort)
     else errors.push(`PORT must be an integer from 0 to 65535 (got "${rawPort}").`)
+  }
+
+  let allowedOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173']
+  const rawOrigins = read(env, 'ALLOWED_ORIGINS')
+  if (rawOrigins !== undefined) {
+    const items = [...new Set(rawOrigins.split(',').map((o) => o.trim()).filter((o) => o !== ''))]
+    if (items.length === 1 && items[0] === 'none') allowedOrigins = []
+    else if (items.length > 16) errors.push('ALLOWED_ORIGINS lists more than 16 origins.')
+    else {
+      const problems: string[] = []
+      for (const entry of items) {
+        if (entry === '*' || entry === 'null') { problems.push(`ALLOWED_ORIGINS must list exact origins; "${entry}" is not allowed.`); continue }
+        let url: URL
+        try { url = new URL(entry) } catch { problems.push(`ALLOWED_ORIGINS entry "${entry}" is not a valid origin (expected something like http://localhost:5173).`); continue }
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') problems.push(`ALLOWED_ORIGINS entry "${entry}" must use http or https.`)
+        else if (url.origin !== entry) problems.push(`ALLOWED_ORIGINS entry "${entry}" must be an origin only, like ${url.origin}.`)
+      }
+      if (problems.length > 0) errors.push(...problems)
+      else allowedOrigins = items
+    }
   }
 
   const dataDir = resolve(cwd, read(env, 'DATA_DIR') ?? 'data')
@@ -98,7 +118,7 @@ export function parseConfig(env: Env, cwd: string = process.cwd()): Parsed {
   if (errors.length > 0) return { ok: false, errors }
   return {
     ok: true,
-    config: { host, port, dataDir, runtime: rawRuntime as RuntimeKind, taskTimeoutMs, cancelGraceMs, approvalTimeoutMs, maxMessageBytes, maxTaskOutputBytes, eventBufferSize, auditLogMaxBytes, workspaceRoot: ws.workspaceRoot, workspaces: ws.workspaces, allowedTools, credentialsConfigured: (read(env, 'ANTHROPIC_API_KEY') ?? '').trim() !== '' },
+    config: { host, port, dataDir, runtime: rawRuntime as RuntimeKind, taskTimeoutMs, cancelGraceMs, approvalTimeoutMs, maxMessageBytes, maxTaskOutputBytes, eventBufferSize, auditLogMaxBytes, workspaceRoot: ws.workspaceRoot, workspaces: ws.workspaces, allowedTools, allowedOrigins, credentialsConfigured: (read(env, 'ANTHROPIC_API_KEY') ?? '').trim() !== '' },
   }
 }
 

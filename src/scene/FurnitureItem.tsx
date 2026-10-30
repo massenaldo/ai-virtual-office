@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ThreeEvent } from '@react-three/fiber'
 import { FURNITURE_SPECS } from '../layout/catalog'
 import type { Furniture, FurnitureType, Selection } from '../layout/types'
@@ -36,9 +36,16 @@ export type FurnitureItemProps = {
   onTransformStart(target: NonNullable<Selection>): void
   onTransform(intent: TransformIntent): void
   onTransformEnd(): void
+  /** Outline the desk of the selected agent (outside edit mode). */
+  agentHighlight?: boolean
+  /** Workforce mode: clicking this desk opens or assigns its agent. Never passed in edit mode. */
+  onDeskClick?: () => void
 }
 
-export default function FurnitureItem({ item, floorPlan, editing, selected, invalid, onSelect, onTransformStart, onTransform, onTransformEnd }: FurnitureItemProps) {
+/** A press that moved further than this many pixels was an orbit or pan, not a click. */
+const CLICK_SLOP = 4
+
+export default function FurnitureItem({ item, floorPlan, editing, selected, invalid, onSelect, onTransformStart, onTransform, onTransformEnd, agentHighlight = false, onDeskClick }: FurnitureItemProps) {
   const [hovered, setHovered] = useState(false)
   const target = { kind: 'furniture' as const, id: item.id }
   const drag = useFloorDrag({
@@ -49,9 +56,20 @@ export default function FurnitureItem({ item, floorPlan, editing, selected, inva
     onEnd: onTransformEnd,
   })
   const spec = FURNITURE_SPECS[item.type]
-  const highlight = highlightFor({ editing, selected, hovered, invalid })
+  const deskClick = !editing && onDeskClick ? onDeskClick : undefined
+  const highlight = highlightFor({ editing, selected, hovered, invalid, agent: agentHighlight, deskHover: hovered && !!deskClick })
+  // The pointer cursor belongs to a hovered clickable desk; reset it when the desk stops being clickable or unmounts.
+  useEffect(() => {
+    if (!deskClick || !hovered) return
+    document.body.style.cursor = 'pointer'
+    return () => { document.body.style.cursor = '' }
+  }, [deskClick, hovered])
   const pointer = editing ? {
     onClick: (e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); onSelect() },
+    onPointerOver: (e: ThreeEvent<PointerEvent>) => { e.stopPropagation(); setHovered(true) },
+    onPointerOut: () => setHovered(false),
+  } : deskClick ? {
+    onClick: (e: ThreeEvent<MouseEvent>) => { if (e.delta > CLICK_SLOP) return; e.stopPropagation(); deskClick() },
     onPointerOver: (e: ThreeEvent<PointerEvent>) => { e.stopPropagation(); setHovered(true) },
     onPointerOut: () => setHovered(false),
   } : {}

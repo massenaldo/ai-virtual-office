@@ -124,3 +124,13 @@ textarea.field-input{resize:vertical;min-height:54px;font-family:inherit}
 .activity-list time{color:#6e7a8c;font-variant-numeric:tabular-nums}
 .nav-item .nav-badge{margin-left:auto;font-size:9px;color:#8e9bad}
 @media(max-width:1000px){.scene-card.workforce .editor-body{grid-template-columns:1fr}.scene-card.workforce .canvas-wrap{order:-1;height:480px}.editor-panel.workforce{border:0;border-top:1px solid #29323e}}
+/* Desk status markers */
+.desk-marker-layer{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:11}
+.desk-marker{position:absolute;left:0;top:0;visibility:hidden;will-change:transform;pointer-events:none;display:flex;align-items:center;gap:5px;white-space:nowrap;font:600 9px 'DM Sans Variable','DM Sans',sans-serif;color:#25303b;background:#ffffffe6;border:1px solid #c3ccd0;border-radius:999px;padding:3px 7px 3px 5px;box-shadow:0 2px 6px #1d2a3522}
+.desk-marker.selected{border-color:#a89af5;box-shadow:0 0 0 2px #a89af566}
+.desk-marker-dot{width:7px;height:7px;border-radius:50%;background:#8e9bad;flex-shrink:0}
+.desk-marker.thinking .desk-marker-dot{background:#a89af5}
+.desk-marker.working .desk-marker-dot{background:#65c995}
+.desk-marker.waiting .desk-marker-dot{background:#e5b878}
+.desk-marker.error .desk-marker-dot{background:#ff8a8a}
+.desk-marker.completed .desk-marker-dot{background:#83c1df}

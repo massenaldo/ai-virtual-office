@@ -21,3 +21,14 @@ export function screenPosition(point: THREE.Vector3, camera: THREE.Camera, size:
     visible: projected.z > -1 && projected.z < 1,
   }
 }
+
+/** A status marker over a desk. Scene-side shape, so the scene never imports workforce types. */
+export type DeskMarker = { id: string; label: string; status: string; x: number; z: number; selected: boolean }
+
+export const MARKER_HEIGHT = 1.45
+export const PLAN_MARKER_HEIGHT = 0.35
+
+/** Where a desk marker floats: just above the monitor in 3D, just above the floor in floor plan. */
+export function markerAnchor(m: Pick<DeskMarker, 'x' | 'z'>, floorPlan: boolean, out = new THREE.Vector3()): THREE.Vector3 {
+  return out.set(m.x, floorPlan ? PLAN_MARKER_HEIGHT : MARKER_HEIGHT, m.z)
+}

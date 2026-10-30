@@ -12,7 +12,9 @@ import { hasUnsavedChanges } from './editor/status'
 import { summarizeLayout } from './editor/summary'
 import { useEditorActions, type DialogRequest } from './editor/useEditorActions'
 import { useLayoutEditor } from './editor/useLayoutEditor'
-import WorkforcePanel from './workforce/ui/WorkforcePanel'
+import type { FocusRequest } from './scene/OfficeScene'
+import WorkforcePanel, { selectedAgentId, type WorkforceView } from './workforce/ui/WorkforcePanel'
+import { deskClickTarget, deskMarkers, deskStatus } from './workforce/view'
 import { useWorkforce } from './workforce/useWorkforce'
 
 const LOAD_PROBLEM_MESSAGE = {
@@ -38,7 +40,10 @@ export default function App() {
   const [snap, setSnap] = useState(true)
   const [dialog, setDialog] = useState<DialogRequest | null>(null)
   const [agentsOpen, setAgentsOpen] = useState(false)
+  const [agentView, setAgentView] = useState<WorkforceView>({ kind: 'list' })
+  const [focus, setFocus] = useState<FocusRequest | null>(null)
   const workforce = useWorkforce()
+  const closeAgents = () => { setAgentsOpen(false); setAgentView({ kind: 'list' }) }
   const summary = summarizeLayout(state.layout)
   const issues = useMemo(() => findIssues(state.layout), [state.layout])
   const actions = useEditorActions(editor, setDialog, snap)
@@ -68,7 +73,7 @@ export default function App() {
   // Layout editing and the agents panel are separate modes; turning one on turns the other off.
   const toggleEditing = () => {
     if (editing) return requestLeaveEditing()
-    setAgentsOpen(false)
+    closeAgents()
     setEditing(true)
   }
   const openAgents = () => (editing ? requestLeaveEditing(() => setAgentsOpen(true)) : setAgentsOpen(true))
@@ -78,13 +83,26 @@ export default function App() {
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
   }, [unsaved])
+  // Agents in the office: markers whenever not editing; the selected agent's desk and desk clicks only with the panel open.
+  const selectedAgent = agentsOpen && workforce ? workforce.state.agents.find((a) => a.id === selectedAgentId(agentView)) : undefined
+  const workforceState = workforce?.state
+  const markers = useMemo(() => (workforceState && !editing ? deskMarkers(state.layout, workforceState, selectedAgent?.id ?? null) : undefined), [workforceState, editing, state.layout, selectedAgent?.id])
+  const highlightDeskId = selectedAgent && deskStatus(state.layout, selectedAgent).kind === 'assigned' ? selectedAgent.deskId : null
+  const onDeskClick = agentsOpen && workforce ? (deskId: string) => {
+    const target = deskClickTarget(workforce.state, deskId)
+    setAgentView(target.kind === 'open' ? { kind: 'detail', agentId: target.agentId } : target)
+  } : undefined
+  const focusDesk = (deskId: string) => {
+    const desk = state.layout.furniture.find((f) => f.id === deskId)
+    if (desk) setFocus({ x: desk.x, z: desk.z, key: Date.now() })
+  }
   useEditorShortcuts(editing && !dialog, { undo, redo, delete: actions.requestDelete, escape: actions.escape })
 
   return <main className="app-shell">
     <aside className="sidebar">
       <div className="brand"><div className="brand-mark"><Boxes size={21} /></div><div><strong>AI WORKSPACE</strong><span>VIRTUAL OFFICE</span></div></div>
       <div className="workspace-label">WORKSPACE</div>
-      <button className={agentsOpen ? 'nav-item' : 'nav-item active'} onClick={() => setAgentsOpen(false)} aria-pressed={!agentsOpen}><Building2 size={17}/> Office</button>
+      <button className={agentsOpen ? 'nav-item' : 'nav-item active'} onClick={closeAgents} aria-pressed={!agentsOpen}><Building2 size={17}/> Office</button>
       <button className={agentsOpen ? 'nav-item active' : 'nav-item'} onClick={openAgents} aria-pressed={agentsOpen}><Bot size={17}/> AI Agents {workforce && <span className="nav-badge">{workforce.state.agents.length}</span>}</button>
       <button className="nav-item" onClick={() => setShowTeams(!showTeams)}><Users size={17}/> Departments <ChevronDown size={14} className="nav-end"/></button>
       {showTeams && <div className="team-list">{summary.departments.map((d) => <div className="team-item" key={d.id}><span className="team-dot" style={{ background: d.color }}/><span>{d.label}</span><small>{d.desks}</small></div>)}</div>}
@@ -102,13 +120,14 @@ export default function App() {
           onSave={editor.save} onResetLayout={confirmResetLayout} onResetView={() => setViewKey((k) => k + 1)}/></div>
         <div className="editor-body">
         {editing && <OutlinerPanel layout={state.layout} selection={state.selection} issues={issues} onSelect={actions.select} onAddRoom={actions.addRoom} onAddFurniture={actions.addFurniture}/>}
-        <div className="canvas-wrap"><OfficeScene layout={state.layout} floorPlan={floorPlan} viewKey={viewKey} editing={editing} selection={state.selection} issues={issues} onSelect={actions.select} onTransformStart={actions.transformStart} onTransform={actions.transform} onTransformEnd={actions.transformEnd}/>
+        <div className="canvas-wrap"><OfficeScene layout={state.layout} floorPlan={floorPlan} viewKey={viewKey} editing={editing} selection={state.selection} issues={issues} onSelect={actions.select} onTransformStart={actions.transformStart} onTransform={actions.transform} onTransformEnd={actions.transformEnd}
+          markers={markers} highlightDeskId={highlightDeskId} onDeskClick={onDeskClick} focus={focus}/>
           {editor.loadProblem && <div className="scene-notice" role="alert"><AlertTriangle size={15}/><span>{LOAD_PROBLEM_MESSAGE[editor.loadProblem]}</span><button className="notice-close" onClick={editor.dismissLoadProblem} aria-label="Dismiss"><X size={14}/></button></div>}
           {editor.status === 'save-failed' && <div className="scene-notice error" role="alert"><AlertTriangle size={15}/><span>Save failed: {editor.saveError} Your changes are still here; try saving again.</span></div>}
           {workforce?.loadProblem && <div className="scene-notice" role="alert"><AlertTriangle size={15}/><span>{WORKFORCE_PROBLEM_MESSAGE[workforce.loadProblem]}</span><button className="notice-close" onClick={workforce.actions.dismissLoadProblem} aria-label="Dismiss"><X size={14}/></button></div>}
           {workforce?.saveError && <div className="scene-notice error" role="alert"><AlertTriangle size={15}/><span>Agent changes couldn't be saved: {workforce.saveError}</span></div>}
           <div className="scene-hint"><Maximize2 size={13}/> {editing ? <>Click to select <span>·</span> Drag to move <span>·</span> Drag empty space to {floorPlan ? 'pan' : 'orbit'}</> : <>Drag to orbit <span>·</span> Scroll to zoom <span>·</span> Right-drag to pan</>}</div><div className="scene-badge"><span className="badge-icon"><Building2 size={16}/></span><div><strong>AI Software Company</strong><small>Realistic 3D workspace</small></div></div></div>
-        {agentsOpen && <WorkforcePanel workforce={workforce} layout={state.layout} openDialog={setDialog}/>}
+        {agentsOpen && <WorkforcePanel workforce={workforce} layout={state.layout} view={agentView} onViewChange={setAgentView} onFocusDesk={focusDesk} openDialog={setDialog}/>}
         {editing && <PropertiesPanel layout={state.layout} selection={state.selection} issues={issues} onRoomChange={actions.roomChange} onFurnitureChange={actions.furnitureChange} onRotate={actions.rotate} onRotateRoom={actions.rotateRoom} onDuplicate={actions.duplicate} onDelete={actions.requestDelete}/>}
         </div>
         <div className="scene-footer"><div className="legend"><span className="legend-swatch"/><span>Office departments</span><span className="legend-glass"/><span>Glass partitions</span></div><span className="scene-footer-right"><CheckCircle2 size={14}/> {summary.roomCount} rooms · {state.layout.furniture.length} furniture items</span></div>

@@ -17,3 +17,20 @@ describe('highlightFor', () => {
     expect(highlightFor({ editing: true, selected: false, hovered: true, invalid: false })).toEqual({ color: HIGHLIGHT.hover, width: 2 })
   })
 })
+
+describe('agent and desk hover highlights', () => {
+  const base = { editing: false, selected: false, hovered: false, invalid: false }
+  it('agent highlight shows outside edit mode', () => {
+    expect(highlightFor({ ...base, agent: true })).toEqual({ color: HIGHLIGHT.agent, width: 3 })
+    expect(HIGHLIGHT.agent).toBe('#a89af5')
+  })
+  it('desk hover shows outside edit mode only without agent', () => {
+    expect(highlightFor({ ...base, deskHover: true })).toEqual({ color: HIGHLIGHT.hover, width: 2 })
+    expect(highlightFor({ ...base, deskHover: true, agent: true })).toEqual({ color: HIGHLIGHT.agent, width: 3 })
+    expect(highlightFor(base)).toBeNull()
+  })
+  it('edit mode ignores the agent flags', () => {
+    expect(highlightFor({ ...base, editing: true, agent: true, deskHover: true })).toBeNull()
+    expect(highlightFor({ ...base, editing: true, selected: true, agent: true })).toEqual({ color: HIGHLIGHT.selected, width: 3 })
+  })
+})

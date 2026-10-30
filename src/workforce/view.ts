@@ -1,6 +1,7 @@
 import { DEPARTMENTS } from '../layout/catalog'
 import type { OfficeLayout } from '../layout/types'
-import { activeTaskFor } from './operations'
+import type { DeskMarker } from '../scene/labels'
+import { activeTaskFor, agentAtDesk } from './operations'
 import type { Agent, AgentActivity, AgentDepartment, AgentStatus, AgentTask, TaskStatus, WorkforceState } from './types'
 
 // Pure helpers for the workforce panel, so the components only render.
@@ -22,7 +23,7 @@ export function filterAgents(agents: Agent[], f: AgentFilter): Agent[] {
 }
 
 /** 'Desk 03' for the default desk-03 naming; any other id is shown as is. */
-const deskLabel = (id: string) => (/^desk-\d+$/.test(id) ? `Desk ${id.slice(5)}` : id)
+export const deskLabel = (id: string) => (/^desk-\d+$/.test(id) ? `Desk ${id.slice(5)}` : id)
 
 const roomName = (layout: OfficeLayout, roomId: string | null) => (roomId === null ? OPEN_FLOOR : layout.rooms.find((r) => r.id === roomId)?.name ?? OPEN_FLOOR)
 
@@ -67,4 +68,22 @@ export function removalPrompt(s: WorkforceState, agentId: string): { title: stri
 /** Local 24-hour HH:MM:SS. en-GB pins the digits and separators; the time zone stays the viewer's. */
 export function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+}
+
+/** One marker per agent whose desk exists in the layout, in layout order. Missing desks get none (the panel flags them). */
+export function deskMarkers(layout: OfficeLayout, s: WorkforceState, selectedAgentId: string | null): DeskMarker[] {
+  return layout.furniture.flatMap((f) => {
+    const agent = f.type === 'desk' ? agentAtDesk(s, f.id) : undefined
+    return agent ? [{ id: agent.id, label: agent.name, status: agent.status, x: f.x, z: f.z, selected: agent.id === selectedAgentId }] : []
+  })
+}
+
+export function deskClickTarget(s: WorkforceState, deskId: string): { kind: 'open'; agentId: string } | { kind: 'assign'; deskId: string } {
+  const agent = agentAtDesk(s, deskId)
+  return agent ? { kind: 'open', agentId: agent.id } : { kind: 'assign', deskId }
+}
+
+/** Candidates for a free desk: agents without one first, then the rest (who would move). */
+export function assignableAgents(s: WorkforceState): Agent[] {
+  return [...s.agents.filter((a) => a.deskId === null), ...s.agents.filter((a) => a.deskId !== null)]
 }

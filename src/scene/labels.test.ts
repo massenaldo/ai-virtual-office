@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
-import { labelAnchor, screenPosition } from './labels'
+import { labelAnchor, markerAnchor, screenPosition } from './labels'
 
 const room = { x: 2, z: -3, wallHeight: 2.5 }
 
@@ -30,5 +30,12 @@ describe('screenPosition', () => {
 
   it('hides points behind the camera', () => {
     expect(screenPosition(new THREE.Vector3(0, 0, 20), camera, size).visible).toBe(false)
+  })
+})
+
+describe('markerAnchor', () => {
+  it('floats above a desk in 3D and just above the floor in plan', () => {
+    expect(markerAnchor({ x: 1, z: 2 }, false).toArray()).toEqual([1, 1.45, 2])
+    expect(markerAnchor({ x: 1, z: 2 }, true).toArray()).toEqual([1, 0.35, 2])
   })
 })

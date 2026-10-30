@@ -80,3 +80,14 @@ export function fitOverview(layout: Framing, aspect: number, fovDeg = OVERVIEW_F
   }
   return { target: [target.x, target.y, target.z], distance }
 }
+
+/** Distance from a focused desk along the overview direction: close enough to read the room, far enough to see its neighbours. */
+export const FOCUS_DISTANCE = 9
+
+/** Camera pose that centres a floor point: the overview angle in 3D, straight down (as the plan camera) in floor plan. */
+export function focusPose(point: { x: number; z: number }, floorPlan: boolean): { target: [number, number, number]; position: [number, number, number] } {
+  if (floorPlan) return { target: [point.x, 0, point.z], position: [point.x, 40, point.z + 0.001] }
+  const t = new THREE.Vector3(point.x, OVERVIEW_TARGET[1], point.z)
+  const p = t.clone().addScaledVector(OVERVIEW_DIRECTION, FOCUS_DISTANCE)
+  return { target: [t.x, t.y, t.z], position: [p.x, p.y, p.z] }
+}

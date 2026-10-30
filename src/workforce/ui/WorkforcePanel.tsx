@@ -1,25 +1,31 @@
-import { useState } from 'react'
 import type { DialogRequest } from '../../editor/useEditorActions'
 import type { OfficeLayout } from '../../layout/types'
 import type { Workforce } from '../useWorkforce'
-import { removalPrompt } from '../view'
+import { deskLabel, removalPrompt } from '../view'
 import AgentDetail from './AgentDetail'
 import AgentForm from './AgentForm'
 import AgentList from './AgentList'
+import AssignDesk from './AssignDesk'
 
-export type WorkforcePanelProps = { workforce: Workforce | null; layout: OfficeLayout; openDialog(d: DialogRequest): void }
+export type WorkforceView = { kind: 'list' } | { kind: 'create' } | { kind: 'detail' | 'edit'; agentId: string } | { kind: 'assign'; deskId: string }
 
-type View = { kind: 'list' } | { kind: 'create' } | { kind: 'detail' | 'edit'; agentId: string }
+export type WorkforcePanelProps = { workforce: Workforce | null; layout: OfficeLayout; view: WorkforceView; onViewChange(v: WorkforceView): void; onFocusDesk(deskId: string): void; openDialog(d: DialogRequest): void }
 
-export default function WorkforcePanel({ workforce, layout, openDialog }: WorkforcePanelProps) {
-  const [view, setView] = useState<View>({ kind: 'list' })
+/** The agent the panel is showing, if any; the office highlights its desk. */
+export function selectedAgentId(view: WorkforceView): string | null {
+  return view.kind === 'detail' || view.kind === 'edit' ? view.agentId : null
+}
+
+export default function WorkforcePanel({ workforce, layout, view, onViewChange: setView, onFocusDesk, openDialog }: WorkforcePanelProps) {
   const header = <div className="panel-title">AI agents <span className="mock-badge" title="Tasks are simulated in the browser. No AI is run.">Mock mode</span></div>
   if (!workforce) return <aside className="editor-panel workforce" aria-label="AI agents">{header}<p className="panel-hint">Loading agents…</p></aside>
 
   const { state, actions } = workforce
-  const agent = view.kind === 'detail' || view.kind === 'edit' ? state.agents.find((a) => a.id === view.agentId) : undefined
-  // A removed agent (from another view or a restore) falls back to the list.
-  const shown: View = (view.kind === 'detail' || view.kind === 'edit') && !agent ? { kind: 'list' } : view
+  const agentId = selectedAgentId(view)
+  const agent = agentId ? state.agents.find((a) => a.id === agentId) : undefined
+  const assignDesk = view.kind === 'assign' ? layout.furniture.find((f) => f.id === view.deskId && f.type === 'desk') : undefined
+  // A removed agent or a desk that left the layout falls back to the list.
+  const shown: WorkforceView = (agentId && !agent) || (view.kind === 'assign' && !assignDesk) ? { kind: 'list' } : view
   const list = () => setView({ kind: 'list' })
 
   const remove = (id: string) => {
@@ -31,7 +37,7 @@ export default function WorkforcePanel({ workforce, layout, openDialog }: Workfo
 
   return <aside className="editor-panel workforce" aria-label="AI agents">
     {header}
-    {shown.kind === 'list' && <AgentList state={state} layout={layout} onOpen={(agentId) => setView({ kind: 'detail', agentId })} onCreate={() => setView({ kind: 'create' })} onRestoreDemo={actions.restoreDemoAgents}/>}
+    {shown.kind === 'list' && <AgentList state={state} layout={layout} onOpen={(id) => setView({ kind: 'detail', agentId: id })} onCreate={() => setView({ kind: 'create' })} onRestoreDemo={actions.restoreDemoAgents}/>}
     {shown.kind === 'create' && <>
       <div className="field-group-label">New agent</div>
       <AgentForm onCancel={list} onSubmit={(input) => {
@@ -50,6 +56,12 @@ export default function WorkforcePanel({ workforce, layout, openDialog }: Workfo
         return null
       }}/>
     </>}
-    {shown.kind === 'detail' && agent && <AgentDetail key={agent.id} workforce={workforce} layout={layout} agent={agent} onBack={list} onEdit={() => setView({ kind: 'edit', agentId: agent.id })} onRemove={() => remove(agent.id)}/>}
+    {shown.kind === 'detail' && agent && <AgentDetail key={agent.id} workforce={workforce} layout={layout} agent={agent} onBack={list} onEdit={() => setView({ kind: 'edit', agentId: agent.id })} onRemove={() => remove(agent.id)} onFocusDesk={() => agent.deskId && onFocusDesk(agent.deskId)}/>}
+    {shown.kind === 'assign' && assignDesk && <AssignDesk key={assignDesk.id} state={state} layout={layout} deskId={assignDesk.id} deskLabel={deskLabel(assignDesk.id)} onCancel={list} onAssign={(id) => {
+      const r = actions.assignDesk(id, assignDesk.id)
+      if (!r.ok) return r.error
+      setView({ kind: 'detail', agentId: id })
+      return null
+    }}/>}
   </aside>
 }

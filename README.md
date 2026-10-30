@@ -51,6 +51,13 @@ You can also run `./scripts/vo.sh [sessionID]` directly without Claude Code.
   - Overlapping or out-of-bounds placement is outlined in red and listed in the properties panel (a warning, not a block)
   - Undo/redo (⌘/Ctrl+Z, ⌘/Ctrl+Shift+Z), Delete/Backspace, and Esc to clear the selection or cancel a drag
 - **Saving:** the complete layout (rooms, furniture, office settings) is stored in the browser's `localStorage` under `ai-virtual-office:layout:v1` and restored on the next start. The status shows Saved, Unsaved changes, or Save failed. You're asked before leaving edit mode or closing the tab with unsaved changes
+- **AI agent workforce** (click **AI Agents** in the sidebar). **Tasks are simulated in the browser: nothing calls Claude or any other AI, makes network requests or runs processes.** The panel shows a **Mock mode** badge, demo agents are labelled **Demo**, and simulated task events are labelled **Simulated**.
+  - Six demo agents (Project Management, Tech Lead, Backend, Frontend, QA, DevOps) seated at default desks, added once on first start; **Restore demo agents** brings back any you removed
+  - Filter agents by department and status; create, edit and remove agents (removing one with task history asks first)
+  - Assign one agent per desk from a picker grouped by room, or unassign
+  - Start a simulated task: the agent goes Thinking, then Working, then Completed (about 6 seconds), with an activity timeline. **Cancel task**, and demo buttons for **Simulate waiting** / **Resume** / **Simulate error**
+  - In the office: a status marker over each assigned desk (3D and floor plan); the selected agent's desk is outlined and **Focus desk** moves the camera to it; with the panel open, click a desk to open its agent, or click a free desk to assign one
+  - Layout editing and the agents panel are separate modes; opening the panel with unsaved layout changes asks you to save or discard first
 - Local-only development server bound to 127.0.0.1
 
 ## Layout data
@@ -62,10 +69,21 @@ The scene renders a typed, versioned `OfficeLayout` (`src/layout/types.ts`). It 
 - Saved data that can't be read (damaged, or from a newer version) is never overwritten silently: the app shows the default layout and copies the old value to `ai-virtual-office:layout:v1:backup` before the next save.
 - **Reset layout** restores the default office after a confirmation and can be undone.
 
+## Agent data
+
+Agents, tasks and recent activity are typed, versioned data in `src/workforce/` (`types.ts`), kept apart from the layout.
+
+- **Storage:** `localStorage` key `ai-virtual-office:workforce:v1`, saved automatically on every change. Agent changes are not part of the layout's undo history and never touch the layout key.
+- **Validation:** loading checks every record and every reference (task ↔ agent, activity ↔ agent and task, one agent per desk, one active task per agent). Data that can't be read is copied to `ai-virtual-office:workforce:v1:backup`, a notice is shown, and the panel starts empty; nothing is overwritten without a backup.
+- **History:** the newest 300 activity events are kept; tasks are kept.
+- **Desks:** an agent refers to a desk by its furniture ID. If that desk is no longer in the layout (deleted, or a different layout), the agent keeps the reference and shows **Workstation unavailable** until you pick another desk.
+- **Reload:** a task that was running when the page closed is marked failed with "Interrupted by page reload (simulated run)".
+- **Runtime boundary:** a `RuntimeProvider` interface (`src/workforce/runtime/types.ts`) separates the app from whatever executes a task. `MockRuntimeProvider` is the browser-timer simulation used today. `ClaudeRuntimeProvider` is a placeholder that only reports "Not available: requires a server-side runtime." A real Claude runtime must run on a server: the browser must never hold Anthropic credentials or API keys, or get shell or process access.
+
 ## Development
 
 ```bash
-npm test        # unit tests (Vitest) for the layout model, storage, history and editor logic
+npm test        # unit tests (Vitest) for the layout model, storage, history, editor logic, and the agent workforce (operations, storage, mock runtime, controller, view helpers)
 npm run build   # type-check and production build
 npm run preview # serve the production build at http://127.0.0.1:4173
 ```
@@ -86,7 +104,14 @@ Add `?stats` to the URL (for example http://localhost:5173/?stats) to show a sma
 - Furniture is not instanced: each item draws one mesh per material, so very large layouts (hundreds of items) cost more draw calls. Room shells are merged into one mesh per material.
 - Lighting has no real-time ambient occlusion or post-processing; soft contact shadows stand in for it.
 - `npm run build` warns that the main JavaScript chunk is larger than 500 kB (three.js); the app is not code-split yet.
+- **Agents are a simulation.** No real Claude or Agent SDK execution exists yet; task results are canned text that says so.
+- Agent data is per browser and per origin, like the layout: `localhost:5173` and `127.0.0.1:5173` keep separate agents.
+- One task per agent at a time, with no queue. Finished tasks are never trimmed, only activity is.
+- In the floor plan, a room's label can sit over the centre-row desks and hide the selected agent's desk outline; the marker's ring still shows which desk it is.
+- Desk clicks in the office have no keyboard equivalent; the desk picker in the agent panel does the same thing.
+- In 3D, clicking a wall or glass in front of a desk opens that desk's agent.
+- If saved agent data is damaged a second time while an older backup exists, the older backup is kept and the new damaged data is not copied.
 
 ## Next milestone
 
-AI agent runtimes and task orchestration, built on top of the saved office layout.
+A real, server-side agent runtime behind the existing `RuntimeProvider` boundary, replacing the mock for agents that opt in.

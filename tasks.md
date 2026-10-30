@@ -1,7 +1,7 @@
 # Milestone 3A — AI Agent Workforce UI and Mock Runtime: Tasks
 
 **Spec:** [`plan.md`](plan.md) (Milestone 3A brief). This file is my working task list for that spec.
-**Status:** Approved, 2026-10-30. Q1–Q4 answered (see "Decisions" at the end). Stages A–C are done (C in review); Stage D is next.
+**Status:** Approved, 2026-10-30. Q1–Q4 answered (see "Decisions" at the end). All stages are done; Stage D (verification, README, [final report](docs/milestone-3a-report.md)) is in review.
 **Earlier milestones:** [`docs/milestones/milestone-2-tasks.md`](docs/milestones/milestone-2-tasks.md) and [`milestone-2-plan.md`](docs/milestones/milestone-2-plan.md).
 
 ## What this milestone is
@@ -95,10 +95,10 @@ The office gets a staff of **AI agents** you can manage. You can create agents, 
 
 ## Stage D — Verify, document, report
 
-- [ ] All 12 checks in plan.md Phase 9, run in the browser on the dev server and on `vite preview`, plus `/vo`.
-- [ ] Malformed workforce storage test in the browser: the app loads, shows a notice, and backs up the data.
-- [ ] README: Workforce section, mock-runtime disclaimer, storage keys, limitations.
-- [ ] Final report (plan.md "Final report"), including the explicit statement that execution is simulated.
+- [x] All 12 checks in plan.md Phase 9, run in the browser on the dev server and on `vite preview`, plus `/vo`.
+- [x] Malformed workforce storage test in the browser: the app loads, shows a notice, and backs up the data.
+- [x] README: Workforce section, mock-runtime disclaimer, storage keys, limitations.
+- [x] Final report (plan.md "Final report"), including the explicit statement that execution is simulated.
 - [ ] PR
 
 ## Decisions (answered 2026-10-30)

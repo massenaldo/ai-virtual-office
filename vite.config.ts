@@ -11,5 +11,6 @@ export default defineConfig({
     strictPort: true,
   },
   // Let tests read stylesheets as text (Vitest replaces CSS with an empty string by default).
-  test: { css: true },
+  // No persistent module cache: it keys on a file's own text, so import.meta.glob lists in the source-scanning tests went stale when files were added.
+  test: { css: true, fsModuleCache: false },
 })

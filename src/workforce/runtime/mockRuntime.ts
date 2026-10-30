@@ -70,6 +70,7 @@ export class MockRuntimeProvider implements RuntimeProvider, MockDemoControls {
     return () => this.listeners.delete(listener)
   }
 
+  /** Drops every run without events; tasks it was running stay active in state until cancelTask or a reload ends them. */
   dispose(): void {
     this.runs.forEach((run) => this.clearTimers(run))
     this.runs.clear()

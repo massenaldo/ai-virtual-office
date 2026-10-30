@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activeTaskFor, addActivity, applyRuntimeEvent, assignDesk, assignTask, createAgent, emptyWorkforce, INTERRUPTED_MESSAGE, recoverInterruptedTasks, removeAgent, updateAgent, type AgentInput } from './operations'
+import { activeTaskFor, addActivity, applyRuntimeEvent, assignDesk, assignTask, cancelTask, createAgent, emptyWorkforce, INTERRUPTED_MESSAGE, recoverInterruptedTasks, removeAgent, updateAgent, type AgentInput } from './operations'
 import type { AgentTask, WorkforceState } from './types'
 
 const NOW = '2026-10-30T09:00:00.000Z'
@@ -236,5 +236,25 @@ describe('recoverInterruptedTasks', () => {
   it('returns the same state when nothing is running', () => {
     const { state } = withTask()
     expect(recoverInterruptedTasks(state, LATER)).toBe(state)
+  })
+})
+
+describe('cancelTask', () => {
+  it('ends an active task the runtime no longer tracks', () => {
+    const { state, agentId, taskId } = withTask()
+    const s = cancelTask(state, taskId, LATER)
+    expect(s.tasks[0]).toMatchObject({ status: 'cancelled', completedAt: LATER })
+    expect(s.agents[0].status).toBe('idle')
+    expect(s.activities.at(-1)).toMatchObject({ type: 'task-cancelled', taskId, source: 'mock' })
+    expect(activeTaskFor(s, agentId)).toBeUndefined()
+    expect(assignTask(s, agentId, { title: 'Next', description: '' }, LATER).ok).toBe(true)
+  })
+
+  it('returns the same state for finished or unknown tasks', () => {
+    const { state, taskId } = withTask()
+    const cancelled = cancelTask(state, taskId, LATER)
+    expect(cancelTask(cancelled, taskId, LATER)).toBe(cancelled)
+    expect(applyRuntimeEvent(cancelled, { type: 'cancelled', taskId }, LATER, 'mock')).toBe(cancelled)
+    expect(cancelTask(state, 'task-x', LATER)).toBe(state)
   })
 })

@@ -115,7 +115,7 @@ export function loadWorkforce(storage: KV | null, now: string): WorkforceLoadRes
   try {
     if (storage.getItem(WORKFORCE_BACKUP_KEY) === null) storage.setItem(WORKFORCE_BACKUP_KEY, json)
   } catch {
-    // The notice still shows; the original value stays under the main key until the next save.
+    // The notice still shows; saveWorkforce retries the backup and refuses to overwrite the value without one.
   }
   return { state: emptyWorkforce(), seeded: false, problem }
 }
@@ -125,6 +125,9 @@ export function saveWorkforce(storage: KV | null, s: WorkforceState): { ok: true
   const json = serializeWorkforce(s)
   if (!readStored(json)) return { ok: false, error: 'The workforce data failed validation and was not saved.' }
   try {
+    const current = storage.getItem(WORKFORCE_STORAGE_KEY)
+    // Saves run on every change, so an unreadable value must be backed up before it is overwritten; if that fails, nothing is written.
+    if (current !== null && !readStored(current) && storage.getItem(WORKFORCE_BACKUP_KEY) === null) storage.setItem(WORKFORCE_BACKUP_KEY, current)
     storage.setItem(WORKFORCE_STORAGE_KEY, json)
     return { ok: true }
   } catch (error) {

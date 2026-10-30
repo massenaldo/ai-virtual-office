@@ -139,6 +139,24 @@ describe('saveWorkforce', () => {
     expect(saveWorkforce(s, createDemoWorkforce(NOW))).toEqual({ ok: false, error: 'QuotaExceededError' })
   })
 
+  it('keeps unreadable data when its backup cannot be written', () => {
+    const data = new Map([[WORKFORCE_STORAGE_KEY, '{bad']])
+    const s = {
+      getItem: (k: string) => data.get(k) ?? null,
+      setItem: (k: string, v: string) => { if (k === WORKFORCE_BACKUP_KEY) throw new Error('full'); data.set(k, v) },
+    }
+    const loaded = loadWorkforce(s, NOW)
+    expect(loaded.problem).toBe('corrupt')
+    expect(saveWorkforce(s, createDemoWorkforce(NOW))).toEqual({ ok: false, error: 'full' })
+    expect(data.get(WORKFORCE_STORAGE_KEY)).toBe('{bad')
+  })
+
+  it('backs up unreadable data before overwriting it', () => {
+    const s = memoryStorage({ [WORKFORCE_STORAGE_KEY]: '{bad' })
+    expect(saveWorkforce(s, createDemoWorkforce(NOW)).ok).toBe(true)
+    expect(s.data.get(WORKFORCE_BACKUP_KEY)).toBe('{bad')
+  })
+
   it('reports missing storage', () => {
     expect(saveWorkforce(null, createDemoWorkforce(NOW))).toEqual({ ok: false, error: 'Browser storage is not available.' })
   })

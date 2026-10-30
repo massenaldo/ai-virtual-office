@@ -159,6 +159,13 @@ export function applyRuntimeEvent(s: WorkforceState, event: RuntimeEvent, now: s
   return applyTransition(s, task, transitionFor(event, task, now, source))
 }
 
+/** Ends an active task in state, whether or not a runtime still tracks it. Call it alongside runtime.cancel; the runtime's own cancelled event is then ignored. */
+export function cancelTask(s: WorkforceState, taskId: string, now: string): WorkforceState {
+  const task = s.tasks.find((t) => t.id === taskId)
+  const agent = task && s.agents.find((a) => a.id === task.agentId)
+  return agent ? applyRuntimeEvent(s, { type: 'cancelled', taskId }, now, sourceOf(agent)) : s
+}
+
 /** After a reload no timer is running any more, so started tasks are marked failed instead of hanging forever. Queued tasks never started and stay. */
 export function recoverInterruptedTasks(s: WorkforceState, now: string): WorkforceState {
   return s.tasks.reduce((state, task) => {

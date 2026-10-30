@@ -1,10 +1,11 @@
 import type { MockDemoControls, RuntimeAvailability, RuntimeEvent } from '../../src/workforce/runtime/types'
 import type { ActivitySource, Agent, AgentTask, ApprovalDecision, TaskRuntime } from '../../src/workforce/types'
+import type { ResolvedWorkspace } from '../workspaces'
 
 // Runtime contract v2, server side. It reuses the browser's RuntimeEvent so one event stream feeds applyRuntimeEvent.
 
-/** What a runtime needs to run one task. Stage C adds the resolved workspace and the tool policy here. */
-export type StartContext = { agent: Agent; signal: AbortSignal }
+/** What a runtime needs to run one task. workspace.path is a real path and stays on the server. */
+export type StartContext = { agent: Agent; signal: AbortSignal; workspace: ResolvedWorkspace | null }
 
 export type StartOutcome = { ok: true; executionId: string; sessionId: string | null } | { ok: false; error: string }
 

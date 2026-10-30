@@ -6,20 +6,40 @@ import { messageTruncatedMarker, outputLimitMarker, truncateUtf8 } from './limit
 import type { Logger } from './log'
 import { sourceFor, type DemoProvider, type ServerRuntimeProvider } from './runtime/types'
 import type { WorkforceStore } from './store'
+import { resolveWorkspace, WORKSPACE_ID_RE, type ResolvedWorkspace, type WorkspaceReason } from './workspaces'
 
-export type ManagerError = { ok: false; code: 'not_found' | 'invalid' | 'conflict' | 'unavailable'; error: string }
+export type ManagerError = { ok: false; code: 'not_found' | 'invalid' | 'conflict' | 'unavailable' | 'bad_request'; error: string }
 export type ManagerResult<T = Record<never, never>> = ({ ok: true } & T) | ManagerError
 
-export type LifecycleAction = 'task.start' | 'task.cancel' | 'task.force_cancelled' | 'task.timeout' | 'approval.decided' | 'approval.timeout'
+export type LifecycleAction = 'task.start' | 'task.cancel' | 'task.force_cancelled' | 'task.timeout' | 'approval.requested' | 'approval.decided' | 'approval.timeout' | 'tool.allowed' | 'tool.denied' | 'tool.asked' | 'workspace.rejected' | 'runtime.note'
+
+export type LifecycleActor = 'api' | 'system' | 'runtime'
+
+/** What the manager reports about itself: ids and reason codes only, never request bodies or paths. */
+export type LifecycleEvent = { action: LifecycleAction; actor: LifecycleActor; taskId: string | null; agentId: string; requestId?: string; workspaceId?: string; tool?: string; decision?: string; reason?: string; detail?: string }
+
+/** Passed by the HTTP layer: a request id marks the call as coming from the API rather than a timer. */
+export type CallOptions = { requestId?: string }
+
+const actorFor = (opts: CallOptions): LifecycleActor => (opts.requestId ? 'api' : 'system')
+
+const WORKSPACE_COPY = (reason: WorkspaceReason, id: unknown): string => {
+  switch (reason) {
+    case 'not_configured': return 'Workspaces are not configured on this server.'
+    case 'invalid_id': return '"workspaceId" must be a workspace id: 1–32 lowercase letters, digits or hyphens.'
+    case 'unknown': return `Unknown workspace "${String(id)}".`
+    default: return `Workspace "${String(id)}" is not available.`
+  }
+}
 
 export type TaskManagerOptions = {
   store: WorkforceStore
   provider: ServerRuntimeProvider
-  config: Pick<ServerConfig, 'taskTimeoutMs' | 'cancelGraceMs' | 'approvalTimeoutMs' | 'maxMessageBytes' | 'maxTaskOutputBytes'>
+  config: Pick<ServerConfig, 'taskTimeoutMs' | 'cancelGraceMs' | 'approvalTimeoutMs' | 'maxMessageBytes' | 'maxTaskOutputBytes' | 'workspaceRoot' | 'workspaces'>
   now: () => string
   log: Logger
-  /** Stage C audit seam: called for each lifecycle step the manager takes on its own. */
-  onLifecycle?: (e: { action: LifecycleAction; taskId: string; agentId: string; detail?: string }) => void
+  /** Audit seam: called for each lifecycle step the manager takes. */
+  onLifecycle?: (e: LifecycleEvent) => void
 }
 
 export const APPROVAL_TIMEOUT_MESSAGE = (ms: number) => `No approval decision within ${Math.round(ms / 1000)} s`
@@ -28,7 +48,7 @@ export const unavailableMessage = (kind: TaskRuntime, reason: string) => `The ${
 type Timer = ReturnType<typeof setTimeout>
 
 /** Everything the manager holds for one task while it is active; deleted when the task ends. */
-type Run = { abort: AbortController; taskTimer: Timer | null; approvalTimer: Timer | null; approvalId: string | null; graceTimer: Timer | null; outputBytes: number; outputClosed: boolean; launched: boolean }
+type Run = { abort: AbortController; taskTimer: Timer | null; approvalTimer: Timer | null; approvalId: string | null; graceTimer: Timer | null; outputBytes: number; outputClosed: boolean; launched: boolean; workspace: ResolvedWorkspace | null }
 
 const isDemo = (p: ServerRuntimeProvider): p is DemoProvider => 'requestApproval' in p && 'forceError' in p
 
@@ -66,30 +86,51 @@ export class TaskManager {
     return this.state.tasks.find((t) => t.id === id)
   }
 
-  private report(action: LifecycleAction, task: AgentTask, detail?: string): void {
-    this.onLifecycle?.({ action, taskId: task.id, agentId: task.agentId, detail })
+  /** Builds the event without undefined keys, so consumers can tell "absent" from "empty". */
+  private report(action: LifecycleAction, task: AgentTask, x: { actor?: LifecycleActor; requestId?: string; tool?: string; decision?: string; reason?: string; detail?: string } = {}): void {
+    const event: LifecycleEvent = { action, actor: x.actor ?? 'system', taskId: task.id, agentId: task.agentId }
+    if (x.requestId !== undefined) event.requestId = x.requestId
+    if (task.workspaceId !== null) event.workspaceId = task.workspaceId
+    for (const key of ['tool', 'decision', 'reason', 'detail'] as const) if (x[key] !== undefined) event[key] = x[key]
+    this.onLifecycle?.(event)
   }
 
   /** Synchronous: the task is `starting` when this returns, and the provider start continues in the background. */
-  startTask(agentId: string, input: TaskInput): ManagerResult<{ task: AgentTask }> {
+  startTask(agentId: string, input: TaskInput, opts: CallOptions & { workspaceId?: string | null } = {}): ManagerResult<{ task: AgentTask }> {
     const availability = this.provider.availability
     if (!availability.available) return { ok: false, code: 'unavailable', error: unavailableMessage(this.provider.kind, availability.reason) }
     const agent = this.state.agents.find((a) => a.id === agentId)
     if (!agent) return { ok: false, code: 'not_found', error: 'Agent not found.' }
     const invalid = validateTaskInput(input)
     if (invalid) return { ok: false, code: 'invalid', error: invalid }
+
+    let workspace: ResolvedWorkspace | null = null
+    const requested = opts.workspaceId ?? null
+    if (requested !== null) {
+      const resolved = resolveWorkspace(this.config, requested)
+      if (!resolved.ok) {
+        const event: LifecycleEvent = { action: 'workspace.rejected', actor: actorFor(opts), taskId: null, agentId, reason: resolved.reason }
+        if (opts.requestId !== undefined) event.requestId = opts.requestId
+        // Only a well-formed id is safe to record; anything else could be attacker-chosen text.
+        if (WORKSPACE_ID_RE.test(requested)) event.workspaceId = requested
+        this.onLifecycle?.(event)
+        return { ok: false, code: resolved.reason === 'invalid_id' ? 'bad_request' : 'invalid', error: WORKSPACE_COPY(resolved.reason, requested) }
+      }
+      workspace = resolved.workspace
+    }
+    if (this.provider.kind === 'claude' && workspace === null) return { ok: false, code: 'invalid', error: 'The claude runtime needs a workspace.' }
     if (activeTaskFor(this.state, agentId)) return { ok: false, code: 'conflict', error: `${agent.name} already has an active task.` }
 
-    const assigned = assignTask(this.state, agentId, input, this.now(), { runtime: this.provider.kind, timeoutMs: this.config.taskTimeoutMs })
+    const assigned = assignTask(this.state, agentId, input, this.now(), { runtime: this.provider.kind, timeoutMs: this.config.taskTimeoutMs, workspaceId: workspace?.id ?? null })
     if (!assigned.ok) return { ok: false, code: 'invalid', error: assigned.error }
     this.store.commit(assigned.state)
     this.store.commit(markStarting(this.state, assigned.taskId, this.now()))
 
-    const run: Run = { abort: new AbortController(), taskTimer: null, approvalTimer: null, approvalId: null, graceTimer: null, outputBytes: 0, outputClosed: false, launched: false }
+    const run: Run = { abort: new AbortController(), taskTimer: null, approvalTimer: null, approvalId: null, graceTimer: null, outputBytes: 0, outputClosed: false, launched: false, workspace }
     this.runs.set(assigned.taskId, run)
     run.taskTimer = setTimeout(() => this.onTaskTimeout(assigned.taskId), this.config.taskTimeoutMs)
     const task = this.task(assigned.taskId)!
-    this.report('task.start', task)
+    this.report('task.start', task, { actor: actorFor(opts), requestId: opts.requestId })
     void this.launch(assigned.taskId)
     return { ok: true, task }
   }
@@ -103,7 +144,7 @@ export class TaskManager {
     run.launched = true
     let outcome
     try {
-      outcome = await this.provider.start(task, { agent, signal: run.abort.signal })
+      outcome = await this.provider.start(task, { agent, signal: run.abort.signal, workspace: run.workspace })
     } catch (error) {
       outcome = { ok: false as const, error: `Runtime failed to start: ${error instanceof Error ? error.message : String(error)}` }
     }
@@ -180,7 +221,7 @@ export class TaskManager {
     this.report('approval.timeout', task)
   }
 
-  cancelTask(taskId: string): ManagerResult<{ task: AgentTask }> {
+  cancelTask(taskId: string, opts: CallOptions = {}): ManagerResult<{ task: AgentTask }> {
     const task = this.task(taskId)
     if (!task) return { ok: false, code: 'not_found', error: 'Task not found.' }
     if (!isActiveTask(task)) return { ok: false, code: 'conflict', error: 'Task is not active.' }
@@ -190,7 +231,7 @@ export class TaskManager {
     this.store.commit(requestCancel(this.state, taskId, this.now(), this.source))
     if (run?.taskTimer) clearTimeout(run.taskTimer)
     if (run) run.taskTimer = null
-    this.report('task.cancel', task)
+    this.report('task.cancel', task, { actor: actorFor(opts), requestId: opts.requestId })
 
     if (this.task(taskId)?.status === 'cancelled') {
       this.finalize(taskId)
@@ -219,7 +260,7 @@ export class TaskManager {
     this.report('task.force_cancelled', task)
   }
 
-  decideApproval(taskId: string, approvalId: string, decision: ApprovalDecision): ManagerResult<{ task: AgentTask }> {
+  decideApproval(taskId: string, approvalId: string, decision: ApprovalDecision, opts: CallOptions = {}): ManagerResult<{ task: AgentTask }> {
     const task = this.task(taskId)
     if (!task) return { ok: false, code: 'not_found', error: 'Task not found.' }
     if (task.status !== 'waiting_for_approval' || !task.pendingApproval) return { ok: false, code: 'conflict', error: 'Task is not waiting for approval.' }
@@ -227,17 +268,19 @@ export class TaskManager {
     this.store.commit(recordDecision(this.state, taskId, approvalId, decision, this.now(), this.source))
     const run = this.runs.get(taskId)
     if (run) this.clearApproval(run)
-    this.report('approval.decided', task, decision)
+    this.report('approval.decided', task, { actor: actorFor(opts), requestId: opts.requestId, decision })
     // The provider's reaction (the mock answers at once) arrives as events and is applied before this returns.
     this.provider.respondToApproval(taskId, approvalId, decision)
     return { ok: true, task: this.task(taskId) ?? task }
   }
 
-  removeAgent(agentId: string): ManagerResult<{ cancelledTaskId: string | null }> {
+  removeAgent(agentId: string, opts: CallOptions = {}): ManagerResult<{ cancelledTaskId: string | null }> {
     if (!this.state.agents.some((a) => a.id === agentId)) return { ok: false, code: 'not_found', error: 'Agent not found.' }
+    const activeTask = activeTaskFor(this.state, agentId)
     const { state, cancelledTaskId } = dropAgent(this.state, agentId)
     this.store.commit(state)
     if (cancelledTaskId) {
+      if (activeTask) this.report('task.cancel', activeTask, { actor: actorFor(opts), requestId: opts.requestId, detail: 'agent removed' })
       const run = this.runs.get(cancelledTaskId)
       this.provider.cancel(cancelledTaskId)
       run?.abort.abort()

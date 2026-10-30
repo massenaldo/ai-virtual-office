@@ -26,7 +26,11 @@ export type ErrorResponse = { error: string }
 export type CreateAgentBody = AgentInput
 export type PatchAgentBody = Partial<AgentInput>
 export type DeskBody = { deskId: string | null }
-export type CreateTaskBody = { title: string; description?: string }
+export type CreateTaskBody = { title: string; description?: string; workspaceId?: string | null }
+export type WorkspacesResponse = { workspaces: { id: string }[] }
+
+/** Send on every POST, PUT, PATCH and DELETE, even without a body: the server refuses state changes without it (Stage C). */
+export const MUTATION_HEADERS = { 'Content-Type': 'application/json' } as const
 export type ApprovalBody = { approvalId: string; decision: ApprovalDecision }
 
 /** Event ids are '<boot>:<seq>': seq rises within one server run, and the boot part tells a client its id predates a restart. */

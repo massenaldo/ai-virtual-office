@@ -42,13 +42,14 @@ export function parseDesk(b: Body): { deskId: string | null } {
   return { deskId: v }
 }
 
-export function parseCreateTask(b: Body): TaskInput {
-  for (const key of Object.keys(b)) {
-    if (key === 'workspaceId') throw bad('"workspaceId" is not supported yet.')
-    if (key !== 'title' && key !== 'description') throw bad(`Unknown field "${key}".`)
-  }
+export type CreateTaskRequest = TaskInput & { workspaceId: string | null }
+
+export function parseCreateTask(b: Body): CreateTaskRequest {
+  allow(b, ['title', 'description', 'workspaceId'])
   const description = 'description' in b ? text(b, 'description') : ''
-  return { title: text(b, 'title'), description }
+  const workspaceId = b.workspaceId === undefined ? null : b.workspaceId
+  if (workspaceId !== null && typeof workspaceId !== 'string') throw bad('"workspaceId" must be a string or null.')
+  return { title: text(b, 'title'), description, workspaceId }
 }
 
 export function parseApproval(b: Body): { approvalId: string; decision: ApprovalDecision } {

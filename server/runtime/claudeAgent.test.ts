@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createDemoWorkforce } from '../../src/workforce/demo'
 import { assignTask } from '../../src/workforce/operations'
+import { testStartContext } from '../test/startContext'
 import { ClaudeAgentRuntimeProvider } from './claudeAgent'
 
 describe('ClaudeAgentRuntimeProvider', () => {
@@ -13,7 +14,7 @@ describe('ClaudeAgentRuntimeProvider', () => {
     const off = provider.subscribe((e) => heard.push(e))
     expect(provider.kind).toBe('claude')
     expect(provider.availability).toEqual({ available: false, reason: 'Claude Agent SDK not installed' })
-    expect(await provider.start(r.state.tasks[0], { agent: demo.agents[0], signal: new AbortController().signal })).toEqual({ ok: false, error: 'Claude Agent SDK not installed' })
+    expect(await provider.start(r.state.tasks[0], testStartContext(demo.agents[0]))).toEqual({ ok: false, error: 'Claude Agent SDK not installed' })
     expect(provider.status(r.state.tasks[0].id)).toEqual({ state: 'unknown' })
     expect(provider.result(r.state.tasks[0].id)).toBeNull()
     provider.cancel('task-1')

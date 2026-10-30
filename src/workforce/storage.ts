@@ -31,7 +31,7 @@ export function serializeWorkforce(s: WorkforceState): string {
   return JSON.stringify({
     schemaVersion: s.schemaVersion,
     agents: s.agents.map((a) => ({ id: a.id, name: a.name, role: a.role, department: a.department, deskId: a.deskId, status: a.status, currentTaskId: a.currentTaskId, runtimeMode: a.runtimeMode, demo: a.demo, createdAt: a.createdAt, lastActivityAt: a.lastActivityAt })),
-    tasks: s.tasks.map((t) => ({ id: t.id, agentId: t.agentId, title: t.title, description: t.description, status: t.status, createdAt: t.createdAt, startedAt: t.startedAt, completedAt: t.completedAt, resultSummary: t.resultSummary, errorMessage: t.errorMessage, executionId: t.executionId, timeoutMs: t.timeoutMs, runtime: t.runtime, sessionId: t.sessionId, endedReason: t.endedReason, pendingApproval: t.pendingApproval && { id: t.pendingApproval.id, tool: t.pendingApproval.tool, summary: t.pendingApproval.summary, requestedAt: t.pendingApproval.requestedAt } })),
+    tasks: s.tasks.map((t) => ({ id: t.id, agentId: t.agentId, title: t.title, description: t.description, status: t.status, createdAt: t.createdAt, startedAt: t.startedAt, completedAt: t.completedAt, resultSummary: t.resultSummary, errorMessage: t.errorMessage, executionId: t.executionId, timeoutMs: t.timeoutMs, runtime: t.runtime, workspaceId: t.workspaceId, sessionId: t.sessionId, endedReason: t.endedReason, pendingApproval: t.pendingApproval && { id: t.pendingApproval.id, tool: t.pendingApproval.tool, summary: t.pendingApproval.summary, requestedAt: t.pendingApproval.requestedAt } })),
     activities: s.activities.slice(-ACTIVITY_LIMIT).map((a) => ({
       id: a.id, agentId: a.agentId, taskId: a.taskId, type: a.type, message: a.message, timestamp: a.timestamp, source: a.source,
       ...(a.type === 'desk-assigned' ? { deskId: a.deskId } : {}),
@@ -64,6 +64,9 @@ function parseTask(v: unknown): AgentTask | null {
   if (!isObject(v) || !isText(v.id) || !isText(v.agentId) || !isText(v.title) || typeof v.description !== 'string' || !isOneOf(v.status, TASK_STATUSES)) return null
   if (!isTime(v.createdAt) || !isTimeOrNull(v.startedAt) || !isTimeOrNull(v.completedAt) || !isTextOrNull(v.resultSummary) || !isTextOrNull(v.errorMessage) || !isTextOrNull(v.executionId)) return null
   if (!(v.timeoutMs === null || (Number.isInteger(v.timeoutMs) && (v.timeoutMs as number) > 0)) || !isOneOf(v.runtime, TASK_RUNTIMES) || !isTextOrNull(v.sessionId)) return null
+  // Saved before workspaces existed: no field means no workspace.
+  const workspaceId = v.workspaceId === undefined ? null : v.workspaceId
+  if (!isTextOrNull(workspaceId)) return null
   const status = v.status
   const active = status === 'queued' || status === 'starting' || status === 'running' || status === 'waiting_for_approval' || status === 'cancelling'
   // An end reason exactly when the task has ended; a pending approval exactly while it waits for one.
@@ -72,7 +75,7 @@ function parseTask(v: unknown): AgentTask | null {
   if ((status === 'waiting_for_approval') !== (pendingApproval !== null) || (v.pendingApproval !== null && !pendingApproval)) return null
   return {
     id: v.id, agentId: v.agentId, title: v.title, description: v.description, status, createdAt: v.createdAt, startedAt: v.startedAt, completedAt: v.completedAt,
-    resultSummary: v.resultSummary, errorMessage: v.errorMessage, executionId: v.executionId, timeoutMs: v.timeoutMs as number | null, runtime: v.runtime, sessionId: v.sessionId,
+    resultSummary: v.resultSummary, errorMessage: v.errorMessage, executionId: v.executionId, timeoutMs: v.timeoutMs as number | null, runtime: v.runtime, workspaceId, sessionId: v.sessionId,
     endedReason: v.endedReason as TaskEndReason | null, pendingApproval,
   }
 }

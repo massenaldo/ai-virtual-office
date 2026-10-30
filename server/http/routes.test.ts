@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { startTestServer, type TestServer } from '../test/helpers'
+import { makeWorkspaceRoot } from '../test/workspaces'
 
 let s: TestServer
 const SLOW = { thinkingMs: 60000, workingMs: 60000 }
@@ -92,7 +93,7 @@ describe('tasks', () => {
     await startForge()
     expect(await s.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'Again' })).toMatchObject({ status: 409, body: { error: 'Forge already has an active task.' } })
     expect(await s.api('POST', '/api/agents/agent-demo-frontend/tasks', { title: '' })).toMatchObject({ status: 422, body: { error: 'Title is required.' } })
-    expect(await s.api('POST', '/api/agents/agent-demo-frontend/tasks', { title: 'x', workspaceId: 'sandbox' })).toMatchObject({ status: 400, body: { error: '"workspaceId" is not supported yet.' } })
+    expect(await s.api('POST', '/api/agents/agent-demo-frontend/tasks', { title: 'x', workspaceId: 'sandbox' })).toMatchObject({ status: 422, body: { error: 'Workspaces are not configured on this server.' } })
     expect(await s.api('POST', '/api/agents/agent-demo-frontend/tasks', { title: 'x', command: 'rm -rf /' })).toMatchObject({ status: 400, body: { error: 'Unknown field "command".' } })
     expect(await s.api('POST', '/api/agents/agent-demo-frontend/tasks', { title: 5 })).toMatchObject({ status: 400, body: { error: '"title" must be a string.' } })
     expect(await s.api('POST', '/api/agents/agent-x/tasks', { title: 'x' })).toMatchObject({ status: 404, body: { error: 'Agent not found.' } })
@@ -162,3 +163,44 @@ describe('the claude runtime', () => {
     }
   })
 })
+
+describe('workspaces', () => {
+  let ws: ReturnType<typeof makeWorkspaceRoot>
+  let w: TestServer
+  beforeEach(async () => {
+    ws = makeWorkspaceRoot(['sandbox'])
+    w = await startTestServer(ws.env, { mockTimings: SLOW })
+  })
+  afterEach(async () => { await w.close(); ws.cleanup() })
+  const taskCount = async () => (await w.api('GET', '/api/state')).body.state.tasks.length as number
+
+  it('lists workspace ids only', async () => {
+    const r = await w.api('GET', '/api/workspaces')
+    expect(r.body).toEqual({ workspaces: [{ id: 'sandbox' }] })
+    expect(JSON.stringify(r.body)).not.toContain(ws.root)
+  })
+
+  it('starts a task in a workspace', async () => {
+    const r = await w.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'Build API', workspaceId: 'sandbox' })
+    expect(r.status).toBe(202)
+    expect(r.body.task.workspaceId).toBe('sandbox')
+    const none = await w.api('POST', '/api/agents/agent-demo-frontend/tasks', { title: 'x', workspaceId: null })
+    expect(none.status).toBe(202)
+    expect(none.body.task.workspaceId).toBeNull()
+  })
+
+  it('rejects bad workspaces with exact copy and creates no task', async () => {
+    const before = await taskCount()
+    expect(await w.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'x', workspaceId: 'nope' })).toMatchObject({ status: 422, body: { error: 'Unknown workspace "nope".' } })
+    expect(await w.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'x', workspaceId: '../etc' })).toMatchObject({ status: 400, body: { error: '"workspaceId" must be a workspace id: 1–32 lowercase letters, digits or hyphens.' } })
+    expect(await w.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'x', workspaceId: 5 })).toMatchObject({ status: 400, body: { error: '"workspaceId" must be a string or null.' } })
+    expect(await taskCount()).toBe(before)
+  })
+
+  it('never exposes the workspace path', async () => {
+    await w.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'Build API', workspaceId: 'sandbox' })
+    await w.api('POST', '/api/agents/agent-demo-frontend/tasks', { title: 'x', workspaceId: 'nope' })
+    for (const path of ['/api/state', '/api/health', '/api/workspaces']) expect(JSON.stringify((await w.api('GET', path)).body)).not.toContain(ws.root)
+  })
+})
+

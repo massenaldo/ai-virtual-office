@@ -1,6 +1,6 @@
 import type { ServerResponse } from 'node:http'
 import pkg from '../../package.json' with { type: 'json' }
-import type { StateResponse } from '../../src/workforce/api'
+import type { StateResponse, WorkspacesResponse } from '../../src/workforce/api'
 import { restoreDemoAgents } from '../../src/workforce/demo'
 import { assignDesk, createAgent, updateAgent } from '../../src/workforce/operations'
 import type { ServerConfig } from '../config'
@@ -24,7 +24,7 @@ export type RouteDeps = {
   streams: Set<ServerResponse>
 }
 
-const STATUS: Record<ManagerError['code'], number> = { not_found: 404, invalid: 422, conflict: 409, unavailable: 503 }
+const STATUS: Record<ManagerError['code'], number> = { not_found: 404, invalid: 422, conflict: 409, unavailable: 503, bad_request: 400 }
 
 /** A failed manager call becomes the HTTP error with its own message. */
 function must<T extends { ok: boolean }>(r: T): Extract<T, { ok: true }> {
@@ -54,6 +54,15 @@ export function createRoutes(deps: RouteDeps): Route[] {
       // The state and the last event id are read in the same tick, so a client can apply exactly the events after it.
       handler: () => {
         const body: StateResponse = { state: store.state, lastEventId: events.lastEventId, loadProblem: store.load.problem, preserved: store.load.preserved, saveError: store.saveError }
+        return { status: 200, body }
+      },
+    },
+    {
+      method: 'GET',
+      path: '/api/workspaces',
+      // Ids only, so the task form can offer a choice; paths never leave the server.
+      handler: () => {
+        const body: WorkspacesResponse = { workspaces: config.workspaces.map(({ id }) => ({ id })) }
         return { status: 200, body }
       },
     },
@@ -107,8 +116,8 @@ export function createRoutes(deps: RouteDeps): Route[] {
       path: '/api/agents/:id/tasks',
       body: 'json',
       handler: ({ params, body }) => {
-        const input = parseCreateTask(body as Record<string, unknown>)
-        return { status: 202, body: { task: must(manager.startTask(params.id, input)).task } }
+        const { workspaceId, ...input } = parseCreateTask(body as Record<string, unknown>)
+        return { status: 202, body: { task: must(manager.startTask(params.id, input, { workspaceId })).task } }
       },
     },
     {

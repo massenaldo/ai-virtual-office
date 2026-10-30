@@ -3,6 +3,7 @@ import type { RuntimeEvent } from '../../src/workforce/runtime/types'
 import { createDemoWorkforce } from '../../src/workforce/demo'
 import { assignTask } from '../../src/workforce/operations'
 import type { AgentTask } from '../../src/workforce/types'
+import { testStartContext } from '../test/startContext'
 import { ServerMockProvider } from './mockProvider'
 
 const NOW = '2026-10-31T09:00:00.000Z'
@@ -17,7 +18,7 @@ function newTask(): AgentTask {
 
 let provider: ServerMockProvider
 let events: RuntimeEvent[]
-const start = (task: AgentTask) => provider.start(task, { agent: forge, signal: new AbortController().signal })
+const start = (task: AgentTask) => provider.start(task, testStartContext(forge))
 
 beforeEach(() => {
   vi.useFakeTimers()

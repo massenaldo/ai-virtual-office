@@ -14,7 +14,7 @@ function withAgent(input: AgentInput = NOVA, s: WorkforceState = emptyWorkforce(
 }
 
 function task(agentId: string, patch: Partial<AgentTask> = {}): AgentTask {
-  return { id: 'task-1', agentId, title: 'Draft sprint plan', description: '', status: 'running', createdAt: NOW, startedAt: NOW, completedAt: null, resultSummary: null, errorMessage: null, executionId: 'exec-1', timeoutMs: null, runtime: 'mock', sessionId: null, endedReason: null, pendingApproval: null, ...patch }
+  return { id: 'task-1', agentId, title: 'Draft sprint plan', description: '', status: 'running', createdAt: NOW, startedAt: NOW, completedAt: null, resultSummary: null, errorMessage: null, executionId: 'exec-1', timeoutMs: null, runtime: 'mock', workspaceId: null, sessionId: null, endedReason: null, pendingApproval: null, ...patch }
 }
 
 describe('createAgent', () => {
@@ -147,7 +147,7 @@ const approval = (taskId: string, approvalId = 'approval-1') => ({ type: 'approv
 describe('assignTask', () => {
   it('creates a queued v2 task and points the agent at it', () => {
     const { state, agentId, taskId } = withTask()
-    expect(state.tasks[0]).toMatchObject({ id: taskId, agentId, status: 'queued', title: 'Draft sprint plan', description: 'Two-week plan', createdAt: NOW, startedAt: null, completedAt: null, executionId: null, timeoutMs: null, runtime: 'mock', sessionId: null, endedReason: null, pendingApproval: null })
+    expect(state.tasks[0]).toMatchObject({ id: taskId, agentId, status: 'queued', title: 'Draft sprint plan', description: 'Two-week plan', createdAt: NOW, startedAt: null, completedAt: null, executionId: null, timeoutMs: null, runtime: 'mock', workspaceId: null, sessionId: null, endedReason: null, pendingApproval: null })
     expect(state.agents[0]).toMatchObject({ currentTaskId: taskId, status: 'idle' })
     expect(state.activities.at(-1)).toMatchObject({ type: 'task-assigned', agentId, taskId })
     expect(activeTaskFor(state, agentId)?.id).toBe(taskId)
@@ -407,3 +407,14 @@ describe('recoverInterruptedTasks message', () => {
     expect(recoverInterruptedTasks(state, LATER).tasks[0].errorMessage).toBe(INTERRUPTED_MESSAGE)
   })
 })
+
+describe('assignTask workspace id', () => {
+  it('records a workspace id and defaults to null', () => {
+    const { state, id } = withAgent()
+    const withWs = assignTask(state, id, { title: 'Ok', description: '' }, NOW, { workspaceId: 'sandbox' })
+    expect(withWs.ok && withWs.state.tasks[0].workspaceId).toBe('sandbox')
+    const without = assignTask(state, id, { title: 'Ok', description: '' }, NOW)
+    expect(without.ok && without.state.tasks[0].workspaceId).toBeNull()
+  })
+})
+

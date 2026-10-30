@@ -117,14 +117,14 @@ export function activeTaskFor(s: WorkforceState, agentId: string): AgentTask | u
 }
 
 /** Creates a queued task for the agent. One active task per agent; markStarting and the runtime start it separately. */
-export function assignTask(s: WorkforceState, agentId: string, input: TaskInput, now: string, opts: { runtime?: TaskRuntime; timeoutMs?: number | null } = {}): OpResult<{ taskId: string }> {
+export function assignTask(s: WorkforceState, agentId: string, input: TaskInput, now: string, opts: { runtime?: TaskRuntime; timeoutMs?: number | null; workspaceId?: string | null } = {}): OpResult<{ taskId: string }> {
   const agent = s.agents.find((a) => a.id === agentId)
   if (!agent) return { ok: false, error: 'Agent not found.' }
   const error = validateTaskInput(input)
   if (error) return { ok: false, error }
   if (activeTaskFor(s, agentId)) return { ok: false, error: `${agent.name} already has an active task.` }
   const taskId = createId('task', new Set(s.tasks.map((t) => t.id)))
-  const task: AgentTask = { id: taskId, agentId, title: input.title.trim(), description: input.description.trim(), status: 'queued', createdAt: now, startedAt: null, completedAt: null, resultSummary: null, errorMessage: null, executionId: null, timeoutMs: opts.timeoutMs ?? null, runtime: opts.runtime ?? 'mock', sessionId: null, endedReason: null, pendingApproval: null }
+  const task: AgentTask = { id: taskId, agentId, title: input.title.trim(), description: input.description.trim(), status: 'queued', createdAt: now, startedAt: null, completedAt: null, resultSummary: null, errorMessage: null, executionId: null, timeoutMs: opts.timeoutMs ?? null, runtime: opts.runtime ?? 'mock', workspaceId: opts.workspaceId ?? null, sessionId: null, endedReason: null, pendingApproval: null }
   const next = replaceAgent({ ...s, tasks: [...s.tasks, task] }, { ...agent, currentTaskId: taskId })
   const state = addActivity(next, { type: 'task-assigned', agentId, taskId, message: `Assigned "${task.title}"`, timestamp: now, source: sourceOf(agent) })
   return { ok: true, state, taskId }

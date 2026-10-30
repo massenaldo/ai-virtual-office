@@ -10,11 +10,12 @@ import type { ServerRuntimeProvider } from './runtime/types'
 import { openWorkforceStore, type WorkforceStore } from './store'
 import { TaskManager, type LifecycleAction, type TaskManagerOptions } from './taskManager'
 import { FakeProvider } from './test/fakeProvider'
+import { makeWorkspaceRoot } from './test/workspaces'
 
 const NOW = '2026-10-31T09:00:00.000Z'
 const FORGE = 'agent-demo-backend'
 const INPUT = { title: 'Build API', description: '' }
-const BASE_CONFIG = { taskTimeoutMs: 600000, cancelGraceMs: 5000, approvalTimeoutMs: 300000, maxMessageBytes: 32768, maxTaskOutputBytes: 262144 }
+const BASE_CONFIG = { taskTimeoutMs: 600000, cancelGraceMs: 5000, approvalTimeoutMs: 300000, maxMessageBytes: 32768, maxTaskOutputBytes: 262144, workspaceRoot: null as string | null, workspaces: [] as Array<{ id: string; relativePath: string }> }
 
 let dir: string
 let store: WorkforceStore
@@ -369,3 +370,67 @@ describe('limits and housekeeping', () => {
     expect(seen).toContain('approval.decided')
   })
 })
+
+describe('workspaces at task start', () => {
+  let ws: ReturnType<typeof makeWorkspaceRoot>
+  beforeEach(() => { ws = makeWorkspaceRoot(['sandbox']) })
+  afterEach(() => { ws.cleanup() })
+  const wsConfig = () => ({ workspaceRoot: ws.root, workspaces: [{ id: 'sandbox', relativePath: 'sandbox' }] })
+
+  it('passes the resolved workspace to the provider', async () => {
+    const fake = new FakeProvider()
+    const m = make(fake, wsConfig())
+    const r = m.startTask(FORGE, INPUT, { workspaceId: 'sandbox' })
+    expect(r.ok && r.task.workspaceId).toBe('sandbox')
+    await tick()
+    expect(fake.starts[0].ctx.workspace).toEqual({ id: 'sandbox', path: ws.path('sandbox') })
+  })
+
+  it('refuses an unknown workspace without creating a task', () => {
+    const events: unknown[] = []
+    const m = make(new FakeProvider(), wsConfig(), (e) => events.push(e))
+    const before = store.state.tasks
+    expect(m.startTask(FORGE, INPUT, { workspaceId: 'nope' })).toEqual({ ok: false, code: 'invalid', error: 'Unknown workspace "nope".' })
+    expect(store.state.tasks).toBe(before)
+    expect(events).toEqual([{ action: 'workspace.rejected', actor: 'system', taskId: null, agentId: FORGE, workspaceId: 'nope', reason: 'unknown' }])
+  })
+
+  it('maps a malformed id to bad_request', () => {
+    const events: Array<Record<string, unknown>> = []
+    const m = make(new FakeProvider(), wsConfig(), (e) => events.push(e as Record<string, unknown>))
+    expect(m.startTask(FORGE, INPUT, { workspaceId: '../x' })).toEqual({ ok: false, code: 'bad_request', error: '"workspaceId" must be a workspace id: 1–32 lowercase letters, digits or hyphens.' })
+    expect('workspaceId' in events[0]).toBe(false)
+    expect(events[0]).toMatchObject({ action: 'workspace.rejected', reason: 'invalid_id' })
+  })
+
+  it('explains an unconfigured or unavailable workspace', () => {
+    const m = make(new FakeProvider())
+    expect(m.startTask(FORGE, INPUT, { workspaceId: 'sandbox' })).toEqual({ ok: false, code: 'invalid', error: 'Workspaces are not configured on this server.' })
+    manager = null
+    const m2 = make(new FakeProvider(), wsConfig())
+    rmSync(ws.path('sandbox'), { recursive: true })
+    expect(m2.startTask(FORGE, INPUT, { workspaceId: 'sandbox' })).toEqual({ ok: false, code: 'invalid', error: 'Workspace "sandbox" is not available.' })
+  })
+
+  it('treats a null workspace id as none', async () => {
+    const fake = new FakeProvider()
+    const m = make(fake, wsConfig())
+    const r = m.startTask(FORGE, INPUT, { workspaceId: null })
+    expect(r.ok && r.task.workspaceId).toBeNull()
+    await tick()
+    expect(fake.starts[0].ctx.workspace).toBeNull()
+  })
+
+  it('the claude runtime needs a workspace', () => {
+    const m = make(new FakeProvider({ kind: 'claude' }), wsConfig())
+    expect(m.startTask(FORGE, INPUT)).toEqual({ ok: false, code: 'invalid', error: 'The claude runtime needs a workspace.' })
+  })
+
+  it('reports the actor from the request id', () => {
+    const events: Array<Record<string, unknown>> = []
+    const m = make(new FakeProvider(), {}, (e) => events.push(e as Record<string, unknown>))
+    m.startTask(FORGE, INPUT, { requestId: 'r1' })
+    expect(events[0]).toMatchObject({ action: 'task.start', actor: 'api', requestId: 'r1' })
+  })
+})
+

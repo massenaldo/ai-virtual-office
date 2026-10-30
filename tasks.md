@@ -1,7 +1,7 @@
 # Milestone 3A — AI Agent Workforce UI and Mock Runtime: Tasks
 
 **Spec:** [`plan.md`](plan.md) (Milestone 3A brief). This file is my working task list for that spec.
-**Status:** Approved, 2026-10-30. Q1–Q4 answered (see "Decisions" at the end). Stages A and B are done (B in review); Stage C is next.
+**Status:** Approved, 2026-10-30. Q1–Q4 answered (see "Decisions" at the end). Stages A–C are done (C in review); Stage D is next.
 **Earlier milestones:** [`docs/milestones/milestone-2-tasks.md`](docs/milestones/milestone-2-tasks.md) and [`milestone-2-plan.md`](docs/milestones/milestone-2-plan.md).
 
 ## What this milestone is
@@ -87,10 +87,10 @@ The office gets a staff of **AI agents** you can manage. You can create agents, 
 
 ## Stage C — Agents in the 3D office
 
-- [ ] Status markers above assigned desks in 3D and floor plan; they never take clicks.
-- [ ] Selecting an agent highlights its desk and offers "Focus" to move the camera to it.
-- [ ] In Workforce mode, clicking an assigned desk opens that agent; clicking a free desk offers to assign one.
-- [ ] Graceful handling of deleted desks, Reset layout, and unsaved layout changes. Edit mode, transforms, undo/redo, save, reset and floor-plan sync stay unchanged.
+- [x] Status markers above assigned desks in 3D and floor plan; they never take clicks.
+- [x] Selecting an agent highlights its desk and offers "Focus" to move the camera to it.
+- [x] In Workforce mode, clicking an assigned desk opens that agent; clicking a free desk offers to assign one.
+- [x] Graceful handling of deleted desks, Reset layout, and unsaved layout changes. Edit mode, transforms, undo/redo, save, reset and floor-plan sync stay unchanged.
 - [ ] PR with screenshots
 
 ## Stage D — Verify, document, report

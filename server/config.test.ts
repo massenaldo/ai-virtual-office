@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { CONFIG_VARIABLES, formatConfigErrors, mergeEnv, parseConfig } from './config'
 import { makeWorkspaceRoot } from './test/workspaces'
 
-const DEFAULTS = { host: '127.0.0.1', port: 8787, dataDir: '/repo/data', runtime: 'mock', taskTimeoutMs: 600000, cancelGraceMs: 5000, approvalTimeoutMs: 300000, maxMessageBytes: 32768, maxTaskOutputBytes: 262144, eventBufferSize: 500, auditLogMaxBytes: 5242880, workspaceRoot: null, workspaces: [], credentialsConfigured: false }
+const DEFAULTS = { host: '127.0.0.1', port: 8787, dataDir: '/repo/data', runtime: 'mock', taskTimeoutMs: 600000, cancelGraceMs: 5000, approvalTimeoutMs: 300000, maxMessageBytes: 32768, maxTaskOutputBytes: 262144, eventBufferSize: 500, auditLogMaxBytes: 5242880, workspaceRoot: null, workspaces: [], allowedTools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'], credentialsConfigured: false }
 const NAMES = CONFIG_VARIABLES
 
 describe('parseConfig', () => {
@@ -19,7 +19,7 @@ describe('parseConfig', () => {
 
   it('reads every variable', () => {
     const r = parseConfig({ HOST: 'localhost', PORT: '9000', DATA_DIR: 'tmp/x', RUNTIME: 'claude', TASK_TIMEOUT_MS: '1000', CANCEL_GRACE_MS: '200', APPROVAL_TIMEOUT_MS: '3000', MAX_MESSAGE_BYTES: '100', MAX_TASK_OUTPUT_BYTES: '1000', EVENT_BUFFER_SIZE: '20', AUDIT_LOG_MAX_BYTES: '65536', ANTHROPIC_API_KEY: 'k' }, '/repo')
-    expect(r).toEqual({ ok: true, config: { host: 'localhost', port: 9000, dataDir: '/repo/tmp/x', runtime: 'claude', taskTimeoutMs: 1000, cancelGraceMs: 200, approvalTimeoutMs: 3000, maxMessageBytes: 100, maxTaskOutputBytes: 1000, eventBufferSize: 20, auditLogMaxBytes: 65536, workspaceRoot: null, workspaces: [], credentialsConfigured: true } })
+    expect(r).toEqual({ ok: true, config: { host: 'localhost', port: 9000, dataDir: '/repo/tmp/x', runtime: 'claude', taskTimeoutMs: 1000, cancelGraceMs: 200, approvalTimeoutMs: 3000, maxMessageBytes: 100, maxTaskOutputBytes: 1000, eventBufferSize: 20, auditLogMaxBytes: 65536, workspaceRoot: null, workspaces: [], allowedTools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'], credentialsConfigured: true } })
   })
 
   it('collects every error with readable copy', () => {
@@ -166,6 +166,19 @@ describe('workspace config', () => {
 
   it('refuses DATA_DIR inside a workspace', () => {
     expect(cfg({ WORKSPACE_ROOT: ws.root, WORKSPACES: ws.env.WORKSPACES, DATA_DIR: join(ws.path('sandbox'), 'data') })).toEqual({ ok: false, errors: ['DATA_DIR must not be inside workspace "sandbox".'] })
+  })
+})
+
+describe('ALLOWED_TOOLS', () => {
+  it('reads ALLOWED_TOOLS', () => {
+    expect(parseConfig({ ALLOWED_TOOLS: ' Bash, Read ,Bash' }, '/repo')).toMatchObject({ ok: true, config: { allowedTools: ['Bash', 'Read'] } })
+    expect(parseConfig({ ALLOWED_TOOLS: 'none' }, '/repo')).toMatchObject({ ok: true, config: { allowedTools: [] } })
+  })
+
+  it('refuses wildcard and unknown tools', () => {
+    expect(parseConfig({ ALLOWED_TOOLS: '*' }, '/repo')).toEqual({ ok: false, errors: ['ALLOWED_TOOLS must list tool names; "*" is not allowed.'] })
+    expect(parseConfig({ ALLOWED_TOOLS: 'all' }, '/repo')).toEqual({ ok: false, errors: ['ALLOWED_TOOLS must list tool names; "all" is not allowed.'] })
+    expect(parseConfig({ ALLOWED_TOOLS: 'Read,Foo' }, '/repo')).toEqual({ ok: false, errors: ['ALLOWED_TOOLS has an unknown tool "Foo". Known tools: Read, Glob, Grep, Write, Edit, Bash, WebFetch, WebSearch.'] })
   })
 })
 

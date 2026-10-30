@@ -13,6 +13,7 @@ import { ServerMockProvider } from './runtime/mockProvider'
 import type { ServerRuntimeProvider } from './runtime/types'
 import { openWorkforceStore, type WorkforceStore } from './store'
 import { TaskManager } from './taskManager'
+import { toolPolicyFrom } from './toolPolicy'
 
 export type AppDeps = {
   now?: () => string
@@ -37,7 +38,7 @@ export function createApp(config: ServerConfig, deps: AppDeps = {}): App {
   // Every commit, from any path, becomes typed events in the same tick, so state and log can't disagree.
   const store = openWorkforceStore({ dataDir: config.dataDir, now, log, onCommit: (before, after) => { events.append(deriveEvents(before, after)) } })
   const provider = deps.provider ?? (config.runtime === 'mock' ? new ServerMockProvider({ timings: deps.mockTimings }) : new ClaudeAgentRuntimeProvider())
-  const manager = new TaskManager({ store, provider, config, now, log })
+  const manager = new TaskManager({ store, provider, config, policy: toolPolicyFrom(config), now, log })
   const streams = new Set<ServerResponse>()
   const startedAt = now()
   const routes = createRoutes({ config, store, events, provider, manager, now, startedAt, heartbeatMs: deps.heartbeatMs ?? HEARTBEAT_MS, streams })

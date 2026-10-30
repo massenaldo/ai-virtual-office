@@ -1,11 +1,14 @@
 import { activeTaskFor, applyRuntimeEvent, assignTask, cancelTask as forceCancel, decideApproval as recordDecision, isActiveTask, markStarting, removeAgent as dropAgent, requestCancel, timeOutTask, validateTaskInput, type TaskInput } from '../src/workforce/operations'
+import { createId } from '../src/layout/operations'
 import type { RuntimeEvent } from '../src/workforce/runtime/types'
 import type { AgentTask, ApprovalDecision, TaskRuntime, WorkforceState } from '../src/workforce/types'
 import type { ServerConfig } from './config'
 import { messageTruncatedMarker, outputLimitMarker, truncateUtf8 } from './limits'
 import type { Logger } from './log'
-import { sourceFor, type DemoProvider, type ServerRuntimeProvider } from './runtime/types'
+import { redactSecrets } from './redact'
+import { sourceFor, type DemoProvider, type ServerRuntimeProvider, type ToolGateResult, type ToolRequest } from './runtime/types'
 import type { WorkforceStore } from './store'
+import { decideToolUse, sanitizeSummary, toolDeniedMessage, type DenyReason, type ToolPolicy } from './toolPolicy'
 import { resolveWorkspace, WORKSPACE_ID_RE, type ResolvedWorkspace, type WorkspaceReason } from './workspaces'
 
 export type ManagerError = { ok: false; code: 'not_found' | 'invalid' | 'conflict' | 'unavailable' | 'bad_request'; error: string }
@@ -35,6 +38,7 @@ const WORKSPACE_COPY = (reason: WorkspaceReason, id: unknown): string => {
 export type TaskManagerOptions = {
   store: WorkforceStore
   provider: ServerRuntimeProvider
+  policy: ToolPolicy
   config: Pick<ServerConfig, 'taskTimeoutMs' | 'cancelGraceMs' | 'approvalTimeoutMs' | 'maxMessageBytes' | 'maxTaskOutputBytes' | 'workspaceRoot' | 'workspaces'>
   now: () => string
   log: Logger
@@ -48,7 +52,9 @@ export const unavailableMessage = (kind: TaskRuntime, reason: string) => `The ${
 type Timer = ReturnType<typeof setTimeout>
 
 /** Everything the manager holds for one task while it is active; deleted when the task ends. */
-type Run = { abort: AbortController; taskTimer: Timer | null; approvalTimer: Timer | null; approvalId: string | null; graceTimer: Timer | null; outputBytes: number; outputClosed: boolean; launched: boolean; workspace: ResolvedWorkspace | null }
+type Run = { abort: AbortController; taskTimer: Timer | null; approvalTimer: Timer | null; approvalId: string | null; graceTimer: Timer | null; outputBytes: number; outputClosed: boolean; launched: boolean; workspace: ResolvedWorkspace | null; toolWaiter: { approvalId: string; tool: string; resolve: (r: ToolGateResult) => void } | null }
+
+const CANCELLED: ToolGateResult = { behavior: 'deny', outcome: 'cancelled', message: 'The task is no longer running.' }
 
 const isDemo = (p: ServerRuntimeProvider): p is DemoProvider => 'requestApproval' in p && 'forceError' in p
 
@@ -60,6 +66,7 @@ export class TaskManager {
   private readonly store: WorkforceStore
   private readonly provider: ServerRuntimeProvider
   private readonly config: TaskManagerOptions['config']
+  private readonly policy: ToolPolicy
   private readonly now: () => string
   private readonly log: Logger
   private readonly onLifecycle: TaskManagerOptions['onLifecycle']
@@ -71,6 +78,7 @@ export class TaskManager {
     this.store = opts.store
     this.provider = opts.provider
     this.config = opts.config
+    this.policy = opts.policy
     this.now = opts.now
     this.log = opts.log
     this.onLifecycle = opts.onLifecycle
@@ -126,7 +134,7 @@ export class TaskManager {
     this.store.commit(assigned.state)
     this.store.commit(markStarting(this.state, assigned.taskId, this.now()))
 
-    const run: Run = { abort: new AbortController(), taskTimer: null, approvalTimer: null, approvalId: null, graceTimer: null, outputBytes: 0, outputClosed: false, launched: false, workspace }
+    const run: Run = { abort: new AbortController(), taskTimer: null, approvalTimer: null, approvalId: null, graceTimer: null, outputBytes: 0, outputClosed: false, launched: false, workspace, toolWaiter: null }
     this.runs.set(assigned.taskId, run)
     run.taskTimer = setTimeout(() => this.onTaskTimeout(assigned.taskId), this.config.taskTimeoutMs)
     const task = this.task(assigned.taskId)!
@@ -144,7 +152,14 @@ export class TaskManager {
     run.launched = true
     let outcome
     try {
-      outcome = await this.provider.start(task, { agent, signal: run.abort.signal, workspace: run.workspace })
+      outcome = await this.provider.start(task, {
+        agent,
+        signal: run.abort.signal,
+        workspace: run.workspace,
+        tools: this.policy,
+        requestToolApproval: (request) => this.requestToolApproval(taskId, request),
+        audit: (note) => { const t = this.task(taskId); if (t) this.report('runtime.note', t, { actor: 'runtime', detail: note }) },
+      })
     } catch (error) {
       outcome = { ok: false as const, error: `Runtime failed to start: ${error instanceof Error ? error.message : String(error)}` }
     }
@@ -194,6 +209,8 @@ export class TaskManager {
     const run = this.runs.get(taskId)
     if (!run) return
     for (const timer of [run.taskTimer, run.approvalTimer, run.graceTimer]) if (timer) clearTimeout(timer)
+    // A runtime still waiting on a tool answer must be released when its task ends, however it ends.
+    this.settleTool(run, CANCELLED)
     this.runs.delete(taskId)
   }
 
@@ -217,6 +234,7 @@ export class TaskManager {
     this.store.commit(applyRuntimeEvent(this.state, { type: 'failed', taskId, error: APPROVAL_TIMEOUT_MESSAGE(this.config.approvalTimeoutMs) }, this.now(), this.source))
     this.provider.cancel(taskId)
     run.abort.abort()
+    this.settleTool(run, { behavior: 'deny', outcome: 'expired', message: APPROVAL_TIMEOUT_MESSAGE(this.config.approvalTimeoutMs) })
     this.finalize(taskId)
     this.report('approval.timeout', task)
   }
@@ -230,7 +248,7 @@ export class TaskManager {
     const run = this.runs.get(taskId)
     this.store.commit(requestCancel(this.state, taskId, this.now(), this.source))
     if (run?.taskTimer) clearTimeout(run.taskTimer)
-    if (run) run.taskTimer = null
+    if (run) { run.taskTimer = null; this.settleTool(run, CANCELLED) }
     this.report('task.cancel', task, { actor: actorFor(opts), requestId: opts.requestId })
 
     if (this.task(taskId)?.status === 'cancelled') {
@@ -269,8 +287,13 @@ export class TaskManager {
     const run = this.runs.get(taskId)
     if (run) this.clearApproval(run)
     this.report('approval.decided', task, { actor: actorFor(opts), requestId: opts.requestId, decision })
-    // The provider's reaction (the mock answers at once) arrives as events and is applied before this returns.
-    this.provider.respondToApproval(taskId, approvalId, decision)
+    if (run?.toolWaiter?.approvalId === approvalId) {
+      // A tool request the manager is holding: answer the runtime's promise; the runtime decides what happens next.
+      this.settleTool(run, decision === 'approve' ? { behavior: 'allow', outcome: 'approved' } : { behavior: 'deny', outcome: 'denied', message: 'Denied by a human reviewer.' })
+    } else {
+      // An approval the provider raised itself: its reaction arrives as events.
+      this.provider.respondToApproval(taskId, approvalId, decision)
+    }
     return { ok: true, task: this.task(taskId) ?? task }
   }
 
@@ -287,6 +310,44 @@ export class TaskManager {
       this.finalize(cancelledTaskId)
     }
     return { ok: true, cancelledTaskId }
+  }
+
+  /** Resolves the runtime's pending tool request once; later calls do nothing. */
+  private settleTool(run: Run, result: ToolGateResult): void {
+    const waiter = run.toolWaiter
+    if (!waiter) return
+    run.toolWaiter = null
+    waiter.resolve(result)
+  }
+
+  /**
+   * The gate a runtime goes through before using a tool. The policy decides; an `ask` becomes the existing
+   * waiting_for_approval state, approval timer and approval endpoint. Every state change happens before this returns.
+   */
+  requestToolApproval(taskId: string, request: ToolRequest): Promise<ToolGateResult> {
+    const run = this.runs.get(taskId)
+    const task = this.task(taskId)
+    if (!run || !task || (task.status !== 'running' && task.status !== 'waiting_for_approval')) return Promise.resolve(CANCELLED)
+
+    const d = decideToolUse(this.policy, request.tool, request.input, run.workspace)
+    const tool = request.tool
+    if (d.decision === 'allow') {
+      this.report('tool.allowed', task, { actor: 'runtime', tool, decision: 'allow', reason: d.reason, detail: d.summary })
+      return Promise.resolve({ behavior: 'allow', outcome: 'allowed' })
+    }
+    const refuse = (reason: DenyReason): Promise<ToolGateResult> => {
+      this.report('tool.denied', task, { actor: 'runtime', tool, decision: 'deny', reason })
+      return Promise.resolve({ behavior: 'deny', outcome: 'denied_by_policy', message: toolDeniedMessage(tool, reason) })
+    }
+    if (d.decision === 'deny') return refuse(d.reason)
+    if (task.status === 'waiting_for_approval' || run.toolWaiter) return refuse('approval_pending')
+
+    this.report('tool.asked', task, { actor: 'runtime', tool, decision: 'ask', reason: 'needs_approval', detail: d.summary })
+    const approvalId = createId('approval')
+    const promise = new Promise<ToolGateResult>((resolve) => { run.toolWaiter = { approvalId, tool, resolve } })
+    this.onEvent({ type: 'approval_requested', taskId, approvalId, tool, summary: d.summary })
+    this.report('approval.requested', task, { actor: 'runtime', tool, detail: `approvalId=${approvalId}` })
+    return promise
   }
 
   private demo(taskId: string): ManagerResult<{ task: AgentTask; provider: DemoProvider }> {
@@ -329,16 +390,17 @@ export class TaskManager {
     switch (event.type) {
       case 'message': {
         if (run.outputClosed) return null
-        const t = truncateUtf8(event.text, perMessage)
+        const t = truncateUtf8(redactSecrets(event.text), perMessage)
         const used = Buffer.byteLength(t.text)
         if (run.outputBytes + used > budget) return { ...event, text: fit(t.text) }
         run.outputBytes += used
         return { ...event, text: t.truncated ? t.text + messageTruncatedMarker(perMessage) : t.text }
       }
-      case 'progress': return { ...event, message: cut(event.message) }
-      case 'failed': return { ...event, error: cut(event.error) }
+      case 'progress': return { ...event, message: cut(redactSecrets(event.message)) }
+      case 'failed': return { ...event, error: cut(redactSecrets(event.error)) }
+      case 'approval_requested': return { ...event, summary: sanitizeSummary(event.summary) }
       case 'completed': {
-        const t = truncateUtf8(event.summary, perMessage)
+        const t = truncateUtf8(redactSecrets(event.summary), perMessage)
         return { ...event, summary: fit(t.truncated ? t.text + messageTruncatedMarker(perMessage) : t.text) }
       }
       default: return event
@@ -349,6 +411,7 @@ export class TaskManager {
     this.unsubscribe()
     for (const run of this.runs.values()) {
       for (const timer of [run.taskTimer, run.approvalTimer, run.graceTimer]) if (timer) clearTimeout(timer)
+      this.settleTool(run, CANCELLED)
       run.abort.abort()
     }
     this.runs.clear()

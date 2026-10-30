@@ -1,3 +1,4 @@
+import { readdirSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { startTestServer, type TestServer } from '../test/helpers'
 import { makeWorkspaceRoot } from '../test/workspaces'
@@ -123,8 +124,12 @@ describe('tasks', () => {
     expect(pending.tool).toBe('Write')
     expect(await s.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'maybe' })).toMatchObject({ status: 400, body: { error: '"decision" must be "approve" or "deny".' } })
     expect(await s.api('POST', `/api/tasks/${id}/approval`, { approvalId: '', decision: 'deny' })).toMatchObject({ status: 400, body: { error: '"approvalId" must be a non-empty string.' } })
+    expect(pending.summary).toBe('Write simulated.txt (39 B)')
     const denied = await s.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'deny' })
-    expect(denied).toMatchObject({ status: 200, body: { task: { status: 'failed', errorMessage: 'Approval denied (simulated)' } } })
+    // A human deny answers the request; the mock then ends its own run as failed.
+    expect(denied).toMatchObject({ status: 200, body: { task: { status: 'running' } } })
+    await until(async () => (await task(id)).status === 'failed')
+    expect(await task(id)).toMatchObject({ errorMessage: 'Approval denied (simulated)' })
     expect(await s.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'deny' })).toMatchObject({ status: 409, body: { error: 'Task is not waiting for approval.' } })
   })
 
@@ -201,6 +206,41 @@ describe('workspaces', () => {
     await w.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'Build API', workspaceId: 'sandbox' })
     await w.api('POST', '/api/agents/agent-demo-frontend/tasks', { title: 'x', workspaceId: 'nope' })
     for (const path of ['/api/state', '/api/health', '/api/workspaces']) expect(JSON.stringify((await w.api('GET', path)).body)).not.toContain(ws.root)
+  })
+})
+
+describe('the demo tool request', () => {
+  it('follows ALLOWED_TOOLS', async () => {
+    const t = await startTestServer({ ALLOWED_TOOLS: 'Read' }, { mockTimings: SLOW })
+    try {
+      const r = await t.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'Build API' })
+      const id = r.body.task.id as string
+      await until(async () => (await t.api('GET', '/api/state')).body.state.tasks[0].status === 'running')
+      expect((await t.api('POST', `/api/demo/tasks/${id}/request-approval`)).status).toBe(202)
+      await until(async () => (await t.api('GET', '/api/state')).body.state.tasks[0].status === 'failed')
+      expect((await t.api('GET', '/api/state')).body.state.tasks[0].errorMessage).toBe('Tool "Write" denied by policy: not in ALLOWED_TOOLS.')
+    } finally {
+      await t.close()
+    }
+  })
+
+  it('approving the demo write changes nothing on disk', async () => {
+    const w = makeWorkspaceRoot(['sandbox'])
+    const t = await startTestServer(w.env, { mockTimings: { thinkingMs: 30, workingMs: 30 } })
+    try {
+      const r = await t.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'Build API', workspaceId: 'sandbox' })
+      const id = r.body.task.id as string
+      const get = async () => (await t.api('GET', '/api/state')).body.state.tasks[0]
+      await until(async () => (await get()).status === 'running')
+      await t.api('POST', `/api/demo/tasks/${id}/request-approval`)
+      const pending = (await get()).pendingApproval
+      expect((await t.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'approve' })).status).toBe(200)
+      await until(async () => (await get()).status === 'completed')
+      expect(readdirSync(w.path('sandbox'))).toEqual([])
+    } finally {
+      await t.close()
+      w.cleanup()
+    }
   })
 })
 

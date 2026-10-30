@@ -2,18 +2,19 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { parseEnv } from 'node:util'
 import { findSecretInConfig } from './redact'
+import { DEFAULT_ALLOWED_TOOLS, TOOL_CATALOGUE } from './toolPolicy'
 import { parseWorkspaces, type WorkspaceEntry } from './workspaces'
 
 export type RuntimeKind = 'mock' | 'claude'
 
-export type ServerConfig = { host: string; port: number; dataDir: string; runtime: RuntimeKind; taskTimeoutMs: number; cancelGraceMs: number; approvalTimeoutMs: number; maxMessageBytes: number; maxTaskOutputBytes: number; eventBufferSize: number; auditLogMaxBytes: number; workspaceRoot: string | null; workspaces: WorkspaceEntry[]; credentialsConfigured: boolean }
+export type ServerConfig = { host: string; port: number; dataDir: string; runtime: RuntimeKind; taskTimeoutMs: number; cancelGraceMs: number; approvalTimeoutMs: number; maxMessageBytes: number; maxTaskOutputBytes: number; eventBufferSize: number; auditLogMaxBytes: number; workspaceRoot: string | null; workspaces: WorkspaceEntry[]; allowedTools: string[]; credentialsConfigured: boolean }
 
 export type Env = Record<string, string | undefined>
 
 type Parsed = { ok: true; config: ServerConfig } | { ok: false; errors: string[] }
 
 /** Every environment variable parseConfig reads, in .env.example order. */
-export const CONFIG_VARIABLES: readonly string[] = ['HOST', 'PORT', 'DATA_DIR', 'WORKSPACE_ROOT', 'WORKSPACES', 'RUNTIME', 'TASK_TIMEOUT_MS', 'CANCEL_GRACE_MS', 'APPROVAL_TIMEOUT_MS', 'MAX_MESSAGE_BYTES', 'MAX_TASK_OUTPUT_BYTES', 'EVENT_BUFFER_SIZE', 'AUDIT_LOG_MAX_BYTES', 'ANTHROPIC_API_KEY']
+export const CONFIG_VARIABLES: readonly string[] = ['HOST', 'PORT', 'DATA_DIR', 'WORKSPACE_ROOT', 'WORKSPACES', 'RUNTIME', 'TASK_TIMEOUT_MS', 'CANCEL_GRACE_MS', 'APPROVAL_TIMEOUT_MS', 'ALLOWED_TOOLS', 'MAX_MESSAGE_BYTES', 'MAX_TASK_OUTPUT_BYTES', 'EVENT_BUFFER_SIZE', 'AUDIT_LOG_MAX_BYTES', 'ANTHROPIC_API_KEY']
 
 /** Environment names that suggest skipping permission checks. This server has no such switch, so their presence is an error rather than being ignored. */
 export const REFUSED_ENV_PATTERN = /DANGEROUSLY|BYPASS_?PERMISSIONS|SKIP_?PERMISSIONS|PERMISSION_MODE/i
@@ -80,13 +81,24 @@ export function parseConfig(env: Env, cwd: string = process.cwd()): Parsed {
     else errors.push(`AUDIT_LOG_MAX_BYTES must be from 65536 to 1073741824 (got "${rawAudit}").`)
   }
 
+  let allowedTools = [...DEFAULT_ALLOWED_TOOLS]
+  const rawTools = read(env, 'ALLOWED_TOOLS')
+  if (rawTools !== undefined) {
+    const items = rawTools.split(',').map((t) => t.trim()).filter((t) => t !== '')
+    const known = TOOL_CATALOGUE.map((t) => t.name)
+    const unknown = items.find((t) => !known.includes(t) && t !== 'none')
+    if (items.some((t) => t === '*' || t.toLowerCase() === 'all')) errors.push(`ALLOWED_TOOLS must list tool names; "${rawTools.trim()}" is not allowed.`)
+    else if (unknown !== undefined) errors.push(`ALLOWED_TOOLS has an unknown tool "${unknown}". Known tools: ${known.join(', ')}.`)
+    else allowedTools = items.length === 1 && items[0] === 'none' ? [] : [...new Set(items)]
+  }
+
   const ws = parseWorkspaces(read(env, 'WORKSPACE_ROOT'), read(env, 'WORKSPACES'), dataDir)
   errors.push(...ws.errors)
 
   if (errors.length > 0) return { ok: false, errors }
   return {
     ok: true,
-    config: { host, port, dataDir, runtime: rawRuntime as RuntimeKind, taskTimeoutMs, cancelGraceMs, approvalTimeoutMs, maxMessageBytes, maxTaskOutputBytes, eventBufferSize, auditLogMaxBytes, workspaceRoot: ws.workspaceRoot, workspaces: ws.workspaces, credentialsConfigured: (read(env, 'ANTHROPIC_API_KEY') ?? '').trim() !== '' },
+    config: { host, port, dataDir, runtime: rawRuntime as RuntimeKind, taskTimeoutMs, cancelGraceMs, approvalTimeoutMs, maxMessageBytes, maxTaskOutputBytes, eventBufferSize, auditLogMaxBytes, workspaceRoot: ws.workspaceRoot, workspaces: ws.workspaces, allowedTools, credentialsConfigured: (read(env, 'ANTHROPIC_API_KEY') ?? '').trim() !== '' },
   }
 }
 

@@ -4,7 +4,8 @@ import { createDemoWorkforce } from '../../src/workforce/demo'
 import { assignTask } from '../../src/workforce/operations'
 import type { AgentTask } from '../../src/workforce/types'
 import { testStartContext } from '../test/startContext'
-import { ServerMockProvider } from './mockProvider'
+import { MOCK_DEMO_WRITE, ServerMockProvider } from './mockProvider'
+import type { StartContext, ToolGateResult } from './types'
 
 const NOW = '2026-10-31T09:00:00.000Z'
 const demo = createDemoWorkforce(NOW)
@@ -65,16 +66,69 @@ describe('ServerMockProvider', () => {
     expect(provider.result('task-x')).toBeNull()
   })
 
-  it('requestApproval sets pendingApprovalId and deny ends failed', async () => {
-    const task = newTask()
-    await start(task)
-    await vi.advanceTimersByTimeAsync(0)
-    provider.requestApproval(task.id)
-    const status = provider.status(task.id)
-    expect(status.state === 'running' && status.pendingApprovalId).toMatch(/^approval-/)
-    const ask = events.find((e) => e.type === 'approval_requested')!
-    provider.respondToApproval(task.id, ask.type === 'approval_requested' ? ask.approvalId : '', 'deny')
-    expect(provider.result(task.id)).toEqual({ outcome: 'failed', error: 'Approval denied (simulated)' })
+  describe('the demo tool request', () => {
+    const settle = (value: ToolGateResult) => { resolveGate(value) }
+    let resolveGate: (r: ToolGateResult) => void
+    let asked: ReturnType<typeof vi.fn>
+    const startWithGate = async () => {
+      const task = newTask()
+      asked = vi.fn(() => new Promise<ToolGateResult>((resolve) => { resolveGate = resolve }))
+      await provider.start(task, testStartContext(forge, { requestToolApproval: asked as unknown as StartContext['requestToolApproval'] }))
+      await vi.advanceTimersByTimeAsync(0)
+      return task
+    }
+
+    it('requestApproval asks through the context and deny ends failed', async () => {
+      const task = await startWithGate()
+      const before = events.length
+      provider.requestApproval(task.id)
+      expect(asked).toHaveBeenCalledWith({ tool: 'Write', input: MOCK_DEMO_WRITE })
+      const status = provider.status(task.id)
+      expect(status.state === 'running' && status.pendingApprovalId).toMatch(/^approval-/)
+      expect(events.slice(before).some((e) => e.type === 'approval_requested')).toBe(false)
+      settle({ behavior: 'deny', outcome: 'denied', message: 'x' })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(provider.result(task.id)).toEqual({ outcome: 'failed', error: 'Approval denied (simulated)' })
+    })
+
+    it('approve continues to completion', async () => {
+      const task = await startWithGate()
+      provider.requestApproval(task.id)
+      settle({ behavior: 'allow', outcome: 'approved' })
+      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(200)
+      expect(provider.result(task.id)).toMatchObject({ outcome: 'completed' })
+    })
+
+    it('a policy denial fails with its message', async () => {
+      const task = await startWithGate()
+      provider.requestApproval(task.id)
+      settle({ behavior: 'deny', outcome: 'denied_by_policy', message: 'M' })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(provider.result(task.id)).toEqual({ outcome: 'failed', error: 'M' })
+    })
+
+    it.each(['expired', 'cancelled'] as const)('%s leaves the run to the manager', async (outcome) => {
+      const task = await startWithGate()
+      provider.requestApproval(task.id)
+      const count = events.length
+      settle({ behavior: 'deny', outcome, message: 'm' })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(events).toHaveLength(count)
+      expect(provider.result(task.id)).toBeNull()
+    })
+
+    it('ignores a second request and a request before the run started', async () => {
+      const task = newTask()
+      asked = vi.fn(() => new Promise<ToolGateResult>(() => {}))
+      await provider.start(task, testStartContext(forge, { requestToolApproval: asked as unknown as StartContext['requestToolApproval'] }))
+      provider.requestApproval(task.id)
+      expect(asked).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(0)
+      provider.requestApproval(task.id)
+      provider.requestApproval(task.id)
+      expect(asked).toHaveBeenCalledTimes(1)
+    })
   })
 
   it('forceError ends failed with the demo message', async () => {

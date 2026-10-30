@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -9,6 +9,7 @@ import { ServerMockProvider } from './runtime/mockProvider'
 import type { ServerRuntimeProvider } from './runtime/types'
 import { openWorkforceStore, type WorkforceStore } from './store'
 import { TaskManager, type LifecycleAction, type TaskManagerOptions } from './taskManager'
+import { DEFAULT_ALLOWED_TOOLS } from './toolPolicy'
 import { FakeProvider } from './test/fakeProvider'
 import { makeWorkspaceRoot } from './test/workspaces'
 
@@ -33,8 +34,8 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-function make(provider: ServerRuntimeProvider, config: Partial<typeof BASE_CONFIG> = {}, onLifecycle?: TaskManagerOptions['onLifecycle']): TaskManager {
-  manager = new TaskManager({ store, provider, config: { ...BASE_CONFIG, ...config }, now: () => NOW, log: silentLogger, onLifecycle })
+function make(provider: ServerRuntimeProvider, config: Partial<typeof BASE_CONFIG> = {}, onLifecycle?: TaskManagerOptions['onLifecycle'], allowed: readonly string[] = DEFAULT_ALLOWED_TOOLS): TaskManager {
+  manager = new TaskManager({ store, provider, config: { ...BASE_CONFIG, ...config }, policy: { allowedTools: new Set(allowed) }, now: () => NOW, log: silentLogger, onLifecycle })
   return manager
 }
 const mock = () => new ServerMockProvider({ timings: { thinkingMs: 100, workingMs: 200 } })
@@ -207,6 +208,7 @@ describe('approvals', () => {
     const r = m.decideApproval(id, task(id).pendingApproval!.id, 'approve')
     expect(r.ok && r.task.status).toBe('running')
     expect(agent().status).toBe('working')
+    await tick()
     await vi.advanceTimersByTimeAsync(200)
     expect(task(id)).toMatchObject({ status: 'completed', endedReason: 'completed' })
     expect(vi.getTimerCount()).toBe(0)
@@ -216,7 +218,10 @@ describe('approvals', () => {
     const m = make(mock())
     const id = await waiting(m)
     const r = m.decideApproval(id, task(id).pendingApproval!.id, 'deny')
-    expect(r.ok && r.task).toMatchObject({ status: 'failed', errorMessage: 'Approval denied (simulated)' })
+    // A human deny tells the runtime "no"; the task itself carries on until the runtime decides what to do.
+    expect(r.ok && r.task.status).toBe('running')
+    await tick()
+    expect(task(id)).toMatchObject({ status: 'failed', errorMessage: 'Approval denied (simulated)' })
     expect(vi.getTimerCount()).toBe(0)
   })
 
@@ -361,7 +366,7 @@ describe('limits and housekeeping', () => {
     await tick()
     m.requestApproval(id)
     await vi.advanceTimersByTimeAsync(300)
-    expect(seen).toEqual(['task.start', 'approval.timeout'])
+    expect(seen).toEqual(['task.start', 'tool.asked', 'approval.requested', 'approval.timeout'])
     const m2id = started(m)
     await tick()
     m.requestApproval(m2id)
@@ -431,6 +436,137 @@ describe('workspaces at task start', () => {
     const m = make(new FakeProvider(), {}, (e) => events.push(e as Record<string, unknown>))
     m.startTask(FORGE, INPUT, { requestId: 'r1' })
     expect(events[0]).toMatchObject({ action: 'task.start', actor: 'api', requestId: 'r1' })
+  })
+})
+
+describe('tool approvals', () => {
+  let ws: ReturnType<typeof makeWorkspaceRoot>
+  let fake: FakeProvider
+  let events: Array<Record<string, unknown>>
+  beforeEach(() => { ws = makeWorkspaceRoot(['sandbox']); writeFileSync(join(ws.path('sandbox'), 'notes.md'), 'hello'); fake = new FakeProvider(); events = [] })
+  afterEach(() => { ws.cleanup() })
+
+  const wsConfig = (extra: Partial<typeof BASE_CONFIG> = {}) => ({ workspaceRoot: ws.root, workspaces: [{ id: 'sandbox', relativePath: 'sandbox' }], ...extra })
+  async function running(extra: Partial<typeof BASE_CONFIG> = {}, allowed?: readonly string[]) {
+    const m = make(fake, wsConfig(extra), (e) => events.push(e as Record<string, unknown>), allowed)
+    const r = m.startTask(FORGE, INPUT, { workspaceId: 'sandbox' })
+    const id = r.ok ? r.task.id : ''
+    await tick()
+    fake.emit({ type: 'started', taskId: id, executionId: 'e' })
+    return { m, id, ctx: fake.starts[0].ctx }
+  }
+  const write = { tool: 'Write', input: { file_path: 'notes.md', content: 'hello' } }
+
+  it('allows a read inside the workspace without asking', async () => {
+    const { id, ctx } = await running()
+    await expect(ctx.requestToolApproval({ tool: 'Read', input: { file_path: 'notes.md' } })).resolves.toEqual({ behavior: 'allow', outcome: 'allowed' })
+    expect(task(id).status).toBe('running')
+    expect(events.find((e) => e.action === 'tool.allowed')).toMatchObject({ actor: 'runtime', tool: 'Read', decision: 'allow', reason: 'read_only', detail: 'Read notes.md' })
+  })
+
+  it('denies unknown, unlisted and outside tools without changing state', async () => {
+    const { ctx } = await running()
+    const before = store.state
+    await expect(ctx.requestToolApproval({ tool: 'Rm', input: {} })).resolves.toEqual({ behavior: 'deny', outcome: 'denied_by_policy', message: 'Tool "Rm" denied by policy: unknown tool.' })
+    expect(store.state).toBe(before)
+    await expect(ctx.requestToolApproval({ tool: 'Bash', input: { command: 'ls' } })).resolves.toMatchObject({ message: 'Tool "Bash" denied by policy: not in ALLOWED_TOOLS.' })
+    await expect(ctx.requestToolApproval({ tool: 'Read', input: { file_path: '/etc/passwd' } })).resolves.toMatchObject({ message: 'Tool "Read" denied by policy: path is outside the task workspace.' })
+    expect(store.state).toBe(before)
+    const denied = events.filter((e) => e.action === 'tool.denied')
+    expect(denied).toHaveLength(3)
+    expect(denied.every((e) => e.detail === undefined)).toBe(true)
+  })
+
+  it('asks for a write and waits for approval', async () => {
+    const { m, id, ctx } = await running()
+    let settled: unknown = 'pending'
+    void ctx.requestToolApproval(write).then((r) => { settled = r })
+    expect(task(id)).toMatchObject({ status: 'waiting_for_approval', pendingApproval: { tool: 'Write', summary: 'Write notes.md (5 B)' } })
+    expect(agent().status).toBe('waiting')
+    await tick()
+    expect(settled).toBe('pending')
+    expect(m.decideApproval(id, task(id).pendingApproval!.id, 'approve').ok).toBe(true)
+    await tick()
+    expect(settled).toEqual({ behavior: 'allow', outcome: 'approved' })
+    expect(fake.responses).toEqual([])
+    expect(task(id).status).toBe('running')
+    expect(events.map((e) => e.action)).toEqual(expect.arrayContaining(['tool.asked', 'approval.requested', 'approval.decided']))
+  })
+
+  it('a human deny resolves denied and the task keeps running', async () => {
+    const { m, id, ctx } = await running()
+    const p = ctx.requestToolApproval(write)
+    m.decideApproval(id, task(id).pendingApproval!.id, 'deny')
+    await expect(p).resolves.toEqual({ behavior: 'deny', outcome: 'denied', message: 'Denied by a human reviewer.' })
+    expect(task(id).status).toBe('running')
+  })
+
+  it('approval timeout resolves expired and fails the task', async () => {
+    const { m, id, ctx } = await running({ approvalTimeoutMs: 2000 })
+    const p = ctx.requestToolApproval(write)
+    const approvalId = task(id).pendingApproval!.id
+    await vi.advanceTimersByTimeAsync(2000)
+    await expect(p).resolves.toEqual({ behavior: 'deny', outcome: 'expired', message: 'No approval decision within 2 s' })
+    expect(task(id).status).toBe('failed')
+    expect(vi.getTimerCount()).toBe(0)
+    expect(m.decideApproval(id, approvalId, 'approve')).toEqual({ ok: false, code: 'conflict', error: 'Task is not waiting for approval.' })
+  })
+
+  describe.each([
+    ['cancelTask', async (m: TaskManager, id: string) => { m.cancelTask(id) }, {}],
+    ['the task timeout', async () => { await vi.advanceTimersByTimeAsync(1000) }, { taskTimeoutMs: 1000 }],
+    ['removeAgent', async (m: TaskManager) => { m.removeAgent(FORGE) }, {}],
+    ['dispose', async (m: TaskManager) => { await m.dispose() }, {}],
+  ] as const)('release on %s', (_name, act, extra) => {
+    it('releases a waiting request as cancelled exactly once', async () => {
+      const { m, id, ctx } = await running(extra)
+      const spy = vi.fn()
+      void ctx.requestToolApproval(write).then(spy)
+      expect(task(id).status).toBe('waiting_for_approval')
+      await act(m, id)
+      await tick()
+      expect(spy).toHaveBeenCalledTimes(1)
+      expect(spy).toHaveBeenCalledWith({ behavior: 'deny', outcome: 'cancelled', message: 'The task is no longer running.' })
+      await vi.advanceTimersByTimeAsync(10000)
+      expect(spy).toHaveBeenCalledTimes(1)
+      expect(vi.getTimerCount()).toBe(0)
+    })
+  })
+
+  it('a second request while one is pending is denied', async () => {
+    const { id, ctx } = await running()
+    const first = vi.fn()
+    void ctx.requestToolApproval(write).then(first)
+    await expect(ctx.requestToolApproval(write)).resolves.toEqual({ behavior: 'deny', outcome: 'denied_by_policy', message: 'Tool "Write" denied by policy: another tool approval is already pending for this task.' })
+    await tick()
+    expect(first).not.toHaveBeenCalled()
+    expect(task(id).status).toBe('waiting_for_approval')
+  })
+
+  it('a request for a task that is not running resolves cancelled', async () => {
+    const { m, id, ctx } = await running()
+    const cancelled = { behavior: 'deny', outcome: 'cancelled', message: 'The task is no longer running.' }
+    await expect(m.requestToolApproval('task-x', write)).resolves.toEqual(cancelled)
+    fake.emit({ type: 'completed', taskId: id, summary: 'done' })
+    await expect(ctx.requestToolApproval(write)).resolves.toEqual(cancelled)
+  })
+
+  it('scrubs secrets from runtime output', async () => {
+    const { id } = await running()
+    fake.emit({ type: 'message', taskId: id, text: 'key sk-ant-api03-abcdefghijklmnop' })
+    expect(store.state.activities.at(-1)?.message).toBe('key [REDACTED]')
+  })
+
+  it('state never contains the workspace path', async () => {
+    const { ctx } = await running()
+    void ctx.requestToolApproval({ tool: 'Write', input: { file_path: join(ws.path('sandbox'), 'notes.md'), content: 'x' } })
+    expect(JSON.stringify(store.state)).not.toContain(ws.root)
+  })
+
+  it('runtime.note audits for the task', async () => {
+    const { ctx } = await running()
+    ctx.audit('hello sk-ant-api03-abcdefghijk')
+    expect(events.find((e) => e.action === 'runtime.note')).toMatchObject({ actor: 'runtime', taskId: expect.any(String) })
   })
 })
 

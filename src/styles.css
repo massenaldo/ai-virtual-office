@@ -74,3 +74,53 @@ kbd{background:#18212d;border:1px solid #303948;border-radius:4px;padding:1px 5p
 .room-label-layer .room-label{position:absolute;left:0;top:0;white-space:nowrap;visibility:hidden;will-change:transform}
 .room-label-layer .room-label.editable{pointer-events:auto}
 .render-stats{position:absolute;top:12px;right:12px;font:500 10px ui-monospace,SFMono-Regular,Menlo,monospace;color:#e9edf4;background:#0c1119d9;border:1px solid #2b3441;border-radius:6px;padding:6px 8px;pointer-events:none;z-index:15}
+/* Workforce panel */
+.scene-card.workforce .editor-body{display:grid;grid-template-columns:minmax(0,1fr) 340px}
+.scene-card.workforce .canvas-wrap{height:clamp(560px,70vh,820px)}
+.editor-panel.workforce{border-left:1px solid #29323e;padding:12px 14px 16px}
+.mock-badge{font-size:8px;letter-spacing:.08em;color:#e5b878;background:#3a3025;border:1px solid #5a4a33;border-radius:4px;padding:3px 6px;cursor:help}
+.agent-list{list-style:none;margin:0 0 12px;padding:0;display:flex;flex-direction:column;gap:4px}
+.agent-row{display:flex;align-items:flex-start;gap:9px;width:100%;background:#141c27;border:1px solid #29323e;border-radius:7px;color:inherit;padding:9px 10px;text-align:left;font-size:11px}
+.agent-row:hover{border-color:#4a5566}
+.agent-row-main{display:flex;flex-direction:column;gap:3px;flex:1;min-width:0}
+.agent-row-main strong{color:#e9edf4;font-size:11.5px}
+.agent-row-main small{color:#8e9bad;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agent-row-status{color:#8e9bad;font-size:10px;flex-shrink:0}
+.agent-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}
+.agent-chip{font-size:9px;color:#aab4c3;background:#1b2430;border:1px solid #303948;border-radius:4px;padding:1px 5px;white-space:nowrap}
+.agent-chip.demo{color:#c5baff;background:#29253e;border-color:#403b5a}
+.agent-chip.sim{color:#e5b878;background:#2b2419;border-color:#4a3d29}
+.agent-chip.warning{color:#ff8a8a;background:#2a1517;border-color:#5c2629}
+.agent-status-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:4px;background:#8e9bad}
+.agent-status-dot.thinking{background:#a89af5;box-shadow:0 0 8px #a89af580}
+.agent-status-dot.working{background:#65c995;box-shadow:0 0 8px #65c99580}
+.agent-status-dot.waiting{background:#e5b878}
+.agent-status-dot.error{background:#ff8a8a}
+.agent-status-dot.completed{background:#83c1df}
+.agent-header{display:flex;align-items:flex-start;gap:9px;margin:4px 0 10px}
+.agent-header>div{flex:1;min-width:0}
+.agent-header strong,.agent-header small{display:block}
+.agent-header strong{font:700 15px 'Manrope Variable',Manrope,sans-serif;color:#eef1f6}
+.agent-header small{color:#8e9bad;font-size:10px;margin-top:3px}
+.panel-link{display:flex;align-items:center;gap:5px;background:transparent;border:0;color:#a89af5;padding:2px 0 8px;font-size:10px}
+.panel-button.primary{background:#a89af5;color:#19182a;border-color:#a89af5;font-weight:700}
+.panel-button.primary:hover{background:#b9adff}
+.field-group-label.section{margin-top:16px;padding-top:12px;border-top:1px solid #1e2733;text-transform:uppercase;font-weight:700;letter-spacing:.08em}
+textarea.field-input{resize:vertical;min-height:54px;font-family:inherit}
+.form-error{color:#ff8a8a;font-size:10px;margin:-4px 0 10px}
+.desk-warning{display:flex;gap:6px;align-items:flex-start;color:#ffb4b4;background:#2a1517;border:1px solid #5c2629;border-radius:6px;padding:7px 8px;font-size:10px;line-height:1.4;margin:0 0 10px}
+.task-card{background:#141c27;border:1px solid #29323e;border-radius:7px;padding:9px 10px;margin-bottom:10px}
+.task-card.running,.task-card.queued{border-color:#3d4f45}
+.task-card.waiting{border-color:#5a4a33}
+.task-card.failed{border-color:#5c2629}
+.task-card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.task-card-head strong{color:#e9edf4;font-size:11px}
+.task-card p{margin:6px 0 0;color:#aab4c3;font-size:10px;line-height:1.45}
+.task-card small{display:block;margin-top:6px;color:#6e7a8c;font-size:9px}
+.task-card .task-result{color:#9dd7b6}
+.task-card .task-error{color:#ff8a8a}
+.activity-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px}
+.activity-list li{display:grid;grid-template-columns:auto 1fr auto;gap:7px;align-items:baseline;font-size:10px;color:#c9d1dc}
+.activity-list time{color:#6e7a8c;font-variant-numeric:tabular-nums}
+.nav-item .nav-badge{margin-left:auto;font-size:9px;color:#8e9bad}
+@media(max-width:1000px){.scene-card.workforce .editor-body{grid-template-columns:1fr}.scene-card.workforce .canvas-wrap{order:-1;height:480px}.editor-panel.workforce{border:0;border-top:1px solid #29323e}}

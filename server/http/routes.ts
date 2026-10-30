@@ -10,6 +10,7 @@ import type { WorkforceStore } from '../store'
 import type { ManagerError, TaskManager } from '../taskManager'
 import { parseApproval, parseCreateAgent, parseCreateTask, parseDesk, parsePatchAgent } from './inputs'
 import { HttpError, type Reply, type Route } from './router'
+import { eventsRoute } from './sse'
 
 export type RouteDeps = {
   config: ServerConfig
@@ -56,6 +57,7 @@ export function createRoutes(deps: RouteDeps): Route[] {
         return { status: 200, body }
       },
     },
+    eventsRoute({ events, heartbeatMs: deps.heartbeatMs, streams: deps.streams, now }),
     {
       method: 'POST',
       path: '/api/agents',

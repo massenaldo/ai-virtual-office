@@ -6,14 +6,13 @@ import { deriveEvents } from './deriveEvents'
 import { EventLog } from './eventLog'
 import { createRoutes } from './http/routes'
 import { createRouter, type Guard } from './http/router'
+import { HEARTBEAT_MS } from './http/sse'
 import { consoleLogger, type Logger } from './log'
 import { ClaudeAgentRuntimeProvider } from './runtime/claudeAgent'
 import { ServerMockProvider } from './runtime/mockProvider'
 import type { ServerRuntimeProvider } from './runtime/types'
 import { openWorkforceStore, type WorkforceStore } from './store'
 import { TaskManager } from './taskManager'
-
-const DEFAULT_HEARTBEAT_MS = 15000
 
 export type AppDeps = {
   now?: () => string
@@ -26,7 +25,7 @@ export type AppDeps = {
   responseHeaders?: (req: IncomingMessage) => Record<string, string>
 }
 
-export type App = { config: ServerConfig; store: WorkforceStore; events: EventLog; provider: ServerRuntimeProvider; manager: TaskManager; startedAt: string; handler: (req: IncomingMessage, res: ServerResponse) => void; closeStreams(): void }
+export type App = { config: ServerConfig; store: WorkforceStore; events: EventLog; provider: ServerRuntimeProvider; manager: TaskManager; startedAt: string; streams: Set<ServerResponse>; handler: (req: IncomingMessage, res: ServerResponse) => void; closeStreams(): void }
 
 export type RunningServer = { url: string; port: number; app: App; close(): Promise<void> }
 
@@ -41,10 +40,10 @@ export function createApp(config: ServerConfig, deps: AppDeps = {}): App {
   const manager = new TaskManager({ store, provider, config, now, log })
   const streams = new Set<ServerResponse>()
   const startedAt = now()
-  const routes = createRoutes({ config, store, events, provider, manager, now, startedAt, heartbeatMs: deps.heartbeatMs ?? DEFAULT_HEARTBEAT_MS, streams })
+  const routes = createRoutes({ config, store, events, provider, manager, now, startedAt, heartbeatMs: deps.heartbeatMs ?? HEARTBEAT_MS, streams })
   const handler = createRouter({ routes, guards: deps.guards, responseHeaders: deps.responseHeaders, log })
   return {
-    config, store, events, provider, manager, startedAt, handler,
+    config, store, events, provider, manager, startedAt, streams, handler,
     closeStreams: () => { for (const res of streams) res.end(); streams.clear() },
   }
 }

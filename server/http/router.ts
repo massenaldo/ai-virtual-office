@@ -83,6 +83,8 @@ export function createRouter({ routes, guards = [], responseHeaders, log }: Rout
     }
 
     const body = route.body === 'json' ? await readJsonBody(req) : undefined
+    // A handler that writes its own response (the event stream) still gets the configured headers.
+    for (const [name, value] of Object.entries(responseHeaders?.(req) ?? {})) res.setHeader(name, value)
     const result = await route.handler({ req, res, url, params, body })
     if ('handled' in result) return
     reply(req, res, result.status, result.body, result.headers)

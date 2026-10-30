@@ -5,3 +5,6 @@ dist/
 .DS_Store
 .env
 .superpowers/
+
+data/
+dist-server/

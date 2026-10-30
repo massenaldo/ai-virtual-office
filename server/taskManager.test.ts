@@ -551,6 +551,30 @@ describe('tool approvals', () => {
     await expect(ctx.requestToolApproval(write)).resolves.toEqual(cancelled)
   })
 
+  it('hides workspace paths in runtime output', async () => {
+    const { id } = await running()
+    const inside = join(ws.path('sandbox'), 'x.txt')
+    fake.emit({ type: 'message', taskId: id, text: `reading ${inside} under ${ws.root}` })
+    fake.emit({ type: 'progress', taskId: id, step: 'working', message: `at ${inside}` })
+    fake.emit({ type: 'failed', taskId: id, error: `ENOENT: no such file '${inside}'` })
+    const text = JSON.stringify(store.state)
+    expect(text).not.toContain(ws.root)
+    expect(task(id).errorMessage).toBe("ENOENT: no such file '<workspace>/x.txt'")
+    expect(store.state.activities.find((a) => a.type === 'agent-message')?.message).toBe('reading <workspace>/x.txt under <workspace-root>')
+  })
+
+  it('hides workspace paths in a failed start', async () => {
+    fake.defer = true
+    const m = make(fake, wsConfig(), (e) => events.push(e as Record<string, unknown>))
+    const r = m.startTask(FORGE, INPUT, { workspaceId: 'sandbox' })
+    const id = r.ok ? r.task.id : ''
+    await tick()
+    fake.rejectStart(new Error(`ENOENT '${ws.path('sandbox')}/missing'`))
+    await tick()
+    expect(task(id).errorMessage).toBe("Runtime failed to start: ENOENT '<workspace>/missing'")
+    expect(JSON.stringify(store.state)).not.toContain(ws.root)
+  })
+
   it('scrubs secrets from runtime output', async () => {
     const { id } = await running()
     fake.emit({ type: 'message', taskId: id, text: 'key sk-ant-api03-abcdefghijklmnop' })

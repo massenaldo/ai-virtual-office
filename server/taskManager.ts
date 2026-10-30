@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs'
 import { activeTaskFor, applyRuntimeEvent, assignTask, cancelTask as forceCancel, decideApproval as recordDecision, isActiveTask, markStarting, removeAgent as dropAgent, requestCancel, timeOutTask, validateTaskInput, type TaskInput } from '../src/workforce/operations'
 import { createId } from '../src/layout/operations'
 import type { RuntimeEvent } from '../src/workforce/runtime/types'
@@ -373,9 +374,23 @@ export class TaskManager {
     return { ok: true }
   }
 
+  /** Server paths never reach state, events or responses: the workspace becomes <workspace>, the root <workspace-root>. */
+  private hidePaths(run: Run, text: string): string {
+    const roots = new Set<string>()
+    const { workspaceRoot } = this.config
+    if (workspaceRoot !== null) {
+      roots.add(workspaceRoot)
+      try { roots.add(realpathSync(workspaceRoot)) } catch { /* the root vanished: the configured spelling still gets replaced */ }
+    }
+    const pairs: Array<[string, string]> = [...(run.workspace ? [[run.workspace.path, '<workspace>'] as [string, string]] : []), ...[...roots].map((r): [string, string] => [r, '<workspace-root>'])]
+    return pairs.sort((x, y) => y[0].length - x[0].length).reduce((t, [path, label]) => (path === '' ? t : t.split(path).join(label)), text)
+  }
+
   /** Output caps, applied before an event reaches state. Progress text and errors are cut but never dropped; messages stop at the task budget. */
   private cap(run: Run, event: RuntimeEvent): RuntimeEvent | null {
     const { maxMessageBytes: perMessage, maxTaskOutputBytes: budget } = this.config
+    // Cut first (redaction cost grows with length), then hide server paths and redact secrets.
+    const clean = (text: string) => this.hidePaths(run, redactSecrets(text.length > perMessage + 4096 ? text.slice(0, perMessage + 4096) : text))
     const cut = (text: string) => {
       const r = truncateUtf8(text, perMessage)
       return r.truncated ? r.text + messageTruncatedMarker(perMessage) : r.text
@@ -391,17 +406,17 @@ export class TaskManager {
     switch (event.type) {
       case 'message': {
         if (run.outputClosed) return null
-        const t = truncateUtf8(redactSecrets(event.text), perMessage)
+        const t = truncateUtf8(clean(event.text), perMessage)
         const used = Buffer.byteLength(t.text)
         if (run.outputBytes + used > budget) return { ...event, text: fit(t.text) }
         run.outputBytes += used
         return { ...event, text: t.truncated ? t.text + messageTruncatedMarker(perMessage) : t.text }
       }
-      case 'progress': return { ...event, message: cut(redactSecrets(event.message)) }
-      case 'failed': return { ...event, error: cut(redactSecrets(event.error)) }
+      case 'progress': return { ...event, message: cut(clean(event.message)) }
+      case 'failed': return { ...event, error: cut(clean(event.error)) }
       case 'approval_requested': return { ...event, summary: sanitizeSummary(event.summary) }
       case 'completed': {
-        const t = truncateUtf8(redactSecrets(event.summary), perMessage)
+        const t = truncateUtf8(clean(event.summary), perMessage)
         return { ...event, summary: fit(t.truncated ? t.text + messageTruncatedMarker(perMessage) : t.text) }
       }
       default: return event

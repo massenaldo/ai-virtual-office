@@ -56,3 +56,18 @@ describe('findSecretInConfig', () => {
     expect(findSecretInConfig({ a: 'x' }, undefined)).toBeNull()
   })
 })
+
+describe('redactSecrets cost', () => {
+  it('stays fast on long runs of secret-looking words', () => {
+    const t0 = Date.now()
+    redactSecrets('token'.repeat(50000))
+    redactSecrets('key '.repeat(60000))
+    redactSecrets('a'.repeat(300000) + 'password=x')
+    expect(Date.now() - t0).toBeLessThan(500)
+  })
+
+  it('still redacts a long key name', () => {
+    expect(redactSecrets(`${'a'.repeat(30)}_api_key=abc123456`)).toBe(`${'a'.repeat(30)}_api_key=[REDACTED]`)
+  })
+})
+

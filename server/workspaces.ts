@@ -125,6 +125,9 @@ export function resolveWorkspace(config: WorkspaceConfig, workspaceId: unknown):
 export function checkPathInWorkspace(workspacePath: string, candidate: unknown): { ok: true; relative: string } | { ok: false; reason: PathReason } {
   // NUL is rejected before any filesystem call: Node throws ERR_INVALID_ARG_VALUE for it, not ENOENT.
   if (typeof candidate !== 'string' || candidate === '' || candidate.length > MAX_PATH_CHARS || candidate.includes('\0') || candidate.includes('\\')) return { ok: false, reason: 'invalid_path' }
+  // A `..` after a symlink is resolved by the kernel against the link's target, but resolve() below removes it textually,
+  // so `link/../x` would be judged by the wrong path. No `..` segment is ever accepted, even one that stays inside.
+  if (candidate.split('/').includes('..')) return { ok: false, reason: 'outside_workspace' }
   const abs = resolve(workspacePath, candidate)
   if (!isInside(workspacePath, abs)) return { ok: false, reason: 'outside_workspace' }
   let cur = abs

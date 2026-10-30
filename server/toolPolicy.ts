@@ -26,10 +26,24 @@ export const TOOL_CATALOGUE: readonly ToolSpec[] = [
 export const DEFAULT_ALLOWED_TOOLS: readonly string[] = ['Read', 'Glob', 'Grep', 'Write', 'Edit']
 export const SUMMARY_MAX_CHARS = 200
 const BASH_MAX_CHARS = 10000
+const PATTERN_MAX_CHARS = 1000
+const URL_MAX_CHARS = 2000
+
+/** The input fields each tool defines (Claude Code's names). Any other field is refused, so nothing unreviewed rides along. */
+const ALLOWED_FIELDS: Record<string, readonly string[]> = {
+  Read: ['file_path', 'offset', 'limit'],
+  Glob: ['pattern', 'path'],
+  Grep: ['pattern', 'path', 'glob', 'type', 'output_mode', '-i', '-n', '-A', '-B', '-C', 'head_limit', 'multiline'],
+  Write: ['file_path', 'content'],
+  Edit: ['file_path', 'old_string', 'new_string', 'replace_all'],
+  Bash: ['command', 'description', 'timeout'],
+  WebFetch: ['url', 'prompt'],
+  WebSearch: ['query', 'allowed_domains', 'blocked_domains'],
+}
 
 export type ToolPolicy = { readonly allowedTools: ReadonlySet<string> }
 
-export type DenyReason = 'unknown_tool' | 'not_allowed' | 'invalid_input' | 'invalid_path' | 'missing_path' | 'outside_workspace' | 'unsafe_symlink' | 'no_workspace' | 'approval_pending'
+export type DenyReason = 'unknown_tool' | 'not_allowed' | 'invalid_input' | 'invalid_path' | 'missing_path' | 'outside_workspace' | 'unsafe_symlink' | 'no_workspace' | 'approval_pending' | 'not_reviewable'
 
 export type ToolDecision =
   | { decision: 'allow'; reason: 'read_only'; summary: string }
@@ -46,6 +60,7 @@ const DENY_TEXT: Record<DenyReason, string> = {
   unsafe_symlink: 'path goes through a broken symlink',
   no_workspace: 'the task has no workspace',
   approval_pending: 'another tool approval is already pending for this task',
+  not_reviewable: 'the request cannot be shown to a reviewer in full',
 }
 
 export function toolPolicyFrom(config: Pick<ServerConfig, 'allowedTools'>): ToolPolicy {
@@ -68,16 +83,19 @@ const nonEmpty = (v: unknown): v is string => typeof v === 'string' && v !== ''
 /** The required non-path fields per tool; false means invalid input. */
 function fieldsValid(tool: string, i: Record<string, unknown>): boolean {
   switch (tool) {
-    case 'Glob':
-    case 'Grep': return nonEmpty(i.pattern)
+    case 'Glob': return nonEmpty(i.pattern) && i.pattern.length <= PATTERN_MAX_CHARS
+    case 'Grep': return nonEmpty(i.pattern) && i.pattern.length <= PATTERN_MAX_CHARS && (i.glob === undefined || (nonEmpty(i.glob) && i.glob.length <= PATTERN_MAX_CHARS))
     case 'Write': return typeof i.content === 'string'
     case 'Edit': return typeof i.old_string === 'string' && typeof i.new_string === 'string'
     case 'Bash': return nonEmpty(i.command) && i.command.length <= BASH_MAX_CHARS
     case 'WebFetch': {
-      if (!nonEmpty(i.url)) return false
-      try { return ['http:', 'https:'].includes(new URL(i.url).protocol) } catch { return false }
+      if (!nonEmpty(i.url) || i.url.length > URL_MAX_CHARS) return false
+      try {
+        const u = new URL(i.url)
+        return ['http:', 'https:'].includes(u.protocol) && u.username === '' && u.password === ''
+      } catch { return false }
     }
-    case 'WebSearch': return nonEmpty(i.query)
+    case 'WebSearch': return nonEmpty(i.query) && i.query.length <= PATTERN_MAX_CHARS
     default: return true
   }
 }
@@ -91,6 +109,11 @@ function lexicalPath(value: unknown): { ok: true; relative: string } | { ok: fal
   return { ok: true, relative: normalized }
 }
 
+/** A glob is matched inside the workspace: no absolute, home-relative or climbing pattern. */
+function globInside(pattern: string): boolean {
+  return !pattern.startsWith('/') && !pattern.startsWith('~') && !pattern.includes('\\') && !pattern.split('/').includes('..')
+}
+
 function summaryFor(tool: string, i: Record<string, unknown>, rel: string | null): string {
   switch (tool) {
     case 'Read': return `Read ${rel}`
@@ -99,7 +122,7 @@ function summaryFor(tool: string, i: Record<string, unknown>, rel: string | null
     case 'Write': return `Write ${rel} (${formatBytes(Buffer.byteLength(i.content as string))})`
     case 'Edit': return `Edit ${rel}`
     case 'Bash': return `Run command: ${i.command}`
-    case 'WebFetch': { const u = new URL(i.url as string); return `Fetch ${u.origin}${u.pathname}` }
+    case 'WebFetch': { const u = new URL(i.url as string); return `Fetch ${u.origin}${u.pathname}${u.search}` }
     default: return `Search the web for ${i.query}`
   }
 }
@@ -111,7 +134,10 @@ export function decideToolUse(policy: ToolPolicy, toolName: string, input: unkno
   if (!spec) return denied('unknown_tool')
   if (!policy.allowedTools.has(spec.name)) return denied('not_allowed')
   if (!isRecord(input)) return denied('invalid_input')
+  if (Object.keys(input).some((k) => !ALLOWED_FIELDS[spec.name]?.includes(k))) return denied('invalid_input')
   if (!fieldsValid(spec.name, input)) return denied('invalid_input')
+  const globs = [spec.name === 'Glob' || spec.name === 'Grep' ? input.glob : undefined, spec.name === 'Glob' ? input.pattern : undefined]
+  if (globs.some((g) => typeof g === 'string' && !globInside(g))) return denied('outside_workspace')
   if (spec.pathRequired && spec.pathArgs.every((a) => input[a] === undefined)) return denied('missing_path')
   if (spec.needsWorkspace && workspace === null) return denied('no_workspace')
 
@@ -123,6 +149,11 @@ export function decideToolUse(policy: ToolPolicy, toolName: string, input: unkno
     rel = checked.relative
   }
 
-  const summary = sanitizeSummary(summaryFor(spec.name, input, rel))
-  return spec.category === 'read' ? { decision: 'allow', reason: 'read_only', summary } : { decision: 'ask', reason: 'needs_approval', summary }
+  const raw = summaryFor(spec.name, input, rel)
+  if (spec.category === 'read') return { decision: 'allow', reason: 'read_only', summary: sanitizeSummary(raw) }
+  // A human approves what the summary says, so it must be the whole action: if redaction or the length cap would change
+  // it, nothing is asked. (Only control characters and repeated spaces are flattened.)
+  const flat = raw.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/ {2,}/g, ' ').trim()
+  if (flat.length > SUMMARY_MAX_CHARS || redactSecrets(flat) !== flat) return denied('not_reviewable')
+  return { decision: 'ask', reason: 'needs_approval', summary: flat }
 }

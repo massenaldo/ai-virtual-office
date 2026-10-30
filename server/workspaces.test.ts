@@ -88,6 +88,13 @@ describe('checkPathInWorkspace', () => {
     }
   })
 
+  it('refuses any path with a .. segment, even one that would stay inside', () => {
+    for (const p of ['link/../notes.md', 'sub/../notes.md', `${W}/link/../x`, 'a/b/../../notes.md', '..']) {
+      expect(checkPathInWorkspace(W, p)).toEqual({ ok: false, reason: 'outside_workspace' })
+    }
+    expect(checkPathInWorkspace(W, 'sub/..hidden/x')).toEqual({ ok: true, relative: 'sub/..hidden/x' })
+  })
+
   it('refuses a write through a dangling symlink', () => {
     expect(checkPathInWorkspace(W, 'dangling')).toEqual({ ok: false, reason: 'unsafe_symlink' })
   })

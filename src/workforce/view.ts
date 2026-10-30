@@ -23,7 +23,7 @@ export function filterAgents(agents: Agent[], f: AgentFilter): Agent[] {
 }
 
 /** 'Desk 03' for the default desk-03 naming; any other id is shown as is. */
-const deskLabel = (id: string) => (/^desk-\d+$/.test(id) ? `Desk ${id.slice(5)}` : id)
+export const deskLabel = (id: string) => (/^desk-\d+$/.test(id) ? `Desk ${id.slice(5)}` : id)
 
 const roomName = (layout: OfficeLayout, roomId: string | null) => (roomId === null ? OPEN_FLOOR : layout.rooms.find((r) => r.id === roomId)?.name ?? OPEN_FLOOR)
 

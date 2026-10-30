@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { AlertTriangle, ArrowLeft, CirclePause, CirclePlay, OctagonX, Pencil, Play, Square, Trash2 } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, CirclePause, CirclePlay, LocateFixed, OctagonX, Pencil, Play, Square, Trash2 } from 'lucide-react'
 import { DEPARTMENTS } from '../../layout/catalog'
 import type { OfficeLayout } from '../../layout/types'
 import type { Workforce } from '../useWorkforce'
@@ -8,7 +8,7 @@ import type { Agent } from '../types'
 import { AGENT_STATUS_LABEL, TASK_STATUS_LABEL, agentTimeline, deskOptions, deskStatus, formatTime } from '../view'
 import { StatusDot } from './AgentList'
 
-export type AgentDetailProps = { workforce: Workforce; layout: OfficeLayout; agent: Agent; onBack(): void; onEdit(): void; onRemove(): void }
+export type AgentDetailProps = { workforce: Workforce; layout: OfficeLayout; agent: Agent; onBack(): void; onEdit(): void; onRemove(): void; onFocusDesk(): void }
 
 function TaskForm({ onStart }: { onStart(input: TaskInput): string | null }) {
   const [input, setInput] = useState<TaskInput>({ title: '', description: '' })
@@ -27,7 +27,7 @@ function TaskForm({ onStart }: { onStart(input: TaskInput): string | null }) {
   </form>
 }
 
-export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, onRemove }: AgentDetailProps) {
+export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, onRemove, onFocusDesk }: AgentDetailProps) {
   const { state, actions } = workforce
   const desk = deskStatus(layout, agent)
   const groups = deskOptions(layout, state, agent.id)
@@ -68,6 +68,9 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
       </select>
     </label>
     {deskError && <p className="form-error" role="alert">{deskError}</p>}
+    {desk.kind !== 'none' && <div className="panel-actions">
+      <button className="panel-button" onClick={onFocusDesk} disabled={desk.kind === 'unavailable'}><LocateFixed size={13}/> {desk.kind === 'assigned' ? 'Focus desk' : 'Desk not in the layout'}</button>
+    </div>}
 
     <div className="field-group-label section">Current task</div>
     {task ? <div className={`task-card ${task.status}`}>

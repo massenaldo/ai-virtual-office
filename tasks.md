@@ -1,7 +1,7 @@
 # Milestone 3A — AI Agent Workforce UI and Mock Runtime: Tasks
 
 **Spec:** [`plan.md`](plan.md) (Milestone 3A brief). This file is my working task list for that spec.
-**Status:** Draft, 2026-10-26. Not started; waiting for your review and answers to the open questions at the end.
+**Status:** Approved, 2026-10-30. Q1–Q4 answered (see "Decisions" at the end); Stage A is next, after the Vitest upgrade PR.
 **Earlier milestones:** [`docs/milestones/milestone-2-tasks.md`](docs/milestones/milestone-2-tasks.md) and [`milestone-2-plan.md`](docs/milestones/milestone-2-plan.md).
 
 ## What this milestone is
@@ -101,10 +101,10 @@ The office gets a staff of **AI agents** you can manage. You can create agents, 
 - [ ] Final report (plan.md "Final report"), including the explicit statement that execution is simulated.
 - [ ] PR
 
-## Open questions
+## Decisions (answered 2026-10-30)
 
-- **Q1: Where should the Workforce live?** My proposal is a panel beside the 3D office, opened from the sidebar's **AI Agents**. The alternative is a separate full page with its own small office map.
-- **Q2: Saving agents.** My proposal is to save automatically on every change, outside the layout's undo history. The alternative is an explicit Save like the layout.
-- **Q3: Deleted desks.** My proposal is to keep the agent's reference, flagged "Workstation unavailable". The alternative is to unassign automatically when the desk disappears.
-- **Q4: Test-runner security advisories.** Should I upgrade Vitest to v5 in a small separate PR first? The advisories are dev-only, but two are rated critical.
-- **Q5: Anything to change** in the decisions or stages above, for example the six demo agents, the 300-event activity limit, or one agent per desk.
+- **Q1: Where the Workforce lives:** a panel beside the 3D office, opened from the sidebar's **AI Agents**. It can't be on at the same time as layout edit mode.
+- **Q2: Saving agents:** saved automatically on every change, outside the layout's undo history.
+- **Q3: Deleted desks:** the agent keeps the reference, flagged "Workstation unavailable".
+- **Q4: Test-runner advisories:** upgrade Vitest to v5 in a small separate PR before Stage A.
+- **Q5:** no changes requested; proposed decisions 1–11 stand.

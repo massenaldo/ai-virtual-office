@@ -1,6 +1,6 @@
 # Milestone 3A — AI Agent Workforce UI and Mock Runtime: Final Report
 
-**Spec:** [`plan.md`](../plan.md) · **Tasks:** [`tasks.md`](../tasks.md) · **Date:** 2026-10-30
+**Spec:** [`milestone-3a-plan.md`](milestones/milestone-3a-plan.md) · **Tasks:** [`milestone-3a-tasks.md`](milestones/milestone-3a-tasks.md) · **Date:** 2026-10-30
 
 > **Runtime execution is simulated.** No real Claude, Claude Code or Agent SDK task execution has been implemented. The mock runtime steps a task through timed states in the browser and writes canned results that say "No AI was run". Nothing in this milestone calls an LLM, makes network requests, or launches processes. A test fails the build's test suite if `fetch(`, `child_process`, `XMLHttpRequest`, `new WebSocket`, `apiKey` or `ANTHROPIC_` appears in the non-test workforce code.
 

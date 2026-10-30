@@ -1,234 +1,217 @@
-# Milestone 3A — AI Agent Workforce UI and Mock Runtime
+# Milestone 3B.1 — Real Agent Runtime Foundation
 
 Project: AI Virtual Office  
 Repository: https://github.com/massenaldo/ai-virtual-office
 
-## Goal
+Milestones 1, 2, and 3A have been completed:
+- Editable 3D office layout.
+- Realistic office environment.
+- Agent Workforce UI.
+- Mock runtime and simulated task lifecycle.
 
-Implement the AI Agent Workforce UI and a working mock runtime in the existing application.
+Now prepare the application for real Claude Agent execution.
 
-The previous milestones are complete:
-- Milestone 1: editable office layout.
-- Milestone 2: realistic 3D office.
+## Objective
 
-Preserve both milestones. This milestone must introduce manageable AI agents, agent-to-desk mapping, task assignments, visible agent status, and activity history.
+Build the backend foundation for a secure, locally hosted AI agent workforce that can later run on a VPS without changing the frontend architecture.
 
-The runtime must initially be simulated. Prepare a clean interface for future Claude Code / Claude Agent runtime integration, but do not claim real AI execution is implemented.
+The selected future runtime is Claude Agent SDK for TypeScript.
 
-## Phase 1 — Audit the actual project
+This phase establishes the backend, runtime abstraction, task lifecycle, event delivery, and security boundaries.
 
-Before coding:
+Do not claim real Claude execution is working until the actual SDK integration has been implemented and tested.
 
-1. Inspect the repository structure and current branch.
-2. Review the layout schema, room and furniture IDs, 3D scene, editor interactions, persistence, and application routing.
-3. Identify how to extend the existing UI without replacing it.
-4. Run the existing production build and relevant tests.
-5. Record pre-existing errors.
-6. Propose a concise implementation plan based on actual files.
+## 1. Audit the existing implementation
 
-Do not rewrite the application or replace the 3D scene.
+Before making changes:
+- Inspect the actual repository and current branch.
+- Review the completed 3A implementation.
+- Inspect agent, task, activity, runtime-provider, and persistence models.
+- Identify existing frontend state management and mock runtime interfaces.
+- Inspect package.json and existing scripts.
+- Run the production build and relevant tests.
+- Record existing issues.
 
-## Phase 2 — Agent domain model
+Create a concise implementation plan based on actual code.
 
-Create or adapt typed domain models for:
+Do not rewrite the existing frontend or 3D scene.
 
-- Agent
-- AgentTask
-- AgentActivity
-- AgentStatus
-- RuntimeMode
+## 2. Backend architecture
 
-Required agent statuses:
-`idle`, `working`, `thinking`, `waiting`, `error`, `completed`.
+Evaluate the smallest appropriate backend architecture compatible with the existing project.
 
-Every agent should have:
-- Stable ID
-- Display name
-- Role and department
-- Optional desk/workstation reference
-- Current status
-- Current task reference
-- Runtime mode: `mock` or `real`
-- Last activity timestamp
+Preferred direction:
+- Separate Node.js + TypeScript backend service.
+- REST API for commands and queries.
+- Server-Sent Events (SSE) for real-time task and agent updates.
+- Runtime provider abstraction.
+- Local development configuration.
+- Environment-based configuration for future VPS deployment.
 
-Every task should have:
-- Stable ID and assigned agent ID
-- Title and description
-- Status
-- Created, started, and completed timestamps where applicable
-- Result summary or error message
+Do not introduce unnecessary infrastructure.
 
-Every activity should have:
-- Stable ID
-- Agent and optional task references
-- Event type and human-readable message
-- Timestamp
-- Source: mock or real
+Do not add a database, Redis, Docker, or distributed queue unless the existing architecture genuinely requires it. Start with a durable, appropriately scoped local persistence strategy and document its limitations.
 
-Use discriminated unions or equivalent typed structures where useful. Follow the project's existing conventions.
+## 3. Runtime provider abstraction
 
-## Phase 3 — Agent management UI
+Define a clean provider contract that supports:
+- Start task.
+- Receive execution events.
+- Request cancellation.
+- Retrieve execution status.
+- Retrieve final result.
+- Handle runtime failures.
+- Associate runtime sessions with workforce tasks.
 
-Add an Agent Workforce view or panel that fits the current application design.
+Keep the existing MockRuntimeProvider functional.
 
-Users should be able to:
-- View all agents and filter by department or status.
-- Create an agent.
-- Edit its name, role, and department.
-- Assign or unassign a workstation.
-- View the agent's current task and recent activity.
-- Open an agent detail panel.
-- Remove an agent with appropriate confirmation when necessary.
+Prepare ClaudeAgentRuntimeProvider as an implementation boundary.
 
-Seed the initial experience with a small, realistic set of example agents across Project Management, Tech Lead, Backend, Frontend, QA, and DevOps.
+Avoid coupling React components directly to Claude SDK or process execution.
 
-Clearly label the initial agents and their activity as demo/mock data.
+## 4. Task lifecycle
 
-Avoid duplicating agent records every time the application loads.
-
-## Phase 4 — Connect agents to the 3D office
-
-Integrate with the existing 3D scene and layout model.
-
-Requirements:
-- An assigned agent is associated with a real existing workstation or furniture ID.
-- Selecting an agent highlights or focuses its workstation when practical.
-- Selecting an agent's workstation opens the corresponding agent details if an agent is assigned.
-- Provide a clear, unobtrusive status indicator or marker.
-- Handle unassigned agents and missing or deleted desks gracefully.
-- Do not modify the underlying furniture geometry just to display status.
-- Do not break room selection, furniture editing, transforms, undo/redo, save, reset, or floor-plan synchronization.
-
-Use the existing selection and interaction patterns wherever possible. Do not let status indicators intercept essential editor interactions.
-
-## Phase 5 — Mock runtime and task simulation
-
-Implement a mock runtime behind a well-defined interface, for example:
-
-- listAgents()
-- createAgent()
-- updateAgent()
-- removeAgent()
-- assignTask()
-- getTask()
-- listActivities()
-- startMockTask()
-- cancelTask()
-
-Adapt these names to the existing architecture.
-
-The mock runtime must support a believable task lifecycle:
-`idle -> working/thinking -> completed`
-
-It should also be possible to represent `waiting` and `error` states through controlled demo actions.
-
-Requirements:
-- Users can create and assign a task to an agent.
-- Starting a task changes the UI state and adds activity events.
-- Task progress is explicitly simulated, not generated by a fake claim of AI execution.
-- Completing, failing, or cancelling a mock task updates task and agent state consistently.
-- Prevent duplicate concurrent tasks for one agent unless the domain model explicitly supports concurrency.
-- Clean up timers and subscriptions when components unmount.
-- Avoid race conditions and inconsistent task references.
-- Clearly label simulated progress and results.
-
-Do not call an LLM or launch external processes in this milestone.
-
-## Phase 6 — Runtime abstraction for future Claude integration
-
-Define a runtime-provider interface that separates application logic from execution details.
-
-Provide a MockRuntimeProvider implementation now.
-
-Prepare a ClaudeRuntimeProvider boundary for future work, but do not implement or pretend to implement its execution functionality in this milestone.
-
-Future real runtime integration must be server-side. The browser must never receive Anthropic credentials, API keys, shell access, or unrestricted process-execution capabilities.
-
-Keep the interface capable of representing:
-- Starting a task
-- Receiving task events
-- Cancellation requests
-- Completion results
-- Runtime errors
-- Session or execution identifiers when applicable
-
-Do not introduce a new backend or runtime dependency solely for this placeholder.
-
-## Phase 7 — Persistence
-
-Persist agent definitions, assignments, tasks, and recent activities using the project's existing storage conventions where appropriate.
-
-Requirements:
-- Stable IDs.
-- Versioned data where practical.
-- Validation when loading stored data.
-- Graceful recovery from malformed or outdated storage.
-- Consistent references between agents, tasks, activities, and desks.
-- A reasonable activity-history limit.
-- Avoid storing unnecessary duplicate state.
-
-Preserve the existing office layout persistence independently. Agent changes must never overwrite or corrupt the saved office geometry.
-
-If the existing architecture makes browser localStorage appropriate, use a separate namespaced key for workforce data. Do not silently replace the office layout's existing storage key.
-
-## Phase 8 — UX and error handling
+Define consistent lifecycle states.
 
 Include:
-- Empty states.
-- Loading or transition states where appropriate.
-- Form validation.
-- Confirmation for destructive operations.
-- Clear task status labels.
-- Human-readable error messages.
-- A visible mock-mode indicator.
-- A useful activity timeline.
+- queued
+- starting
+- running
+- waiting_for_approval
+- completed
+- failed
+- cancelling
+- cancelled
 
-Keep the current visual style consistent with the realistic 3D office and dark dashboard.
+Map these lifecycle states to the existing agent statuses without breaking the current UI.
 
-Do not introduce unnecessary animations or heavy rendering effects.
+Prevent duplicate execution and inconsistent task assignment.
 
-## Phase 9 — Verification
+Implement:
+- Task IDs.
+- Execution IDs.
+- Creation timestamps.
+- Start and completion timestamps.
+- Runtime metadata.
+- Error reporting.
+- Cancellation handling.
+- Task timeout configuration.
 
-Verify the actual implementation.
+## 5. Security foundation
 
-Test at minimum:
-1. Existing application builds successfully.
-2. Existing layout editor still works.
-3. Agent creation, editing, removal, and desk assignment work.
-4. Agent selection maps to the correct workstation.
-5. Task creation and mock execution work.
-6. Task completion and error states update consistently.
-7. Activity events are recorded correctly.
-8. Data survives a page refresh.
-9. Malformed persisted data does not crash the application.
-10. Deleted or unavailable workstations do not break agent records or rendering.
-11. Existing layout save, reload, undo, redo, and reset remain functional.
-12. The `/vo` workflow still works.
+Treat agent execution as a privileged operation.
 
-Run relevant tests and the project's actual production build command. Do not report checks as passed unless they were executed.
+Implement or establish:
+- Workspace allowlisting.
+- Path validation and protection against path traversal.
+- Explicit tool allowlists.
+- No unrestricted host filesystem access.
+- No unrestricted shell access.
+- No secrets exposed to frontend.
+- Backend-only credential handling.
+- Task execution timeouts.
+- Output size limits.
+- Safe process termination.
+- Structured audit logs.
 
-## Scope boundaries
+Dangerous operations must require explicit human approval.
 
-Do not implement:
-- Actual Claude API or Agent SDK execution.
-- Unrestricted shell execution.
-- VPS deployment.
-- Authentication or multi-user access.
-- A database or distributed job queue.
-- Multi-agent orchestration.
-- Video studio functionality.
+Do not use dangerously-skip-permissions or equivalent unrestricted permission bypasses.
 
-These are future milestones.
+Never accept arbitrary working directory paths or executable commands directly from browser requests.
+
+## 6. Real-time events
+
+Establish typed events such as:
+- task.queued
+- task.started
+- agent.status_changed
+- agent.message
+- task.progress
+- task.waiting_for_approval
+- task.completed
+- task.failed
+- task.cancelled
+
+Deliver events to the frontend through SSE.
+
+Support reconnection and event IDs where appropriate.
+
+Ensure the frontend can recover current state after disconnecting instead of relying only on transient events.
+
+## 7. Frontend integration
+
+Connect the existing workforce UI to the backend through a service layer.
+
+Preserve:
+- Agent registry.
+- Desk assignments.
+- 3D agent indicators.
+- Agent detail panel.
+- Task management UI.
+- Activity feed.
+- Existing layout editor.
+
+Keep the mock runtime available for development and fallback.
+
+Introduce an explicit runtime environment indicator such as Mock or Local Backend.
+
+Do not label a mock task as a real Claude execution.
+
+## 8. Local-first and VPS-ready
+
+Support environment-based configuration for:
+- Backend host and port.
+- Frontend API URL.
+- Workspace root.
+- Runtime selection.
+- Execution timeout.
+- Allowed tools.
+- Credential configuration.
+
+Local mode should work on the developer's machine.
+
+Future VPS mode should use the same application-level API and runtime interface.
+
+Do not implement VPS deployment yet.
+
+## 9. Verification
+
+Test:
+1. Backend starts independently.
+2. Frontend connects to backend.
+3. Existing mock runtime still works.
+4. Agent and task state remains consistent.
+5. SSE delivers events and handles reconnection.
+6. Invalid workspace paths are rejected.
+7. Unauthorized commands are rejected.
+8. Cancellation and timeout behavior work.
+9. Existing 3D office and layout editor remain functional.
+10. Production build and relevant tests pass.
+
+Run the actual available checks. Do not claim success without execution.
+
+## 10. Scope boundary
+
+This phase must not:
+- Pretend Claude is running.
+- Launch unrestricted shell commands.
+- Expose credentials in browser code.
+- Deploy to VPS.
+- Introduce multi-user authentication.
+- Rewrite the completed 3D scene.
+- Remove the existing mock runtime.
 
 ## Final report
 
-Summarize:
-- Files changed.
-- Architecture and data model.
-- UI features implemented.
-- Persistence behavior.
-- Tests and build results.
-- Known limitations.
-- Explicit confirmation that runtime execution is simulated and no real Claude task execution has been implemented.
+Report:
+- Actual architecture implemented.
+- Files created and modified.
+- API endpoints.
+- Event contracts.
+- Security boundaries.
+- Persistence approach.
+- Build and test results.
+- Remaining work before real Claude execution.
 
-Implement the changes in the existing repository; do not stop after producing a plan.
+Explicitly state whether the Claude Agent SDK is installed or integrated. Do not claim real agent execution if it is not.

@@ -1,7 +1,7 @@
 # Milestone 3B.1 — Real Agent Runtime Foundation: Tasks
 
 **Spec:** [`plan.md`](plan.md) (Milestone 3B.1 brief). This file is my working task list for that spec.
-**Status:** Draft, 2026-10-31. Waiting for your answers to Q1–Q5 at the end before Stage A starts.
+**Status:** Approved, 2026-10-31. Q1–Q5 answered with the recommendations (see "Decisions" at the end). Stages A and B are done (B in review); Stage C is next.
 **Earlier milestones:** [`milestone-3a-tasks.md`](docs/milestones/milestone-3a-tasks.md) ([report](docs/milestone-3a-report.md)), and [`milestone-2-tasks.md`](docs/milestones/milestone-2-tasks.md).
 
 ## What this milestone is
@@ -167,17 +167,17 @@ The app gets a small **local backend**. It owns agents, tasks and activity, runs
 
 ## Stage B — Backend service core (mock runtime)
 
-- [ ] `server/` with `node:http`, a small router, JSON errors, typed `config.ts`, `.env.example`, `tsconfig.server.json`, and scripts `server` / `server:build` / `dev:full` (see Q3).
-- [ ] JSON file store (atomic write, validation, backup, demo seed) and runtime contract v2 with the server-side mock provider.
-- [ ] Task manager: queued → starting → running, timeouts, cancelling → cancelled with a grace period, output caps, and no duplicate execution.
-- [ ] REST endpoints from decision 7, and SSE with ids, a 500-event replay buffer, `state.reset`, and a heartbeat.
-- [ ] HTTP integration tests (state, commands, the full mock lifecycle, cancel, timeout, reconnect with `Last-Event-ID`) and a PR.
+- [x] `server/` with `node:http`, a small router, JSON errors, typed `config.ts`, `.env.example`, `tsconfig.server.json`, and scripts `server` / `server:build` / `dev:full` (see Q3).
+- [x] JSON file store (atomic write, validation, backup, demo seed) and runtime contract v2 with the server-side mock provider.
+- [x] Task manager: queued → starting → running, timeouts, cancelling → cancelled with a grace period, output caps, and no duplicate execution.
+- [x] REST endpoints from decision 7, and SSE with ids, a 500-event replay buffer, `state.reset`, and a heartbeat.
+- [x] HTTP integration tests (state, commands, the full mock lifecycle, cancel, timeout, reconnect with `Last-Event-ID`) and a PR.
 
 ## Stage C — Security foundation
 
 - [ ] Workspaces by id plus `resolveWorkspace` (traversal, absolute paths, symlink escape, NUL), with rejections audited.
 - [ ] Tool catalogue plus `decideToolUse` (allow / deny / ask), with no bypass mode. Approvals go through the task manager (`waiting_for_approval`, approve / deny endpoint, and a timeout while waiting).
-- [ ] Origin allowlist, JSON-only state changes, CORS, and binding to `127.0.0.1`. Credential handling (server env only, `credentialsConfigured` flag, tests that the bundle and responses carry no key).
+- [ ] Origin allowlist, JSON-only state changes (**including routes with no body**, such as cancel and the demo POSTs, which a plain `text/plain` cross-origin POST can reach today), a **Host-header allowlist** against DNS rebinding (an Origin check alone doesn't stop a rebinding page reading `/api/state` and `/api/events`), CORS, and binding to `127.0.0.1`. Credential handling (server env only, `credentialsConfigured` flag, tests that the bundle and responses carry no key).
 - [ ] Structured audit log (JSON Lines) and a guard test against process execution and credential leaks.
 - [ ] `ClaudeAgentRuntimeProvider` boundary (unavailable, documented integration points) and a PR.
 
@@ -212,3 +212,13 @@ The app gets a small **local backend**. It owns agents, tasks and activity, runs
 - **Q5: Local API protection.**
   - My recommendation for 3B.1: `127.0.0.1` binding, plus the `Origin` allowlist and JSON-only rule from decision 8, with no login, as the spec says.
   - Option: also require a random token created at server start and shown in the terminal. That would be stronger against other software on the same machine, but adds a setup step. I'd save it for the VPS milestone.
+
+## Decisions (answered 2026-10-31)
+
+All five recommendations were accepted:
+
+- **Q1:** the Claude Agent SDK is **not installed** in 3B.1. `ClaudeAgentRuntimeProvider` stays a typed boundary that reports "not installed". The SDK is added and tested in the next phase.
+- **Q2:** in backend mode the server's JSON file is the only source of truth, with its own demo agents. Browser mock agents aren't imported.
+- **Q3:** `npm run dev` and `/vo` stay browser-only. `npm run dev:full` starts the backend and the frontend in local backend mode, and `npm run server` starts the backend alone.
+- **Q4:** add `tsx` as a dev-only dependency to run the TypeScript server in development. The production server is built with Vite's SSR build, with no runtime dependencies.
+- **Q5:** local API protection is `127.0.0.1` binding plus the `Origin` allowlist and JSON-only state changes, with no login or token. A startup token is deferred to the VPS milestone.

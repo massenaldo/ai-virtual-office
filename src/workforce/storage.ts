@@ -9,7 +9,8 @@ export const WORKFORCE_BACKUP_KEY = 'ai-virtual-office:workforce:v2:backup'
 /** Schema v1 data from milestone 3A: read once for migration, never written or removed, so it doubles as a backup. */
 export const WORKFORCE_V1_KEY = 'ai-virtual-office:workforce:v1'
 
-type KV = Pick<Storage, 'getItem' | 'setItem'>
+// Structural, so this module also type-checks without the DOM library (the backend imports it).
+type KV = { getItem(key: string): string | null; setItem(key: string, value: string): void }
 export type WorkforceLoadProblem = 'corrupt' | 'unsupported-version' | 'unavailable'
 /** What happened to stored data that couldn't be read, so the notice can say exactly that. */
 export type Preserved = 'backup-created' | 'backup-exists' | 'left-in-place'

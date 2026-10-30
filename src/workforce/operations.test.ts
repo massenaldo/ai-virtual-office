@@ -399,3 +399,11 @@ describe('states stay saveable', () => {
     expect(applyRuntimeEvent(state, { ...approval(taskId), tool: '' }, LATER, 'mock')).toBe(state)
   })
 })
+
+describe('recoverInterruptedTasks message', () => {
+  it('uses a given message and keeps the browser default otherwise', () => {
+    const { state } = running()
+    expect(recoverInterruptedTasks(state, LATER, 'Interrupted by a server restart').tasks[0]).toMatchObject({ status: 'failed', errorMessage: 'Interrupted by a server restart' })
+    expect(recoverInterruptedTasks(state, LATER).tasks[0].errorMessage).toBe(INTERRUPTED_MESSAGE)
+  })
+})

@@ -1,7 +1,7 @@
 import { DEPARTMENTS } from '../layout/catalog'
 import { createId } from '../layout/operations'
 import type { RuntimeEvent } from './runtime/types'
-import { ACTIVITY_LIMIT, WORKFORCE_SCHEMA_VERSION, type ActivitySource, type Agent, type AgentActivity, type AgentDepartment, type AgentStatus, type AgentTask, type RuntimeMode, type WorkforceState } from './types'
+import { ACTIVITY_LIMIT, WORKFORCE_SCHEMA_VERSION, type ActivitySource, type Agent, type AgentActivity, type AgentDepartment, type AgentStatus, type AgentTask, type ApprovalDecision, type RuntimeMode, type TaskRuntime, type TaskStatus, type WorkforceState } from './types'
 
 // Every operation returns a new state, or the same reference when nothing changed.
 
@@ -14,6 +14,7 @@ export const ROLE_MAX = 60
 export const TITLE_MAX = 80
 export const DESCRIPTION_MAX = 1000
 export const INTERRUPTED_MESSAGE = 'Interrupted by page reload (simulated run)'
+export const TIMEOUT_MESSAGE = (timeoutMs: number) => `Timed out after ${Math.round(timeoutMs / 1000)} s`
 
 // Distributes over the activity union so each variant keeps its own fields.
 type NewActivity = AgentActivity extends infer A ? (A extends AgentActivity ? Omit<A, 'id'> : never) : never
@@ -35,8 +36,10 @@ export function validateAgentInput(input: AgentInput): string | null {
   return null
 }
 
+const ACTIVE: TaskStatus[] = ['queued', 'starting', 'running', 'waiting_for_approval', 'cancelling']
+
 export function isActiveTask(t: AgentTask): boolean {
-  return t.status === 'queued' || t.status === 'running' || t.status === 'waiting'
+  return ACTIVE.includes(t.status)
 }
 
 export function agentAtDesk(s: WorkforceState, deskId: string): Agent | undefined {
@@ -112,66 +115,138 @@ export function activeTaskFor(s: WorkforceState, agentId: string): AgentTask | u
   return s.tasks.find((t) => t.agentId === agentId && isActiveTask(t))
 }
 
-/** Creates a queued task for the agent. One active task per agent; the runtime starts it separately. */
-export function assignTask(s: WorkforceState, agentId: string, input: TaskInput, now: string): OpResult<{ taskId: string }> {
+/** Creates a queued task for the agent. One active task per agent; markStarting and the runtime start it separately. */
+export function assignTask(s: WorkforceState, agentId: string, input: TaskInput, now: string, opts: { runtime?: TaskRuntime; timeoutMs?: number | null } = {}): OpResult<{ taskId: string }> {
   const agent = s.agents.find((a) => a.id === agentId)
   if (!agent) return { ok: false, error: 'Agent not found.' }
   const error = validateTaskInput(input)
   if (error) return { ok: false, error }
   if (activeTaskFor(s, agentId)) return { ok: false, error: `${agent.name} already has an active task.` }
   const taskId = createId('task', new Set(s.tasks.map((t) => t.id)))
-  const task: AgentTask = { id: taskId, agentId, title: input.title.trim(), description: input.description.trim(), status: 'queued', createdAt: now, startedAt: null, completedAt: null, resultSummary: null, errorMessage: null, executionId: null }
+  const task: AgentTask = { id: taskId, agentId, title: input.title.trim(), description: input.description.trim(), status: 'queued', createdAt: now, startedAt: null, completedAt: null, resultSummary: null, errorMessage: null, executionId: null, timeoutMs: opts.timeoutMs ?? null, runtime: opts.runtime ?? 'mock', sessionId: null, endedReason: null, pendingApproval: null }
   const next = replaceAgent({ ...s, tasks: [...s.tasks, task] }, { ...agent, currentTaskId: taskId })
   const state = addActivity(next, { type: 'task-assigned', agentId, taskId, message: `Assigned "${task.title}"`, timestamp: now, source: sourceOf(agent) })
   return { ok: true, state, taskId }
 }
 
-type Transition = { task: Partial<AgentTask>; agentStatus: AgentStatus; activity: NewActivity }
+// agentStatus undefined keeps the agent's current status (cancelling changes nothing visible until it ends).
+type Transition = { task: Partial<AgentTask>; agentStatus?: AgentStatus; activity: NewActivity }
+
+const RUNNING: TaskStatus[] = ['running']
+const ENDABLE: TaskStatus[] = ['running', 'waiting_for_approval', 'cancelling']
+
+/** The task states each runtime event may arrive in; anything else is out of order and ignored. */
+const ACCEPTS: Record<RuntimeEvent['type'], TaskStatus[]> = {
+  started: ['starting'],
+  progress: RUNNING,
+  message: RUNNING,
+  approval_requested: RUNNING,
+  completed: ENDABLE,
+  failed: ENDABLE,
+  cancelled: ACTIVE,
+}
 
 function transitionFor(event: RuntimeEvent, task: AgentTask, now: string, source: ActivitySource): Transition {
   const base = { agentId: task.agentId, taskId: task.id, timestamp: now, source }
   switch (event.type) {
     case 'started':
-      return { task: { status: 'running', startedAt: now, executionId: event.executionId }, agentStatus: 'thinking', activity: { ...base, type: 'task-started', message: `Started "${task.title}"` } }
+      return { task: { status: 'running', startedAt: now, executionId: event.executionId, sessionId: event.sessionId ?? null }, agentStatus: 'thinking', activity: { ...base, type: 'task-started', message: `Started "${task.title}"` } }
     case 'progress':
-      return { task: { status: 'running' }, agentStatus: event.step, activity: { ...base, type: 'task-progress', step: event.step, message: event.message } }
-    case 'waiting':
-      return { task: { status: 'waiting' }, agentStatus: 'waiting', activity: { ...base, type: 'task-waiting', message: event.message } }
+      return { task: {}, agentStatus: event.step, activity: { ...base, type: 'task-progress', step: event.step, message: event.message } }
+    case 'message':
+      return { task: {}, activity: { ...base, type: 'agent-message', message: event.text } }
+    case 'approval_requested':
+      return { task: { status: 'waiting_for_approval', pendingApproval: { id: event.approvalId, tool: event.tool, summary: event.summary, requestedAt: now } }, agentStatus: 'waiting', activity: { ...base, type: 'task-approval-requested', approvalId: event.approvalId, message: `Approval needed: ${event.summary}` } }
     case 'completed':
-      return { task: { status: 'completed', completedAt: now, resultSummary: event.summary }, agentStatus: 'completed', activity: { ...base, type: 'task-completed', message: event.summary } }
+      return { task: { status: 'completed', completedAt: now, resultSummary: event.summary, endedReason: 'completed', pendingApproval: null }, agentStatus: 'completed', activity: { ...base, type: 'task-completed', message: event.summary } }
     case 'failed':
-      return { task: { status: 'failed', completedAt: now, errorMessage: event.error }, agentStatus: 'error', activity: { ...base, type: 'task-failed', message: event.error } }
+      return { task: { status: 'failed', completedAt: now, errorMessage: event.error, endedReason: 'failed', pendingApproval: null }, agentStatus: 'error', activity: { ...base, type: 'task-failed', message: event.error } }
     case 'cancelled':
-      return { task: { status: 'cancelled', completedAt: now }, agentStatus: 'idle', activity: { ...base, type: 'task-cancelled', message: `Cancelled "${task.title}"` } }
+      return { task: { status: 'cancelled', completedAt: now, endedReason: 'cancelled', pendingApproval: null }, agentStatus: 'idle', activity: { ...base, type: 'task-cancelled', message: `Cancelled "${task.title}"` } }
   }
 }
 
 function applyTransition(s: WorkforceState, task: AgentTask, t: Transition): WorkforceState {
   const tasks = s.tasks.map((x) => (x.id === task.id ? { ...x, ...t.task } : x))
-  const agents = s.agents.map((a) => (a.id === task.agentId ? { ...a, status: t.agentStatus } : a))
+  const agents = t.agentStatus === undefined ? s.agents : s.agents.map((a) => (a.id === task.agentId ? { ...a, status: t.agentStatus! } : a))
   return addActivity({ ...s, tasks, agents }, t.activity)
 }
 
-/** The single place runtime events change state. Events for a missing or finished task are ignored, so late timers can't resurrect anything. */
-export function applyRuntimeEvent(s: WorkforceState, event: RuntimeEvent, now: string, source: ActivitySource): WorkforceState {
-  const task = s.tasks.find((t) => t.id === event.taskId)
-  if (!task || !isActiveTask(task) || !s.agents.some((a) => a.id === task.agentId)) return s
-  return applyTransition(s, task, transitionFor(event, task, now, source))
-}
-
-/** Ends an active task in state, whether or not a runtime still tracks it. Call it alongside runtime.cancel; the runtime's own cancelled event is then ignored. */
-export function cancelTask(s: WorkforceState, taskId: string, now: string): WorkforceState {
+/** The task with its agent, when both exist. */
+function taskWithAgent(s: WorkforceState, taskId: string): { task: AgentTask; agent: Agent } | null {
   const task = s.tasks.find((t) => t.id === taskId)
   const agent = task && s.agents.find((a) => a.id === task.agentId)
-  return agent ? applyRuntimeEvent(s, { type: 'cancelled', taskId }, now, sourceOf(agent)) : s
+  return task && agent ? { task, agent } : null
 }
 
-/** After a reload no timer is running any more, so started tasks are marked failed instead of hanging forever. Queued tasks never started and stay. */
+/**
+ * The single place runtime events change state. Events for a missing or finished task, or that don't fit the task's
+ * current state (a second started, progress while waiting), are ignored, so late or duplicate events change nothing.
+ */
+export function applyRuntimeEvent(s: WorkforceState, event: RuntimeEvent, now: string, source: ActivitySource): WorkforceState {
+  const found = taskWithAgent(s, event.taskId)
+  if (!found || !ACCEPTS[event.type].includes(found.task.status)) return s
+  return applyTransition(s, found.task, transitionFor(event, found.task, now, source))
+}
+
+/** queued → starting, just before the runtime is asked to start; a task can only start once. */
+export function markStarting(s: WorkforceState, taskId: string, now: string): WorkforceState {
+  const found = taskWithAgent(s, taskId)
+  if (!found || found.task.status !== 'queued') return s
+  const tasks = s.tasks.map((t) => (t.id === taskId ? { ...t, status: 'starting' as const } : t))
+  const agents = s.agents.map((a) => (a.id === found.agent.id ? { ...a, status: 'thinking' as const, lastActivityAt: now } : a))
+  return { ...s, tasks, agents }
+}
+
+/** A queued task has nothing running and ends at once; a started one waits in cancelling for the runtime to confirm. */
+export function requestCancel(s: WorkforceState, taskId: string, now: string, source: ActivitySource): WorkforceState {
+  const found = taskWithAgent(s, taskId)
+  if (!found) return s
+  const { task } = found
+  if (task.status === 'queued') return applyRuntimeEvent(s, { type: 'cancelled', taskId }, now, source)
+  if (task.status !== 'starting' && task.status !== 'running' && task.status !== 'waiting_for_approval') return s
+  return applyTransition(s, task, { task: { status: 'cancelling' }, activity: { agentId: task.agentId, taskId, timestamp: now, source, type: 'task-cancelling', message: `Cancelling "${task.title}"` } })
+}
+
+/** Records the human decision on the pending approval; a stale id or a second decision changes nothing. The runtime decides what happens next. */
+export function decideApproval(s: WorkforceState, taskId: string, approvalId: string, decision: ApprovalDecision, now: string, source: ActivitySource): WorkforceState {
+  const found = taskWithAgent(s, taskId)
+  const pending = found?.task.status === 'waiting_for_approval' ? found.task.pendingApproval : null
+  if (!found || !pending || pending.id !== approvalId) return s
+  const verb = decision === 'approve' ? 'Approved' : 'Denied'
+  return applyTransition(s, found.task, {
+    task: { status: 'running', pendingApproval: null },
+    agentStatus: 'working',
+    activity: { agentId: found.task.agentId, taskId, timestamp: now, source, type: 'task-approval-decided', approvalId, decision, message: `${verb}: ${pending.summary}` },
+  })
+}
+
+/** Ends an active task that ran past its time limit as failed, with a timeout end reason. */
+export function timeOutTask(s: WorkforceState, taskId: string, now: string, source: ActivitySource): WorkforceState {
+  const found = taskWithAgent(s, taskId)
+  if (!found || !isActiveTask(found.task)) return s
+  const { task } = found
+  const error = task.timeoutMs === null ? 'Timed out' : TIMEOUT_MESSAGE(task.timeoutMs)
+  return applyTransition(s, task, {
+    task: { status: 'failed', completedAt: now, errorMessage: error, endedReason: 'timeout', pendingApproval: null },
+    agentStatus: 'error',
+    activity: { agentId: task.agentId, taskId, timestamp: now, source, type: 'task-timed-out', message: error },
+  })
+}
+
+/** Forces an active task to cancelled, whether or not a runtime still tracks it (a lost runtime, or a cancel that never got confirmed). */
+export function cancelTask(s: WorkforceState, taskId: string, now: string): WorkforceState {
+  const found = taskWithAgent(s, taskId)
+  return found ? applyRuntimeEvent(s, { type: 'cancelled', taskId }, now, sourceOf(found.agent)) : s
+}
+
+/** After a reload no runtime is running any more: started work is marked failed, a pending cancel completes, and queued tasks stay. */
 export function recoverInterruptedTasks(s: WorkforceState, now: string): WorkforceState {
   return s.tasks.reduce((state, task) => {
-    if (task.status !== 'running' && task.status !== 'waiting') return state
     const agent = state.agents.find((a) => a.id === task.agentId)
     const source = agent ? sourceOf(agent) : 'mock'
+    if (task.status === 'cancelling') return applyTransition(state, task, transitionFor({ type: 'cancelled', taskId: task.id }, task, now, source))
+    if (task.status !== 'starting' && task.status !== 'running' && task.status !== 'waiting_for_approval') return state
     return applyTransition(state, task, transitionFor({ type: 'failed', taskId: task.id, error: INTERRUPTED_MESSAGE }, task, now, source))
   }, s)
 }

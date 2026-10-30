@@ -3,7 +3,7 @@ import { createDefaultLayout } from '../layout/defaultLayout'
 import type { OfficeLayout } from '../layout/types'
 import { createDemoWorkforce } from './demo'
 import { addActivity, assignTask, cancelTask } from './operations'
-import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskClickTarget, deskMarkers, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, removalPrompt, TASK_STATUS_LABEL } from './view'
+import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskClickTarget, deskMarkers, workforceNotice, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, removalPrompt, TASK_STATUS_LABEL } from './view'
 
 const NOW = '2026-10-30T09:00:00.000Z'
 const layout = createDefaultLayout()
@@ -20,7 +20,7 @@ function withTask(agentId = 'agent-demo-pm') {
 describe('labels', () => {
   it('covers every status and department except meeting', () => {
     expect(AGENT_STATUS_LABEL).toEqual({ idle: 'Idle', working: 'Working', thinking: 'Thinking', waiting: 'Waiting', error: 'Error', completed: 'Completed' })
-    expect(TASK_STATUS_LABEL).toEqual({ queued: 'Queued', running: 'Running', waiting: 'Waiting', completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled' })
+    expect(TASK_STATUS_LABEL).toEqual({ queued: 'Queued', starting: 'Starting', running: 'Running', waiting_for_approval: 'Waiting for approval', completed: 'Completed', failed: 'Failed', cancelling: 'Cancelling', cancelled: 'Cancelled' })
     expect(AGENT_DEPARTMENTS).not.toContain('meeting')
     expect(AGENT_DEPARTMENTS).toHaveLength(9)
     expect(AGENT_DEPARTMENTS[0]).toBe('executive')
@@ -142,5 +142,15 @@ describe('assignableAgents', () => {
   it('puts agents without a desk first', () => {
     const s = { ...demo, agents: demo.agents.map((a) => (a.id === 'agent-demo-qa' || a.id === 'agent-demo-lead' ? { ...a, deskId: null } : a)) }
     expect(assignableAgents(s).map((a) => a.id)).toEqual(['agent-demo-lead', 'agent-demo-qa', 'agent-demo-pm', 'agent-demo-backend', 'agent-demo-frontend', 'agent-demo-devops'])
+  })
+})
+
+describe('workforceNotice', () => {
+  it('says exactly what happened to unreadable data', () => {
+    expect(workforceNotice('corrupt', 'backup-created')).toBe("Saved agents couldn't be loaded, so none are shown. The saved data was backed up.")
+    expect(workforceNotice('corrupt', 'backup-exists')).toBe("Saved agents couldn't be loaded, so none are shown. An earlier backup already exists, so this data was not backed up and your next change replaces it.")
+    expect(workforceNotice('corrupt', 'left-in-place')).toBe("Saved agents couldn't be loaded, so none are shown. That data is left untouched.")
+    expect(workforceNotice('unsupported-version', 'backup-created')).toBe('Saved agents come from a newer version of the app, so none are shown. The saved data was backed up.')
+    expect(workforceNotice('unavailable', null)).toBe('Browser storage is unavailable, so agent changes cannot be saved in this window.')
   })
 })

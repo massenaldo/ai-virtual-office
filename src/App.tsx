@@ -14,7 +14,7 @@ import { useEditorActions, type DialogRequest } from './editor/useEditorActions'
 import { useLayoutEditor } from './editor/useLayoutEditor'
 import type { FocusRequest } from './scene/OfficeScene'
 import WorkforcePanel, { selectedAgentId, type WorkforceView } from './workforce/ui/WorkforcePanel'
-import { deskClickTarget, deskMarkers, deskStatus } from './workforce/view'
+import { deskClickTarget, deskMarkers, deskStatus, workforceNotice } from './workforce/view'
 import { useWorkforce } from './workforce/useWorkforce'
 
 const LOAD_PROBLEM_MESSAGE = {
@@ -24,11 +24,6 @@ const LOAD_PROBLEM_MESSAGE = {
   missing: '',
 }
 
-const WORKFORCE_PROBLEM_MESSAGE = {
-  corrupt: "Saved agents couldn't be loaded, so none are shown. The saved data was backed up.",
-  'unsupported-version': 'Saved agents come from a newer version of the app, so none are shown. The saved data was backed up.',
-  unavailable: 'Browser storage is unavailable, so agent changes cannot be saved in this window.',
-}
 
 export default function App() {
   const editor = useLayoutEditor()
@@ -124,7 +119,7 @@ export default function App() {
           markers={markers} highlightDeskId={highlightDeskId} onDeskClick={onDeskClick} focus={focus}/>
           {editor.loadProblem && <div className="scene-notice" role="alert"><AlertTriangle size={15}/><span>{LOAD_PROBLEM_MESSAGE[editor.loadProblem]}</span><button className="notice-close" onClick={editor.dismissLoadProblem} aria-label="Dismiss"><X size={14}/></button></div>}
           {editor.status === 'save-failed' && <div className="scene-notice error" role="alert"><AlertTriangle size={15}/><span>Save failed: {editor.saveError} Your changes are still here; try saving again.</span></div>}
-          {workforce?.loadProblem && <div className="scene-notice" role="alert"><AlertTriangle size={15}/><span>{WORKFORCE_PROBLEM_MESSAGE[workforce.loadProblem]}</span><button className="notice-close" onClick={workforce.actions.dismissLoadProblem} aria-label="Dismiss"><X size={14}/></button></div>}
+          {workforce?.loadProblem && <div className="scene-notice" role="alert"><AlertTriangle size={15}/><span>{workforceNotice(workforce.loadProblem, workforce.preserved)}</span><button className="notice-close" onClick={workforce.actions.dismissLoadProblem} aria-label="Dismiss"><X size={14}/></button></div>}
           {workforce?.saveError && <div className="scene-notice error" role="alert"><AlertTriangle size={15}/><span>Agent changes couldn't be saved: {workforce.saveError}</span></div>}
           <div className="scene-hint"><Maximize2 size={13}/> {editing ? <>Click to select <span>·</span> Drag to move <span>·</span> Drag empty space to {floorPlan ? 'pan' : 'orbit'}</> : <>Drag to orbit <span>·</span> Scroll to zoom <span>·</span> Right-drag to pan</>}</div><div className="scene-badge"><span className="badge-icon"><Building2 size={16}/></span><div><strong>AI Software Company</strong><small>Realistic 3D workspace</small></div></div></div>
         {agentsOpen && <WorkforcePanel workforce={workforce} layout={state.layout} view={agentView} onViewChange={setAgentView} onFocusDesk={focusDesk} openDialog={setDialog}/>}

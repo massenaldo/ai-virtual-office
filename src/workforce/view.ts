@@ -2,6 +2,7 @@ import { DEPARTMENTS } from '../layout/catalog'
 import type { OfficeLayout } from '../layout/types'
 import type { DeskMarker } from '../scene/labels'
 import { activeTaskFor, agentAtDesk } from './operations'
+import type { Preserved, WorkforceLoadProblem } from './storage'
 import type { Agent, AgentActivity, AgentDepartment, AgentStatus, AgentTask, TaskStatus, WorkforceState } from './types'
 
 // Pure helpers for the workforce panel, so the components only render.
@@ -12,7 +13,7 @@ export type DeskGroup = { roomId: string | null; roomName: string; desks: DeskOp
 export type DeskStatus = { kind: 'none' } | { kind: 'assigned'; label: string; roomName: string } | { kind: 'unavailable'; deskId: string }
 
 export const AGENT_STATUS_LABEL: Record<AgentStatus, string> = { idle: 'Idle', working: 'Working', thinking: 'Thinking', waiting: 'Waiting', error: 'Error', completed: 'Completed' }
-export const TASK_STATUS_LABEL: Record<TaskStatus, string> = { queued: 'Queued', running: 'Running', waiting: 'Waiting', completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled' }
+export const TASK_STATUS_LABEL: Record<TaskStatus, string> = { queued: 'Queued', starting: 'Starting', running: 'Running', waiting_for_approval: 'Waiting for approval', completed: 'Completed', failed: 'Failed', cancelling: 'Cancelling', cancelled: 'Cancelled' }
 export const AGENT_DEPARTMENTS = Object.keys(DEPARTMENTS).filter((id) => id !== 'meeting') as AgentDepartment[]
 
 const OPEN_FLOOR = 'Open floor'
@@ -86,4 +87,17 @@ export function deskClickTarget(s: WorkforceState, deskId: string): { kind: 'ope
 /** Candidates for a free desk: agents without one first, then the rest (who would move). */
 export function assignableAgents(s: WorkforceState): Agent[] {
   return [...s.agents.filter((a) => a.deskId === null), ...s.agents.filter((a) => a.deskId !== null)]
+}
+
+const PRESERVED_SENTENCE: Record<Preserved, string> = {
+  'backup-created': 'The saved data was backed up.',
+  'backup-exists': 'An earlier backup already exists, so this data was not backed up and your next change replaces it.',
+  'left-in-place': 'That data is left untouched.',
+}
+
+/** The load notice, saying exactly what happened to data that couldn't be read. */
+export function workforceNotice(problem: WorkforceLoadProblem, preserved: Preserved | null): string {
+  if (problem === 'unavailable') return 'Browser storage is unavailable, so agent changes cannot be saved in this window.'
+  const lead = problem === 'unsupported-version' ? 'Saved agents come from a newer version of the app, so none are shown.' : "Saved agents couldn't be loaded, so none are shown."
+  return preserved ? `${lead} ${PRESERVED_SENTENCE[preserved]}` : lead
 }

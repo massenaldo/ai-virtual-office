@@ -5,7 +5,7 @@ import type { RuntimeEvent } from './types'
 
 const NOW = '2026-10-30T09:00:00.000Z'
 const agent: Agent = { id: 'agent-1', name: 'Forge', role: 'API engineer', department: 'backend', deskId: 'desk-07', status: 'idle', currentTaskId: 'task-1', runtimeMode: 'mock', demo: true, createdAt: NOW, lastActivityAt: null }
-const task = (id = 'task-1'): AgentTask => ({ id, agentId: agent.id, title: 'Build API', description: '', status: 'queued', createdAt: NOW, startedAt: null, completedAt: null, resultSummary: null, errorMessage: null, executionId: null })
+const task = (id = 'task-1'): AgentTask => ({ id, agentId: agent.id, title: 'Build API', description: '', status: 'queued', createdAt: NOW, startedAt: null, completedAt: null, resultSummary: null, errorMessage: null, executionId: null, timeoutMs: null, runtime: 'mock', sessionId: null, endedReason: null, pendingApproval: null })
 
 let provider: MockRuntimeProvider
 let events: RuntimeEvent[]
@@ -61,26 +61,57 @@ describe('MockRuntimeProvider', () => {
     expect(provider.activeTaskIds()).toEqual([])
   })
 
-  it('forceWaiting then resume completes after workingMs', () => {
+  const requested = () => events.filter((e): e is Extract<RuntimeEvent, { type: 'approval_requested' }> => e.type === 'approval_requested').at(-1)!
+
+  it('requestApproval then approve completes after workingMs', () => {
     provider.start(task(), agent)
     vi.advanceTimersByTime(500)
-    provider.forceWaiting('task-1')
-    expect(events.at(-1)).toEqual({ type: 'waiting', taskId: 'task-1', message: 'Waiting for input (simulated)' })
+    provider.requestApproval('task-1')
+    expect(requested()).toMatchObject({ type: 'approval_requested', taskId: 'task-1', tool: 'Write', summary: 'Simulated request to write a file' })
+    expect(requested().approvalId).toMatch(/^approval-/)
     vi.advanceTimersByTime(60000)
-    expect(types().at(-1)).toBe('waiting')
+    expect(types().at(-1)).toBe('approval_requested')
     expect(provider.activeTaskIds()).toEqual(['task-1'])
-    provider.resume('task-1')
+    provider.respondToApproval('task-1', requested().approvalId, 'approve')
     expect(types().at(-1)).toBe('progress:working')
-    vi.advanceTimersByTime(4000)
+    vi.advanceTimersByTime(3999)
+    expect(types().at(-1)).toBe('progress:working')
+    vi.advanceTimersByTime(1)
     expect(types().at(-1)).toBe('completed')
   })
 
-  it('resume does nothing unless the task is waiting', () => {
+  it('deny fails with the simulated message', () => {
     provider.start(task(), agent)
     vi.advanceTimersByTime(0)
-    provider.resume('task-1')
-    vi.advanceTimersByTime(6000)
-    expect(types()).toEqual(['started', 'progress:thinking', 'progress:working', 'completed'])
+    provider.requestApproval('task-1')
+    provider.respondToApproval('task-1', requested().approvalId, 'deny')
+    expect(events.at(-1)).toEqual({ type: 'failed', taskId: 'task-1', error: 'Approval denied (simulated)' })
+    expect(provider.activeTaskIds()).toEqual([])
+    vi.advanceTimersByTime(10000)
+    expect(types().at(-1)).toBe('failed')
+  })
+
+  it('respondToApproval ignores a stale id and a second answer', () => {
+    provider.start(task(), agent)
+    vi.advanceTimersByTime(0)
+    provider.requestApproval('task-1')
+    const id = requested().approvalId
+    const count = events.length
+    provider.respondToApproval('task-1', 'approval-stale', 'approve')
+    expect(events).toHaveLength(count)
+    provider.respondToApproval('task-1', id, 'approve')
+    provider.respondToApproval('task-1', id, 'deny')
+    expect(types().slice(count)).toEqual(['progress:working'])
+  })
+
+  it('requestApproval does nothing unless running and not already waiting', () => {
+    provider.requestApproval('task-1')
+    expect(events).toEqual([])
+    provider.start(task(), agent)
+    vi.advanceTimersByTime(0)
+    provider.requestApproval('task-1')
+    provider.requestApproval('task-1')
+    expect(types().filter((t) => t === 'approval_requested')).toHaveLength(1)
   })
 
   it('forceError emits failed with the default message', () => {
@@ -100,8 +131,8 @@ describe('MockRuntimeProvider', () => {
     const count = events.length
     provider.cancel('task-1')
     provider.forceError('task-1')
-    provider.forceWaiting('task-1')
-    provider.resume('task-1')
+    provider.requestApproval('task-1')
+    provider.respondToApproval('task-1', 'approval-x', 'approve')
     provider.cancel('task-unknown')
     expect(events).toHaveLength(count)
     expect(types().filter((t) => t === 'started')).toHaveLength(1)

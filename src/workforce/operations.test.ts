@@ -236,6 +236,13 @@ describe('applyRuntimeEvent', () => {
     expect(applyRuntimeEvent(cancelling, { type: 'completed', taskId, summary: 'raced' }, LATER, 'mock').tasks[0]).toMatchObject({ status: 'completed', endedReason: 'completed' })
   })
 
+  it('a runtime may fail a task that is still starting', () => {
+    const { state, taskId } = withTask()
+    const s = applyRuntimeEvent(markStarting(state, taskId, NOW), { type: 'failed', taskId, error: 'Not available' }, LATER, 'real')
+    expect(s.tasks[0]).toMatchObject({ status: 'failed', endedReason: 'failed', errorMessage: 'Not available' })
+    expect(applyRuntimeEvent(markStarting(state, taskId, NOW), { type: 'completed', taskId, summary: 'x' }, LATER, 'mock').tasks[0].status).toBe('starting')
+  })
+
   it('a message event logs agent-message without a status change', () => {
     const { state, taskId } = running()
     const s = applyRuntimeEvent(state, { type: 'message', taskId, text: 'Reading the spec' }, LATER, 'mock')

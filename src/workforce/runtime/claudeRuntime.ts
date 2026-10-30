@@ -1,4 +1,4 @@
-import type { Agent, AgentTask } from '../types'
+import type { Agent, AgentTask, ApprovalDecision } from '../types'
 import type { RuntimeEvent, RuntimeProvider, StartResult } from './types'
 
 /**
@@ -7,7 +7,7 @@ import type { RuntimeEvent, RuntimeProvider, StartResult } from './types'
  * Rule for the real implementation: execution happens on a server the app talks to, never in the browser.
  * The browser must never hold Anthropic credentials or API keys, and must never get shell access or the ability
  * to launch processes. The server owns the session, enforces what an agent may do, and streams RuntimeEvents
- * (started, progress, waiting, completed, failed, cancelled) back to the page, for example over server-sent
+ * (started, progress, message, approval_requested, completed, failed, cancelled) back to the page, for example over server-sent
  * events. This class would then become a thin client for that stream and the server's start and cancel endpoints.
  */
 
@@ -22,6 +22,8 @@ export class ClaudeRuntimeProvider implements RuntimeProvider {
   }
 
   cancel(_taskId: string): void {}
+
+  respondToApproval(_taskId: string, _approvalId: string, _decision: ApprovalDecision): void {}
 
   subscribe(_listener: (event: RuntimeEvent) => void): () => void {
     return () => {}

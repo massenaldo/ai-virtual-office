@@ -142,7 +142,8 @@ const ACCEPTS: Record<RuntimeEvent['type'], TaskStatus[]> = {
   message: RUNNING,
   approval_requested: RUNNING,
   completed: ENDABLE,
-  failed: ENDABLE,
+  // A runtime can also fail while starting (refused, unavailable, crashed before reporting started).
+  failed: ['starting', ...ENDABLE],
   cancelled: ACTIVE,
 }
 

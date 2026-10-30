@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { AlertTriangle, ArrowLeft, CirclePause, CirclePlay, LocateFixed, OctagonX, Pencil, Play, Square, Trash2 } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Check, LocateFixed, OctagonX, Pencil, Play, ShieldQuestion, Square, Trash2, X } from 'lucide-react'
 import { DEPARTMENTS } from '../../layout/catalog'
 import type { OfficeLayout } from '../../layout/types'
 import type { Workforce } from '../useWorkforce'
@@ -80,15 +80,23 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
       {task.resultSummary && <p className="task-result">{task.resultSummary}</p>}
       {task.errorMessage && <p className="task-error">{task.errorMessage}</p>}
     </div> : <p className="panel-hint">No task yet.</p>}
-    {active ? <>
-      <div className="panel-actions"><button className="panel-button" onClick={() => actions.cancelTask(task.id)}><Square size={13}/> Cancel task</button></div>
-      <div className="field-group-label">Demo controls</div>
+    {task?.status === 'waiting_for_approval' && task.pendingApproval && <div className="approval-card" role="status">
+      <div className="task-card-head"><strong>Approval needed</strong><span className="agent-chip">{task.pendingApproval.tool}</span></div>
+      <p>{task.pendingApproval.summary}</p>
       <div className="panel-actions">
-        {task.status === 'waiting'
-          ? <button className="panel-button" onClick={() => actions.resume(task.id)}><CirclePlay size={13}/> Resume</button>
-          : <button className="panel-button" onClick={() => actions.forceWaiting(task.id)}><CirclePause size={13}/> Simulate waiting</button>}
-        <button className="panel-button danger" onClick={() => actions.forceError(task.id)}><OctagonX size={13}/> Simulate error</button>
+        <button className="panel-button primary" onClick={() => actions.decideApproval(task.id, task.pendingApproval!.id, 'approve')}><Check size={13}/> Approve</button>
+        <button className="panel-button danger" onClick={() => actions.decideApproval(task.id, task.pendingApproval!.id, 'deny')}><X size={13}/> Deny</button>
       </div>
+    </div>}
+    {active ? <>
+      {task.status !== 'cancelling' && <div className="panel-actions"><button className="panel-button" onClick={() => actions.cancelTask(task.id)}><Square size={13}/> Cancel task</button></div>}
+      {task.status === 'running' && <>
+        <div className="field-group-label">Demo controls</div>
+        <div className="panel-actions">
+          <button className="panel-button" onClick={() => actions.requestApproval(task.id)}><ShieldQuestion size={13}/> Simulate approval request</button>
+          <button className="panel-button danger" onClick={() => actions.forceError(task.id)}><OctagonX size={13}/> Simulate error</button>
+        </div>
+      </>}
     </> : <TaskForm onStart={start}/>}
 
     <div className="field-group-label section">Activity</div>

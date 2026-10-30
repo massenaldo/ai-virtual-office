@@ -69,7 +69,7 @@ describe('createWorkforceController', () => {
 
   it('startTask runs the simulated lifecycle and saves each step', () => {
     expect(c.startTask('agent-demo-backend', { title: 'Build API', description: '' })).toEqual({ ok: true })
-    expect(task('agent-demo-backend')?.status).toBe('queued')
+    expect(task('agent-demo-backend')?.status).toBe('starting')
     vi.advanceTimersByTime(0)
     expect(agent('agent-demo-backend')?.status).toBe('thinking')
     vi.advanceTimersByTime(6000)
@@ -107,7 +107,7 @@ describe('createWorkforceController', () => {
 
   it('cancelTask ends a task the runtime lost', () => {
     c.dispose()
-    const silent: RuntimeProvider = { mode: 'mock', availability: { available: true }, start: () => ({ ok: true, executionId: 'exec-x' }), cancel: () => {}, subscribe: () => () => {}, dispose: () => {} }
+    const silent: RuntimeProvider = { mode: 'mock', availability: { available: true }, start: () => ({ ok: true, executionId: 'exec-x' }), cancel: () => {}, respondToApproval: () => {}, subscribe: () => () => {}, dispose: () => {} }
     c = createWorkforceController({ storage, now, runtime: silent })
     c.startTask('agent-demo-qa', { title: 'Run tests', description: '' })
     const id = task('agent-demo-qa')!.id
@@ -135,20 +135,64 @@ describe('createWorkforceController', () => {
     expect(runtime.activeTaskIds()).toEqual([])
   })
 
-  it('demo controls drive waiting and error', () => {
+  it('startTask goes queued → starting → running → completed', () => {
+    const seen: string[] = []
+    c.subscribe(() => { const t = task('agent-demo-qa'); if (t && seen.at(-1) !== t.status) seen.push(t.status) })
+    c.startTask('agent-demo-qa', { title: 'Run tests', description: '' })
+    vi.advanceTimersByTime(6000)
+    expect(seen).toEqual(['queued', 'starting', 'running', 'completed'])
+  })
+
+  it('approval round trip through the controller', () => {
     c.startTask('agent-demo-qa', { title: 'Run tests', description: '' })
     vi.advanceTimersByTime(500)
     const id = task('agent-demo-qa')!.id
-    c.forceWaiting(id)
+    c.requestApproval(id)
+    const pending = task('agent-demo-qa')!.pendingApproval!
+    expect(task('agent-demo-qa')!.status).toBe('waiting_for_approval')
     expect(agent('agent-demo-qa')?.status).toBe('waiting')
-    c.resume(id)
+    c.decideApproval(id, 'approval-stale', 'approve')
+    expect(task('agent-demo-qa')!.status).toBe('waiting_for_approval')
+    c.decideApproval(id, pending.id, 'approve')
+    expect(task('agent-demo-qa')!.status).toBe('running')
     vi.advanceTimersByTime(4000)
-    expect(agent('agent-demo-qa')?.status).toBe('completed')
+    expect(task('agent-demo-qa')).toMatchObject({ status: 'completed', endedReason: 'completed' })
+    c.startTask('agent-demo-qa', { title: 'Again', description: '' })
+    vi.advanceTimersByTime(0)
+    const again = task('agent-demo-qa')!.id
+    c.requestApproval(again)
+    c.decideApproval(again, task('agent-demo-qa')!.pendingApproval!.id, 'deny')
+    expect(task('agent-demo-qa')).toMatchObject({ status: 'failed', errorMessage: 'Approval denied (simulated)' })
+  })
+
+  it('cancel during waiting_for_approval ends cancelled once', () => {
+    c.startTask('agent-demo-qa', { title: 'Run tests', description: '' })
+    vi.advanceTimersByTime(0)
+    const id = task('agent-demo-qa')!.id
+    c.requestApproval(id)
+    c.cancelTask(id)
+    c.cancelTask(id)
+    expect(task('agent-demo-qa')).toMatchObject({ status: 'cancelled', endedReason: 'cancelled', pendingApproval: null })
+    expect(agent('agent-demo-qa')?.status).toBe('idle')
+    expect(state().activities.filter((a) => a.taskId === id && a.type === 'task-cancelled')).toHaveLength(1)
+    expect(runtime.activeTaskIds()).toEqual([])
+  })
+
+  it('demo error ends the task failed', () => {
     c.startTask('agent-demo-qa', { title: 'Again', description: '' })
     vi.advanceTimersByTime(0)
     c.forceError(task('agent-demo-qa')!.id)
     expect(task('agent-demo-qa')).toMatchObject({ status: 'failed', errorMessage: MOCK_ERROR_MESSAGE })
     expect(agent('agent-demo-qa')?.status).toBe('error')
+  })
+
+  it('snapshot carries preserved and migrated from loading', () => {
+    expect(c.getSnapshot()).toMatchObject({ preserved: null })
+    c.dispose()
+    const broken = memoryStorage()
+    broken.data.set(WORKFORCE_STORAGE_KEY, '{bad')
+    c = createWorkforceController({ storage: broken, now, runtime: new MockRuntimeProvider() })
+    expect(c.getSnapshot()).toMatchObject({ loadProblem: 'corrupt', preserved: 'backup-created' })
   })
 
   it('assignDesk and updateAgent pass through errors', () => {

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createDemoWorkforce } from './demo'
-import { applyRuntimeEvent, assignTask, removeAgent } from './operations'
+import { applyRuntimeEvent, assignTask, markStarting, removeAgent } from './operations'
 import { MockRuntimeProvider } from './runtime/mockRuntime'
 import { parseWorkforce, serializeWorkforce } from './storage'
 import type { WorkforceState } from './types'
@@ -25,7 +25,7 @@ afterEach(() => {
 function startTask(agentId: string): string {
   const r = assignTask(state, agentId, { title: 'Build API', description: 'REST endpoints' }, NOW)
   if (!r.ok) throw new Error(r.error)
-  state = r.state
+  state = markStarting(r.state, r.taskId, NOW)
   const task = state.tasks.find((t) => t.id === r.taskId)!
   const agent = state.agents.find((a) => a.id === agentId)!
   const started = provider.start(task, agent)

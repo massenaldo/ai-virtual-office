@@ -4,6 +4,7 @@ import type { StateResponse, WorkspacesResponse } from '../../src/workforce/api'
 import { restoreDemoAgents } from '../../src/workforce/demo'
 import { assignDesk, createAgent, updateAgent } from '../../src/workforce/operations'
 import type { ServerConfig } from '../config'
+import type { AuditLog } from '../audit'
 import type { Logger } from '../log'
 import type { EventLog } from '../eventLog'
 import type { ServerRuntimeProvider } from '../runtime/types'
@@ -25,6 +26,7 @@ export type RouteDeps = {
   streams: Set<ServerResponse>
   log: Logger
   maxStreams?: number
+  audit: AuditLog
 }
 
 const STATUS: Record<ManagerError['code'], number> = { not_found: 404, invalid: 422, conflict: 409, unavailable: 503, bad_request: 400 }
@@ -48,7 +50,7 @@ export function createRoutes(deps: RouteDeps): Route[] {
       path: '/api/health',
       handler: () => {
         const a = provider.availability
-        return { status: 200, body: { ok: true, version: pkg.version, runtime: config.runtime, available: a.available, reason: a.available ? null : a.reason, credentialsConfigured: config.credentialsConfigured, persistence: { ok: store.saveError === null, error: store.saveError }, startedAt } }
+        return { status: 200, body: { ok: true, version: pkg.version, runtime: config.runtime, available: a.available, reason: a.available ? null : a.reason, credentialsConfigured: config.credentialsConfigured, persistence: { ok: store.saveError === null, error: store.saveError }, audit: deps.audit.status, startedAt } }
       },
     },
     {

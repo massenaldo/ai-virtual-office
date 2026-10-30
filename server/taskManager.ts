@@ -161,6 +161,7 @@ export class TaskManager {
         audit: (note) => { const t = this.task(taskId); if (t) this.report('runtime.note', t, { actor: 'runtime', detail: note }) },
       })
     } catch (error) {
+      this.log.error(`Runtime failed to start task ${taskId}`, error)
       outcome = { ok: false as const, error: `Runtime failed to start: ${error instanceof Error ? error.message : String(error)}` }
     }
     if (!outcome.ok) {

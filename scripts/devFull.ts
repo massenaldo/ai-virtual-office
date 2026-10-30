@@ -1,11 +1,15 @@
 import { createServer } from 'vite'
 import { startServer } from '../server/app'
 import { formatConfigErrors, loadConfig } from '../server/config'
+import { consoleLogger } from '../server/log'
+import { redactingLogger } from '../server/redact'
+
+const log = redactingLogger(consoleLogger)
 
 // Backend and Vite dev server in one process, so no process-launching module and no extra dependency is needed.
 const parsed = loadConfig()
 if (!parsed.ok) {
-  console.error(formatConfigErrors(parsed.errors))
+  log.error(formatConfigErrors(parsed.errors))
   process.exit(1)
 }
 
@@ -14,10 +18,10 @@ try {
   backend = await startServer(parsed.config)
 } catch (error) {
   const code = (error as NodeJS.ErrnoException).code
-  console.error(code === 'EADDRINUSE' ? `Port ${parsed.config.port} is already in use (is the backend already running?).` : error instanceof Error ? error.message : String(error))
+  log.error(code === 'EADDRINUSE' ? `Port ${parsed.config.port} is already in use (is the backend already running?).` : error instanceof Error ? error.message : String(error))
   process.exit(1)
 }
-console.log(`AI Virtual Office backend listening on ${backend.url} (runtime: ${parsed.config.runtime})`)
+log.info(`AI Virtual Office backend listening on ${backend.url} (runtime: ${parsed.config.runtime})`)
 // The UI ignores this until Stage D connects it.
 process.env.VITE_WORKFORCE_API_URL ??= backend.url
 
@@ -28,7 +32,7 @@ try {
   vite.printUrls()
 } catch (error) {
   await backend.close()
-  console.error(`Port 5173 is in use (is npm run dev or /vo already running?). ${error instanceof Error ? error.message : ''}`.trim())
+  log.error(`Port 5173 is in use (is npm run dev or /vo already running?). ${error instanceof Error ? error.message : ''}`.trim())
   process.exit(1)
 }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { activeTaskFor, addActivity, applyRuntimeEvent, assignDesk, assignTask, cancelTask, createAgent, decideApproval, emptyWorkforce, INTERRUPTED_MESSAGE, markStarting, recoverInterruptedTasks, removeAgent, requestCancel, timeOutTask, TIMEOUT_MESSAGE, updateAgent, type AgentInput } from './operations'
+import { parseWorkforce, serializeWorkforce } from './storage'
 import type { AgentTask, WorkforceState } from './types'
 
 const NOW = '2026-10-30T09:00:00.000Z'
@@ -364,5 +365,37 @@ describe('recoverInterruptedTasks', () => {
   it('returns the same state when nothing is running', () => {
     const { state } = withTask()
     expect(recoverInterruptedTasks(state, LATER)).toBe(state)
+  })
+})
+
+/** Every state the operations produce must survive a save and reload. */
+const saveable = (s: WorkforceState) => parseWorkforce(JSON.parse(serializeWorkforce(s))) !== null
+
+describe('states stay saveable', () => {
+  it('cancelling from waiting_for_approval clears the approval', () => {
+    const { state, taskId } = running()
+    const cancelling = requestCancel(applyRuntimeEvent(state, approval(taskId), NOW, 'mock'), taskId, LATER, 'mock')
+    expect(cancelling.tasks[0]).toMatchObject({ status: 'cancelling', pendingApproval: null })
+    expect(saveable(cancelling)).toBe(true)
+  })
+
+  it('normalises empty strings in runtime events', () => {
+    const { state: queued, taskId: qId } = withTask()
+    const started = applyRuntimeEvent(markStarting(queued, qId, NOW), { type: 'started', taskId: qId, executionId: '', sessionId: '' }, LATER, 'mock')
+    expect(started.tasks[0]).toMatchObject({ status: 'running', executionId: null, sessionId: null })
+    expect(saveable(started)).toBe(true)
+    const failed = applyRuntimeEvent(started, { type: 'failed', taskId: qId, error: '' }, LATER, 'mock')
+    expect(failed.tasks[0].errorMessage).toBe('The runtime reported an error without a message.')
+    expect(saveable(failed)).toBe(true)
+    const { state, taskId } = running()
+    const done = applyRuntimeEvent(state, { type: 'completed', taskId, summary: '' }, LATER, 'mock')
+    expect(done.tasks[0]).toMatchObject({ status: 'completed', resultSummary: null })
+    expect(saveable(done)).toBe(true)
+  })
+
+  it('ignores an approval request without an id or tool', () => {
+    const { state, taskId } = running()
+    expect(applyRuntimeEvent(state, { ...approval(taskId), approvalId: '' }, LATER, 'mock')).toBe(state)
+    expect(applyRuntimeEvent(state, { ...approval(taskId), tool: '' }, LATER, 'mock')).toBe(state)
   })
 })

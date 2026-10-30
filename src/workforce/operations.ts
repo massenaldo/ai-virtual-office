@@ -14,6 +14,7 @@ export const ROLE_MAX = 60
 export const TITLE_MAX = 80
 export const DESCRIPTION_MAX = 1000
 export const INTERRUPTED_MESSAGE = 'Interrupted by page reload (simulated run)'
+export const UNKNOWN_ERROR = 'The runtime reported an error without a message.'
 export const TIMEOUT_MESSAGE = (timeoutMs: number) => `Timed out after ${Math.round(timeoutMs / 1000)} s`
 
 // Distributes over the activity union so each variant keeps its own fields.
@@ -151,7 +152,7 @@ function transitionFor(event: RuntimeEvent, task: AgentTask, now: string, source
   const base = { agentId: task.agentId, taskId: task.id, timestamp: now, source }
   switch (event.type) {
     case 'started':
-      return { task: { status: 'running', startedAt: now, executionId: event.executionId, sessionId: event.sessionId ?? null }, agentStatus: 'thinking', activity: { ...base, type: 'task-started', message: `Started "${task.title}"` } }
+      return { task: { status: 'running', startedAt: now, executionId: event.executionId || null, sessionId: event.sessionId || null }, agentStatus: 'thinking', activity: { ...base, type: 'task-started', message: `Started "${task.title}"` } }
     case 'progress':
       return { task: {}, agentStatus: event.step, activity: { ...base, type: 'task-progress', step: event.step, message: event.message } }
     case 'message':
@@ -159,9 +160,11 @@ function transitionFor(event: RuntimeEvent, task: AgentTask, now: string, source
     case 'approval_requested':
       return { task: { status: 'waiting_for_approval', pendingApproval: { id: event.approvalId, tool: event.tool, summary: event.summary, requestedAt: now } }, agentStatus: 'waiting', activity: { ...base, type: 'task-approval-requested', approvalId: event.approvalId, message: `Approval needed: ${event.summary}` } }
     case 'completed':
-      return { task: { status: 'completed', completedAt: now, resultSummary: event.summary, endedReason: 'completed', pendingApproval: null }, agentStatus: 'completed', activity: { ...base, type: 'task-completed', message: event.summary } }
-    case 'failed':
-      return { task: { status: 'failed', completedAt: now, errorMessage: event.error, endedReason: 'failed', pendingApproval: null }, agentStatus: 'error', activity: { ...base, type: 'task-failed', message: event.error } }
+      return { task: { status: 'completed', completedAt: now, resultSummary: event.summary || null, endedReason: 'completed', pendingApproval: null }, agentStatus: 'completed', activity: { ...base, type: 'task-completed', message: event.summary } }
+    case 'failed': {
+      const error = event.error || UNKNOWN_ERROR
+      return { task: { status: 'failed', completedAt: now, errorMessage: error, endedReason: 'failed', pendingApproval: null }, agentStatus: 'error', activity: { ...base, type: 'task-failed', message: error } }
+    }
     case 'cancelled':
       return { task: { status: 'cancelled', completedAt: now, endedReason: 'cancelled', pendingApproval: null }, agentStatus: 'idle', activity: { ...base, type: 'task-cancelled', message: `Cancelled "${task.title}"` } }
   }
@@ -187,6 +190,8 @@ function taskWithAgent(s: WorkforceState, taskId: string): { task: AgentTask; ag
 export function applyRuntimeEvent(s: WorkforceState, event: RuntimeEvent, now: string, source: ActivitySource): WorkforceState {
   const found = taskWithAgent(s, event.taskId)
   if (!found || !ACCEPTS[event.type].includes(found.task.status)) return s
+  // An approval nobody can answer (no id) or describe (no tool) is malformed; it must not block the task.
+  if (event.type === 'approval_requested' && (!event.approvalId || !event.tool)) return s
   return applyTransition(s, found.task, transitionFor(event, found.task, now, source))
 }
 
@@ -206,7 +211,7 @@ export function requestCancel(s: WorkforceState, taskId: string, now: string, so
   const { task } = found
   if (task.status === 'queued') return applyRuntimeEvent(s, { type: 'cancelled', taskId }, now, source)
   if (task.status !== 'starting' && task.status !== 'running' && task.status !== 'waiting_for_approval') return s
-  return applyTransition(s, task, { task: { status: 'cancelling' }, activity: { agentId: task.agentId, taskId, timestamp: now, source, type: 'task-cancelling', message: `Cancelling "${task.title}"` } })
+  return applyTransition(s, task, { task: { status: 'cancelling', pendingApproval: null }, activity: { agentId: task.agentId, taskId, timestamp: now, source, type: 'task-cancelling', message: `Cancelling "${task.title}"` } })
 }
 
 /** Records the human decision on the pending approval; a stale id or a second decision changes nothing. The runtime decides what happens next. */

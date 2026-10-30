@@ -246,13 +246,13 @@ export function cancelTask(s: WorkforceState, taskId: string, now: string): Work
   return found ? applyRuntimeEvent(s, { type: 'cancelled', taskId }, now, sourceOf(found.agent)) : s
 }
 
-/** After a reload no runtime is running any more: started work is marked failed, a pending cancel completes, and queued tasks stay. */
-export function recoverInterruptedTasks(s: WorkforceState, now: string): WorkforceState {
+/** After a reload or restart no runtime is running any more: started work is marked failed with the given message, a pending cancel completes, and queued tasks stay. */
+export function recoverInterruptedTasks(s: WorkforceState, now: string, message: string = INTERRUPTED_MESSAGE): WorkforceState {
   return s.tasks.reduce((state, task) => {
     const agent = state.agents.find((a) => a.id === task.agentId)
     const source = agent ? sourceOf(agent) : 'mock'
     if (task.status === 'cancelling') return applyTransition(state, task, transitionFor({ type: 'cancelled', taskId: task.id }, task, now, source))
     if (task.status !== 'starting' && task.status !== 'running' && task.status !== 'waiting_for_approval') return state
-    return applyTransition(state, task, transitionFor({ type: 'failed', taskId: task.id, error: INTERRUPTED_MESSAGE }, task, now, source))
+    return applyTransition(state, task, transitionFor({ type: 'failed', taskId: task.id, error: message }, task, now, source))
   }, s)
 }

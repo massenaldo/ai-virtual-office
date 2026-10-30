@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addActivity, assignDesk, createAgent, emptyWorkforce, removeAgent, updateAgent, type AgentInput } from './operations'
+import { activeTaskFor, addActivity, applyRuntimeEvent, assignDesk, assignTask, createAgent, emptyWorkforce, INTERRUPTED_MESSAGE, recoverInterruptedTasks, removeAgent, updateAgent, type AgentInput } from './operations'
 import type { AgentTask, WorkforceState } from './types'
 
 const NOW = '2026-10-30T09:00:00.000Z'
@@ -124,5 +124,117 @@ describe('addActivity', () => {
     expect(state.activities[0].message).toBe('#6')
     expect(state.agents[0].lastActivityAt).toBe(state.activities.at(-1)?.timestamp)
     expect(new Set(state.activities.map((a) => a.id)).size).toBe(300)
+  })
+})
+
+function withTask(title = 'Draft sprint plan') {
+  const { state, id } = withAgent()
+  const r = assignTask(state, id, { title, description: 'Two-week plan' }, NOW)
+  if (!r.ok) throw new Error(r.error)
+  return { state: r.state, agentId: id, taskId: r.taskId }
+}
+
+describe('assignTask', () => {
+  it('creates a queued task and points the agent at it', () => {
+    const { state, agentId, taskId } = withTask()
+    expect(state.tasks).toHaveLength(1)
+    expect(state.tasks[0]).toMatchObject({ id: taskId, agentId, status: 'queued', title: 'Draft sprint plan', description: 'Two-week plan', createdAt: NOW, startedAt: null, completedAt: null, executionId: null })
+    expect(state.agents[0]).toMatchObject({ currentTaskId: taskId, status: 'idle' })
+    expect(state.activities.at(-1)).toMatchObject({ type: 'task-assigned', agentId, taskId })
+    expect(activeTaskFor(state, agentId)?.id).toBe(taskId)
+  })
+
+  it('blocks a second active task', () => {
+    const { state, agentId, taskId } = withTask()
+    expect(assignTask(state, agentId, { title: 'Another', description: '' }, NOW)).toEqual({ ok: false, error: 'Nova already has an active task.' })
+    const done = applyRuntimeEvent(applyRuntimeEvent(state, { type: 'started', taskId, executionId: 'exec-1' }, NOW, 'mock'), { type: 'completed', taskId, summary: 'Done' }, NOW, 'mock')
+    expect(activeTaskFor(done, agentId)).toBeUndefined()
+    expect(assignTask(done, agentId, { title: 'Another', description: '' }, NOW).ok).toBe(true)
+  })
+
+  it('rejects blank or over-long titles and descriptions', () => {
+    const { state, id } = withAgent()
+    expect(assignTask(state, id, { title: '  ', description: '' }, NOW)).toEqual({ ok: false, error: 'Title is required.' })
+    expect(assignTask(state, id, { title: 'x'.repeat(81), description: '' }, NOW)).toEqual({ ok: false, error: 'Title must be 80 characters or fewer.' })
+    expect(assignTask(state, id, { title: 'Ok', description: 'x'.repeat(1001) }, NOW)).toEqual({ ok: false, error: 'Description must be 1000 characters or fewer.' })
+    expect(assignTask(state, 'agent-x', { title: 'Ok', description: '' }, NOW)).toEqual({ ok: false, error: 'Agent not found.' })
+  })
+})
+
+describe('applyRuntimeEvent', () => {
+  it('walks started → progress working → completed', () => {
+    const { state, agentId, taskId } = withTask()
+    const started = applyRuntimeEvent(state, { type: 'started', taskId, executionId: 'exec-9' }, LATER, 'mock')
+    expect(started.tasks[0]).toMatchObject({ status: 'running', startedAt: LATER, executionId: 'exec-9' })
+    expect(started.agents[0].status).toBe('thinking')
+    expect(started.activities.at(-1)).toMatchObject({ type: 'task-started', taskId, agentId, source: 'mock', message: 'Started "Draft sprint plan"' })
+
+    const working = applyRuntimeEvent(started, { type: 'progress', taskId, step: 'working', message: 'Working (simulated)' }, LATER, 'mock')
+    expect(working.tasks[0].status).toBe('running')
+    expect(working.agents[0].status).toBe('working')
+    expect(working.activities.at(-1)).toMatchObject({ type: 'task-progress', step: 'working', message: 'Working (simulated)' })
+
+    const waiting = applyRuntimeEvent(working, { type: 'waiting', taskId, message: 'Waiting for input (simulated)' }, LATER, 'mock')
+    expect(waiting.tasks[0].status).toBe('waiting')
+    expect(waiting.agents[0].status).toBe('waiting')
+    expect(waiting.activities.at(-1)).toMatchObject({ type: 'task-waiting' })
+
+    const resumed = applyRuntimeEvent(waiting, { type: 'progress', taskId, step: 'working', message: 'Working (simulated)' }, LATER, 'mock')
+    expect(resumed.tasks[0].status).toBe('running')
+
+    const done = applyRuntimeEvent(resumed, { type: 'completed', taskId, summary: 'Simulated result' }, LATER, 'mock')
+    expect(done.tasks[0]).toMatchObject({ status: 'completed', completedAt: LATER, resultSummary: 'Simulated result', errorMessage: null })
+    expect(done.agents[0]).toMatchObject({ status: 'completed', currentTaskId: taskId, lastActivityAt: LATER })
+    expect(done.activities.at(-1)).toMatchObject({ type: 'task-completed', message: 'Simulated result', source: 'mock' })
+  })
+
+  it('failed sets the agent to error', () => {
+    const { state, taskId } = withTask()
+    const s = applyRuntimeEvent(state, { type: 'failed', taskId, error: 'Simulated error' }, LATER, 'mock')
+    expect(s.tasks[0]).toMatchObject({ status: 'failed', completedAt: LATER, errorMessage: 'Simulated error' })
+    expect(s.agents[0].status).toBe('error')
+    expect(s.activities.at(-1)).toMatchObject({ type: 'task-failed', message: 'Simulated error' })
+  })
+
+  it('cancelled returns the agent to idle', () => {
+    const { state, taskId } = withTask()
+    const s = applyRuntimeEvent(applyRuntimeEvent(state, { type: 'started', taskId, executionId: 'e' }, NOW, 'mock'), { type: 'cancelled', taskId }, LATER, 'mock')
+    expect(s.tasks[0]).toMatchObject({ status: 'cancelled', completedAt: LATER })
+    expect(s.agents[0].status).toBe('idle')
+    expect(s.activities.at(-1)).toMatchObject({ type: 'task-cancelled' })
+  })
+
+  it('ignores events for unknown, finished or removed tasks', () => {
+    const { state, agentId, taskId } = withTask()
+    const cancelled = applyRuntimeEvent(state, { type: 'cancelled', taskId }, LATER, 'mock')
+    expect(applyRuntimeEvent(cancelled, { type: 'completed', taskId, summary: 'late' }, LATER, 'mock')).toBe(cancelled)
+    expect(applyRuntimeEvent(cancelled, { type: 'started', taskId, executionId: 'e' }, LATER, 'mock')).toBe(cancelled)
+    const removed = removeAgent(state, agentId).state
+    expect(applyRuntimeEvent(removed, { type: 'progress', taskId, step: 'working', message: 'x' }, LATER, 'mock')).toBe(removed)
+    expect(applyRuntimeEvent(state, { type: 'completed', taskId: 'task-x', summary: 'x' }, LATER, 'mock')).toBe(state)
+  })
+})
+
+describe('recoverInterruptedTasks', () => {
+  it('fails running and waiting tasks only', () => {
+    const a = withAgent({ ...NOVA, name: 'A' })
+    const b = withAgent({ ...NOVA, name: 'B' }, a.state)
+    const c = withAgent({ ...NOVA, name: 'C' }, b.state)
+    const s: WorkforceState = {
+      ...c.state,
+      tasks: [task(a.id, { id: 'task-a', status: 'running' }), task(b.id, { id: 'task-b', status: 'waiting' }), task(c.id, { id: 'task-c', status: 'queued', startedAt: null, executionId: null })],
+      agents: c.state.agents.map((x) => ({ ...x, status: x.id === b.id ? 'waiting' : x.id === a.id ? 'working' : 'idle', currentTaskId: x.id === a.id ? 'task-a' : x.id === b.id ? 'task-b' : 'task-c' })),
+    }
+    const r = recoverInterruptedTasks(s, LATER)
+    expect(r.tasks.map((t) => t.status)).toEqual(['failed', 'failed', 'queued'])
+    expect(r.tasks[0]).toMatchObject({ errorMessage: 'Interrupted by page reload (simulated run)', completedAt: LATER })
+    expect(INTERRUPTED_MESSAGE).toBe('Interrupted by page reload (simulated run)')
+    expect(r.agents.map((x) => x.status)).toEqual(['error', 'error', 'idle'])
+    expect(r.activities.filter((x) => x.type === 'task-failed')).toHaveLength(2)
+  })
+
+  it('returns the same state when nothing is running', () => {
+    const { state } = withTask()
+    expect(recoverInterruptedTasks(state, LATER)).toBe(state)
   })
 })

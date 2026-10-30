@@ -1,14 +1,19 @@
 import { DEPARTMENTS } from '../layout/catalog'
 import { createId } from '../layout/operations'
-import { ACTIVITY_LIMIT, WORKFORCE_SCHEMA_VERSION, type Agent, type AgentActivity, type AgentDepartment, type AgentTask, type RuntimeMode, type WorkforceState } from './types'
+import type { RuntimeEvent } from './runtime/types'
+import { ACTIVITY_LIMIT, WORKFORCE_SCHEMA_VERSION, type ActivitySource, type Agent, type AgentActivity, type AgentDepartment, type AgentStatus, type AgentTask, type RuntimeMode, type WorkforceState } from './types'
 
 // Every operation returns a new state, or the same reference when nothing changed.
 
 export type AgentInput = { name: string; role: string; department: AgentDepartment }
+export type TaskInput = { title: string; description: string }
 export type OpResult<T = {}> = ({ ok: true; state: WorkforceState } & T) | { ok: false; error: string }
 
 export const NAME_MAX = 40
 export const ROLE_MAX = 60
+export const TITLE_MAX = 80
+export const DESCRIPTION_MAX = 1000
+export const INTERRUPTED_MESSAGE = 'Interrupted by page reload (simulated run)'
 
 // Distributes over the activity union so each variant keeps its own fields.
 type NewActivity = AgentActivity extends infer A ? (A extends AgentActivity ? Omit<A, 'id'> : never) : never
@@ -93,4 +98,73 @@ export function assignDesk(s: WorkforceState, agentId: string, deskId: string | 
     deskId === null ? { ...base, type: 'desk-unassigned', message: 'Desk unassigned' } : { ...base, type: 'desk-assigned', deskId, message: `Assigned to desk ${deskId}` },
   )
   return { ok: true, state }
+}
+
+export function validateTaskInput(input: TaskInput): string | null {
+  const title = input.title.trim()
+  if (!title) return 'Title is required.'
+  if (title.length > TITLE_MAX) return `Title must be ${TITLE_MAX} characters or fewer.`
+  if (input.description.trim().length > DESCRIPTION_MAX) return `Description must be ${DESCRIPTION_MAX} characters or fewer.`
+  return null
+}
+
+export function activeTaskFor(s: WorkforceState, agentId: string): AgentTask | undefined {
+  return s.tasks.find((t) => t.agentId === agentId && isActiveTask(t))
+}
+
+/** Creates a queued task for the agent. One active task per agent; the runtime starts it separately. */
+export function assignTask(s: WorkforceState, agentId: string, input: TaskInput, now: string): OpResult<{ taskId: string }> {
+  const agent = s.agents.find((a) => a.id === agentId)
+  if (!agent) return { ok: false, error: 'Agent not found.' }
+  const error = validateTaskInput(input)
+  if (error) return { ok: false, error }
+  if (activeTaskFor(s, agentId)) return { ok: false, error: `${agent.name} already has an active task.` }
+  const taskId = createId('task', new Set(s.tasks.map((t) => t.id)))
+  const task: AgentTask = { id: taskId, agentId, title: input.title.trim(), description: input.description.trim(), status: 'queued', createdAt: now, startedAt: null, completedAt: null, resultSummary: null, errorMessage: null, executionId: null }
+  const next = replaceAgent({ ...s, tasks: [...s.tasks, task] }, { ...agent, currentTaskId: taskId })
+  const state = addActivity(next, { type: 'task-assigned', agentId, taskId, message: `Assigned "${task.title}"`, timestamp: now, source: sourceOf(agent) })
+  return { ok: true, state, taskId }
+}
+
+type Transition = { task: Partial<AgentTask>; agentStatus: AgentStatus; activity: NewActivity }
+
+function transitionFor(event: RuntimeEvent, task: AgentTask, now: string, source: ActivitySource): Transition {
+  const base = { agentId: task.agentId, taskId: task.id, timestamp: now, source }
+  switch (event.type) {
+    case 'started':
+      return { task: { status: 'running', startedAt: now, executionId: event.executionId }, agentStatus: 'thinking', activity: { ...base, type: 'task-started', message: `Started "${task.title}"` } }
+    case 'progress':
+      return { task: { status: 'running' }, agentStatus: event.step, activity: { ...base, type: 'task-progress', step: event.step, message: event.message } }
+    case 'waiting':
+      return { task: { status: 'waiting' }, agentStatus: 'waiting', activity: { ...base, type: 'task-waiting', message: event.message } }
+    case 'completed':
+      return { task: { status: 'completed', completedAt: now, resultSummary: event.summary }, agentStatus: 'completed', activity: { ...base, type: 'task-completed', message: event.summary } }
+    case 'failed':
+      return { task: { status: 'failed', completedAt: now, errorMessage: event.error }, agentStatus: 'error', activity: { ...base, type: 'task-failed', message: event.error } }
+    case 'cancelled':
+      return { task: { status: 'cancelled', completedAt: now }, agentStatus: 'idle', activity: { ...base, type: 'task-cancelled', message: `Cancelled "${task.title}"` } }
+  }
+}
+
+function applyTransition(s: WorkforceState, task: AgentTask, t: Transition): WorkforceState {
+  const tasks = s.tasks.map((x) => (x.id === task.id ? { ...x, ...t.task } : x))
+  const agents = s.agents.map((a) => (a.id === task.agentId ? { ...a, status: t.agentStatus } : a))
+  return addActivity({ ...s, tasks, agents }, t.activity)
+}
+
+/** The single place runtime events change state. Events for a missing or finished task are ignored, so late timers can't resurrect anything. */
+export function applyRuntimeEvent(s: WorkforceState, event: RuntimeEvent, now: string, source: ActivitySource): WorkforceState {
+  const task = s.tasks.find((t) => t.id === event.taskId)
+  if (!task || !isActiveTask(task) || !s.agents.some((a) => a.id === task.agentId)) return s
+  return applyTransition(s, task, transitionFor(event, task, now, source))
+}
+
+/** After a reload no timer is running any more, so started tasks are marked failed instead of hanging forever. Queued tasks never started and stay. */
+export function recoverInterruptedTasks(s: WorkforceState, now: string): WorkforceState {
+  return s.tasks.reduce((state, task) => {
+    if (task.status !== 'running' && task.status !== 'waiting') return state
+    const agent = state.agents.find((a) => a.id === task.agentId)
+    const source = agent ? sourceOf(agent) : 'mock'
+    return applyTransition(state, task, transitionFor({ type: 'failed', taskId: task.id, error: INTERRUPTED_MESSAGE }, task, now, source))
+  }, s)
 }

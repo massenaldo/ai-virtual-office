@@ -92,7 +92,7 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
     {timeline.length === 0 ? <p className="panel-hint">No activity yet.</p> : <ol className="activity-list">{timeline.map((a) => <li key={a.id}>
       <time dateTime={a.timestamp}>{formatTime(a.timestamp)}</time>
       <span>{a.message}</span>
-      {a.source === 'mock' && <span className="agent-chip sim">Simulated</span>}
+      {a.source === 'mock' && a.type.startsWith('task-') && <span className="agent-chip sim">Simulated</span>}
     </li>)}</ol>}
   </>
 }

@@ -11,7 +11,8 @@
     "server": "tsx server/index.ts",
     "server:build": "vite build --config vite.server.config.ts",
     "server:start": "node dist-server/index.js",
-    "dev:full": "tsx watch --clear-screen=false scripts/devFull.ts"
+    "dev:full": "tsx watch --clear-screen=false scripts/devFull.ts",
+    "check:secrets": "tsx scripts/checkSecrets.ts"
   },
   "dependencies": {
     "@fontsource-variable/dm-sans": "^5.3.0",

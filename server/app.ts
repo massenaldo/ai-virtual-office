@@ -61,7 +61,7 @@ export function createApp(config: ServerConfig, deps: AppDeps = {}): App {
   const store = openWorkforceStore({ dataDir: config.dataDir, now, log, onCommit: (before, after) => { events.append(deriveEvents(before, after)) } })
   // The store opens first: it creates DATA_DIR, where the audit log lives.
   const audit = deps.audit ?? openAuditLog({ dataDir: config.dataDir, maxBytes: config.auditLogMaxBytes, now, log, hide: config.workspaceRoot ? [config.workspaceRoot] : [] })
-  const provider = deps.provider ?? (config.runtime === 'mock' ? new ServerMockProvider({ timings: deps.mockTimings }) : new ClaudeAgentRuntimeProvider())
+  const provider = deps.provider ?? (config.runtime === 'mock' ? new ServerMockProvider({ timings: deps.mockTimings }) : new ClaudeAgentRuntimeProvider({ credentialsConfigured: config.credentialsConfigured }))
   const manager = new TaskManager({ store, provider, config, policy: toolPolicyFrom(config), now, log, onLifecycle: (e) => audit.write(toAuditInput(e)) })
   const streams = new Set<ServerResponse>()
   const startedAt = now()

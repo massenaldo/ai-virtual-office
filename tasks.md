@@ -1,103 +1,110 @@
-# Milestone 2 — Realistic Office Builder: Tasks
+# Milestone 3A — AI Agent Workforce UI and Mock Runtime: Tasks
 
-**Spec:** [`plan.md`](plan.md) (Milestone 2 brief). This file is my working task list for that spec.
-**Status:** Approved 2026-10-25. All open questions answered (see the end); the user may raise concerns later.
+**Spec:** [`plan.md`](plan.md) (Milestone 3A brief). This file is my working task list for that spec.
+**Status:** Approved, 2026-10-30. Q1–Q4 answered (see "Decisions" at the end); Stage A is next, after the Vitest upgrade PR.
+**Earlier milestones:** [`docs/milestones/milestone-2-tasks.md`](docs/milestones/milestone-2-tasks.md) and [`milestone-2-plan.md`](docs/milestones/milestone-2-plan.md).
 
 ## What this milestone is
 
-A visual upgrade of the existing 3D office, not a rewrite. The office should look like a real, premium modern tech office: warm wood desks, graphite metal, glass partitions, realistic chairs and monitors, natural daylight. The dark app UI, the layout editor, saving, undo/redo and `/vo` must all keep working. The scope is visual realism only: no AI agents, backend, auth, multiplayer or video studio.
+The office gets a staff of **AI agents** you can manage. You can create agents, give them a desk, assign them a task, and watch a **simulated** run with status and an activity timeline. Agents show up at their desks in the 3D office. The runtime is a mock behind a clean interface, so a real Claude runtime can be plugged in later, on a server. Nothing in this milestone calls an LLM or runs processes, and the UI says so. The office layout, editor, 3D scene and `/vo` must keep working unchanged.
 
-## Current state (from inspecting the code, 2026-10-25)
+## Current state (from inspecting the code, 2026-10-26)
 
-- **Build and tests:** `npm run build` passes (only a chunk-size warning, already present before this milestone). `npm test` passes, 84/84.
-- **Scene code:** `src/scene/`
-  - `OfficeScene.tsx`: lights, floor, cameras
-  - `RoomMesh.tsx`: room floor slab, 2 side walls, glass back wall, ceiling slab, label
-  - `FurnitureItem.tsx` and `models.tsx`: 5 procedural models built from primitives
-  - `FootprintOutline.tsx`, `ResizeHandles.tsx`, `useFloorDrag.ts`: editor feedback and interaction
-- **Layout data:** `src/layout/`. The scene renders `OfficeLayout` (schema v1, key `ai-virtual-office:layout:v1`). Furniture types are desk, chair, monitor, plant and meeting-table, and storage only accepts known types.
-- **Remote asset:** `<Environment preset="apartment">` downloads `lebombo_1k.hdr` from `raw.githack.com` at runtime. This conflicts with plan.md §7 (self-hosted).
-- **Shadows:** every model mesh and every wall casts shadows (13 `castShadow` uses), with a 2048² shadow map.
-- **Visibility:** each room has a solid ceiling slab plus three walls with an open front side, so the ceiling hides the room interior from above.
-- **Floor plan:** an orthographic top-down camera with furniture drawn as flat coloured tiles. Walls and ceilings are hidden.
+- **Branch and checks:** on `main` at #13. `npm test` passes: 22 files, 203 tests. `npm run build` passes.
+- **App shell:** `src/App.tsx` is one page with no router.
+  - The sidebar has **Office** (active) and a greyed-out **AI Agents · LATER** item, which is the natural entry point for this milestone.
+  - The "Next milestone" card still says "Layout editor".
+- **Layout model:** `src/layout/` (`types.ts`, `operations.ts`, `history.ts`, `storage.ts`)
+  - `OfficeLayout` is schema v1, stored under `ai-virtual-office:layout:v1`, saved only when you click Save, with undo/redo history in `editorReducer`.
+  - Furniture IDs are stable strings: `desk-01`…`desk-14` in the default office; new items get random IDs. A workstation is three separate items (desk, chair, monitor); the **desk** is the natural reference.
+- **Selection:** clicking rooms and furniture in the scene only works in **edit mode**: pointer handlers are attached only when `editing` is on. Selection lives in the layout editor state.
+- **Scene:** `src/scene/`
+  - Renders on demand: `frameloop="demand"`.
+  - Room labels are a DOM layer moved by `RoomLabelTracker` (no React re-renders), which is a good pattern for desk status markers.
+  - The furniture footprint outline (`FootprintOutline`) can highlight a desk without changing its geometry.
+- **Tests:** Vitest in a Node environment (no DOM). The existing code keeps logic in pure, tested modules, and components stay thin.
+- **No agent code exists yet.**
+
+### Pre-existing issues (recorded, not caused by this milestone)
+
+- `npm run build` warns that the main chunk is over 500 kB (1,277 kB; mostly three.js).
+- `npm audit`: 3 advisories, all in the **dev-only** test runner: Vitest's `@vitest/mocker` (moderate) and `tinypool` (2 critical). The fix is a major upgrade to Vitest 5 (see Q4).
+- Deferred minors from earlier PRs, still open:
+  - room rotation isn't shown in the room panel;
+  - the old concrete floor material is unused;
+  - one README line still says "polished concrete in open areas";
+  - the stats overlay samples one frame late.
 
 ## How I'll work
 
-- **One stage = one branch = one PR into `main`**, e.g. `feat/office-visuals-stage-a`. No stacked PRs. You merge, then I delete the merged branches.
-- **Before/after screenshots from the same fixed camera angles** go in every PR (3D overview, a close-up, floor plan), because visual quality can't be checked by unit tests.
-- **Each stage ends with the editor regression checklist below,** run in the browser, plus `npm test` and `npm run build`.
-- **Decisions follow your direction over plan.md §10.** plan.md says "do not stop after producing a plan", but you asked to discuss first and review each stage, so I'll stop for review after each PR.
+- **One stage = one branch = one PR into `main`**, as before. You merge, then I delete the branch. I stop for your review after each PR. This follows your direction over plan.md's "do not stop after producing a plan".
+- **Logic first, in pure tested modules** (the domain model, storage, and the runtime with fake timers); React components stay thin.
+- **Each stage ends with** `npm test`, `npm run build`, the editor regression checklist (milestone 2), and browser checks of the new features, with screenshots in the PR.
+- **No new runtime dependencies.** No backend.
 
-## Decisions (proposed by me, agreed 2026-10-25)
+## Decisions I propose (for your OK)
 
-1. **Lighting without downloads:** replace the remote HDR with lighting built in code (drei `Environment` with `Lightformer` panels, plus sun and soft fill lights). No network requests and no new dependency.
-2. **No new rendering dependencies:** no post-processing library. Soft shadows come from tuned shadow maps plus the existing `ContactShadows`, and "ambient occlusion" is faked cheaply (darker contact areas, baked gradients) rather than a real-time AO pass.
-3. **Floor material comes from the room's department** (for example carpet for offices, concrete for the server room), so the saved-layout format doesn't change.
-4. **New furniture types extend the schema in a backward-compatible way.** Storage cabinet, shelf and meeting chair are added to the furniture list. Old saves still load and the schema stays v1. Keyboard, mouse and desk accessories become part of the desk model, not separate items.
-5. **Shared geometry and materials:** one shared materials module, and each furniture model's parts are merged into a few meshes (using three.js's own utilities, nothing new to install). Only larger objects cast shadows; small details don't.
-6. **Changing the default office only affects Reset.** Your saved layout keeps its own rooms and furniture; new furniture only appears in the default after Reset layout.
+1. **Where it lives.** Clicking **AI Agents** in the sidebar opens a **Workforce panel beside the 3D office**, in the same scene card as edit mode's panels. That way the desks stay visible while you work with agents. Workforce mode and layout edit mode are separate modes; turning one on turns the other off (see Q1).
+2. **Workstation = a desk's furniture ID.** Only `desk` items can be assigned, one agent per desk. The chair and monitor next to it aren't referenced.
+3. **Separate storage.** Agents, tasks and activities are saved under their own key, `ai-virtual-office:workforce:v1`, with a schema version, validation and backup on bad data, like the layout. It never touches the layout's key.
+4. **Agent changes save automatically**, instead of using the layout's Save button, and they are **not part of the layout's undo history** (see Q2).
+5. **Missing desks.** If an agent's desk no longer exists in the current layout (deleted, or not in the default after Reset), the agent keeps the reference, shows "Workstation unavailable" and gets no marker. You can pick another desk. Nothing crashes, and nothing is deleted silently (see Q3).
+6. **Demo agents.** Six demo agents are seeded **once**, only when no workforce data is saved yet: Project Management, Tech Lead, Backend, Frontend, QA and DevOps. Each sits at an existing default desk and is labelled **Demo**. Removing them doesn't bring them back on reload. There will be a "Restore demo agents" action.
+7. **Statuses.**
+   - Agent: `idle`, `working`, `thinking`, `waiting`, `error`, `completed`, as the spec requires.
+   - Task: `queued`, `running`, `waiting`, `completed`, `failed`, `cancelled`.
+   - One active task per agent. You can't start a second task while one is running; there is no queue.
+8. **Mock runtime.**
+   - `MockRuntimeProvider` runs timers in the browser. It steps a task through `thinking → working → completed` and writes activity events labelled *Simulated*.
+   - Demo controls can force `waiting` and `error`.
+   - Timers are cleaned up on unmount.
+   - A task that was running when the page reloaded is marked `failed` with "Interrupted by page reload (simulated run)", so references stay consistent.
+9. **Runtime boundary.**
+   - A `RuntimeProvider` interface covers: start a task, a stream of task events, cancel, completion results, errors, and an execution or session ID.
+   - `ClaudeRuntimeProvider` is a placeholder that only reports "not available: requires a server-side runtime". It has no API keys, no fetch, and no process execution.
+10. **Status markers in 3D.** A small coloured status badge floats above each assigned desk: a DOM layer like the room labels, ignoring pointer events, and also shown in the floor plan. Selecting an agent highlights its desk with the existing outline and can focus the camera on it. In Workforce mode, clicking an assigned desk opens that agent.
+11. **Activity history limit:** the most recent 300 events in total. Completed tasks are kept; there is no task-count limit in this milestone.
 
-## Stage A: Lighting, materials, floor, walls, structure
+## Stage A — Domain model, storage and mock runtime (no UI)
 
-- [x] Lighting built in code instead of the remote HDR; balanced daylight plus soft interior fill; tuned tone mapping and exposure
-- [x] Shared material library (oak, graphite metal, warm-white wall paint, glass, concrete, carpet, epoxy); walnut comes with the Stage B furniture
-- [x] Office floor finish plus per-room floors (by department), with clear room boundaries
-- [x] Walls with real thickness, clean corners and baseboards; ceilings removed (cutaway view, Q1)
-- [x] Clean background and a default overview camera that shows the whole office (fitted to the canvas, including edit mode)
-- [x] Floor plan stays clear: readable room colours, boundaries and labels
-- [x] PR with before/after screenshots
-- Also fixed in Stage A: one room label could render empty (labels now live in one DOM layer); open-floor furniture floated 8 cm above the floor.
-- Found, not fixed: `src/styles.css` loads the DM Sans and Manrope fonts from Google Fonts at runtime (needs the user's OK to download and self-host the font files). Fixed in Stage D.
+- [ ] Types in `src/workforce/types.ts`: `Agent`, `AgentTask`, `AgentActivity`, `AgentStatus`, `TaskStatus`, `RuntimeMode` (`mock` | `real`), `ActivitySource`. Use discriminated unions for activity events.
+- [ ] Pure operations in `src/workforce/operations.ts`: create, update, remove an agent; assign or unassign a desk (one agent per desk); assign a task, and block a second active task. Removing an agent cancels its active task.
+- [ ] Storage in `src/workforce/storage.ts`: separate versioned key, strict validation, backup of unreadable data, activity limit, reference checks (task ↔ agent, activity ↔ agent/task). Demo seed only when nothing is stored.
+- [ ] Runtime interface plus `MockRuntimeProvider` in `src/workforce/runtime/`: start, events, cancel, force waiting or error, complete; cleans up its timers; reload recovery.
+- [ ] `ClaudeRuntimeProvider` placeholder, with a comment block on the server-side-only rule (no credentials in the browser).
+- [ ] Tests for all of the above, using Vitest fake timers for the runtime.
+- [ ] PR
 
-## Stage B: Furniture models
+## Stage B — Workforce panel and task UI
 
-- [x] Desk: proper top thickness, graphite frame, optional drawer unit or cable tray, keyboard and mouse
-- [x] Monitor: slim dark bezel, screen surface, stand and base
-- [x] Ergonomic chair: seat, backrest, armrests, gas lift, 5-star base with wheels; low polygon count
-- [x] Meeting table refresh, plus **new** meeting chair, storage cabinet and shelf (schema, palette, catalog footprints, floor-plan tiles, tests)
-- [x] Footprints in `catalog.ts` match the new models, so selection, overlap checks and snapping stay accurate
-- [x] PR with before/after screenshots
-- Plants were only shrunk to fit their footprint (the old foliage was 0.96 m wide); the leafy redesign is in Stage C.
+- [ ] The sidebar **AI Agents** item becomes active and opens the Workforce panel beside the 3D office. A visible **Mock mode** badge.
+- [ ] Agent list with department and status filters, and an empty state.
+- [ ] Create and edit an agent (name, role, department) with form validation. Remove with confirmation when the agent has an active task or history.
+- [ ] Desk picker listing free desks by room. Unassign. "Workstation unavailable" state.
+- [ ] Agent detail panel: current task, task form (title, description), start, cancel, demo controls (waiting / error), and an activity timeline with timestamps and *Simulated* labels.
+- [ ] "Restore demo agents" action. Update the "Next milestone" card.
+- [ ] PR with screenshots
 
-## Stage C: Glass, plants, details
+## Stage C — Agents in the 3D office
 
-- [x] Glass partitions with slim graphite frames for meeting rooms and offices; walls and glass never catch clicks
-- [x] Plants with leaf clusters in a proper planter, in a couple of sizes
-- [x] A few restrained details (wall art, a whiteboard in meeting rooms) that never block editing
-- [x] Default office updated with the new furniture (meeting chairs, storage); move the default meeting table fully inside the meeting room (it currently sticks through the room's east wall)
-- [x] PR with before/after screenshots
+- [ ] Status markers above assigned desks in 3D and floor plan; they never take clicks.
+- [ ] Selecting an agent highlights its desk and offers "Focus" to move the camera to it.
+- [ ] In Workforce mode, clicking an assigned desk opens that agent; clicking a free desk offers to assign one.
+- [ ] Graceful handling of deleted desks, Reset layout, and unsaved layout changes. Edit mode, transforms, undo/redo, save, reset and floor-plan sync stay unchanged.
+- [ ] PR with screenshots
 
-## Stage D: Optimize and verify
+## Stage D — Verify, document, report
 
-- [x] Count draw calls and meshes before and after; limit shadow casters; check frame rate while dragging
-- [x] Full editor regression checklist in 3D and floor plan
-- [x] Production build (`vite preview`) checked in the browser; `/vo` end to end
-- [x] Self-host the DM Sans / Manrope fonts only if necessary (user, 2026-10-25: "include it in a later stage if necessary")
-- [x] README updated (visuals, assets and licences if any, limitations)
-- [x] Final report per plan.md §10
-- Results: 1305 → 803 draw calls per frame in the 3D overview (room shells merged), and 60 → 0 frames per second while idle (render on demand). Shadow casters were already limited in Stage B (only walls and larger furniture), so they needed no change. Fonts self-hosted (user, 2026-10-26). Full report: [`docs/milestone-2-report.md`](docs/milestone-2-report.md).
+- [ ] All 12 checks in plan.md Phase 9, run in the browser on the dev server and on `vite preview`, plus `/vo`.
+- [ ] Malformed workforce storage test in the browser: the app loads, shows a notice, and backs up the data.
+- [ ] README: Workforce section, mock-runtime disclaimer, storage keys, limitations.
+- [ ] Final report (plan.md "Final report"), including the explicit statement that execution is simulated.
+- [ ] PR
 
-## Editor regression checklist (every stage)
+## Decisions (answered 2026-10-30)
 
-- Select, move, resize and rename rooms
-- Select, move, rotate, duplicate, add and delete furniture
-- Undo and redo
-- Save → reload restores the layout
-- Reset layout, with its confirmation
-- 3D and floor plan stay in sync
-- Grid and snap
-- Keyboard shortcuts
-- Selection outlines and labels stay readable over the new materials
-- No console errors
-
-## Open questions (all answered)
-
-- **Q1: Ceilings — answered:** cutaway. No ceilings, so every room is visible from above.
-- **Q1b: Front walls — answered:** no doors. Each room's front side stays open, so the interior is visible from any angle. This overrides plan.md §3 "doors where they make sense".
-- **Q2: Reference look — answered:** no reference; use my design judgment. My call for the look:
-  - **Floors:** light polished concrete in open areas; warm-grey carpet tiles in offices and team rooms; light oak in the meeting room and executive office; dark epoxy in the server room.
-  - **Walls:** warm-white walls with thin graphite baseboards; frameless or slim-framed glass toward circulation areas.
-  - **Furniture:** natural oak desktops on matte graphite frames; charcoal mesh chairs; black monitors with soft blue-grey screen glow; walnut for the executive office and meeting table.
-  - **Lighting:** soft late-morning daylight from one side with gentle, not crushed, shadows; warm interior fill.
-  - **Colour:** department colours become subtle accents (floor inlay or label tint) instead of fully coloured rooms, to keep the palette restrained.
-- **Q3: Decisions 1–6 — answered:** agreed.
+- **Q1: Where the Workforce lives:** a panel beside the 3D office, opened from the sidebar's **AI Agents**. It can't be on at the same time as layout edit mode.
+- **Q2: Saving agents:** saved automatically on every change, outside the layout's undo history.
+- **Q3: Deleted desks:** the agent keeps the reference, flagged "Workstation unavailable".
+- **Q4: Test-runner advisories:** upgrade Vitest to v5 in a small separate PR before Stage A.
+- **Q5:** no changes requested; proposed decisions 1–11 stand.

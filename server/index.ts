@@ -7,7 +7,14 @@ if (!parsed.ok) {
   process.exit(1)
 }
 
-const running = await startServer(parsed.config)
+let running
+try {
+  running = await startServer(parsed.config)
+} catch (error) {
+  const code = (error as NodeJS.ErrnoException).code
+  console.error(code === 'EADDRINUSE' ? `Port ${parsed.config.port} is already in use (is the backend already running?).` : error instanceof Error ? error.message : String(error))
+  process.exit(1)
+}
 console.log(`AI Virtual Office backend listening on ${running.url} (runtime: ${parsed.config.runtime})`)
 
 const stop = () => { void running.close().then(() => process.exit(0)) }

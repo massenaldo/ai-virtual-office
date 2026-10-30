@@ -14,7 +14,7 @@ import type { ExecutionResult, ExecutionStatus, ServerRuntimeProvider, StartCont
  *    workspace."). The SDK's working directory is `ctx.workspace.path`, set by the server and never by the browser or the
  *    model. No additional directories are ever added.
  * 3. Permissions. Every tool call goes through the SDK's permission callback (`canUseTool`), which calls
- *    `ctx.requestToolApproval({ tool, input })`. An `allow` result maps to the SDK's allow result with the input unchanged;
+ *    `ctx.requestToolApproval({ tool, input })`. An `allow` result maps to the SDK's allow result with the input unchanged (paths in it are policy-checked as text and never contain `..`, but the SDK must still not follow a symlink out of the workspace at use time);
  *    a `deny` maps to its deny result with `message`. Never pass an auto-approve tool list for write, execute or network
  *    tools, because SDK auto-approved tools skip the callback; pass every tool outside the catalogue as disallowed. The
  *    permission mode is `default`, never any other mode. Load no user, project or local settings files (no inherited

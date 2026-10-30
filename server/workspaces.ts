@@ -6,10 +6,10 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 //
 // Guaranteed: at the moment of each check, the workspace's real path is inside the root's real path, and a candidate
 // path, with every existing component's symlinks resolved, is inside the workspace. A dangling symlink is never
-// accepted as a target.
+// accepted as a target. A `..` segment is never accepted, because the kernel would apply it after following a symlink.
 // Not guaranteed: time of check to time of use. A process with write access to the root could swap a component between
 // a check and the runtime's own file operation. These checks are a policy, not a sandbox: every task start and every
-// tool decision re-checks, and a runtime must re-check at use time (see the Claude provider notes).
+// tool decision re-checks, but only at that moment, so a runtime must re-check at use time (see the Claude provider notes).
 // A path that names the workspace through an unresolved alias (for example /var/... instead of /private/var/...) fails
 // the lexical step and is denied. That is deny-by-default.
 

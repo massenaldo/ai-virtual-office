@@ -1,14 +1,21 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { parseEnv } from 'node:util'
+import { findSecretInConfig } from './redact'
 
 export type RuntimeKind = 'mock' | 'claude'
 
-export type ServerConfig = { host: string; port: number; dataDir: string; runtime: RuntimeKind; taskTimeoutMs: number; cancelGraceMs: number; approvalTimeoutMs: number; maxMessageBytes: number; maxTaskOutputBytes: number; eventBufferSize: number; credentialsConfigured: boolean }
+export type ServerConfig = { host: string; port: number; dataDir: string; runtime: RuntimeKind; taskTimeoutMs: number; cancelGraceMs: number; approvalTimeoutMs: number; maxMessageBytes: number; maxTaskOutputBytes: number; eventBufferSize: number; auditLogMaxBytes: number; credentialsConfigured: boolean }
 
 export type Env = Record<string, string | undefined>
 
 type Parsed = { ok: true; config: ServerConfig } | { ok: false; errors: string[] }
+
+/** Every environment variable parseConfig reads, in .env.example order. */
+export const CONFIG_VARIABLES: readonly string[] = ['HOST', 'PORT', 'DATA_DIR', 'RUNTIME', 'TASK_TIMEOUT_MS', 'CANCEL_GRACE_MS', 'APPROVAL_TIMEOUT_MS', 'MAX_MESSAGE_BYTES', 'MAX_TASK_OUTPUT_BYTES', 'EVENT_BUFFER_SIZE', 'AUDIT_LOG_MAX_BYTES', 'ANTHROPIC_API_KEY']
+
+/** Environment names that suggest skipping permission checks. This server has no such switch, so their presence is an error rather than being ignored. */
+export const REFUSED_ENV_PATTERN = /DANGEROUSLY|BYPASS_?PERMISSIONS|SKIP_?PERMISSIONS|PERMISSION_MODE/i
 
 const LOOPBACK = ['127.0.0.1', '::1', 'localhost']
 const MAX_TIMER_MS = 2147483647
@@ -25,9 +32,12 @@ const read = (env: Env, name: string): string | undefined => {
  */
 export function parseConfig(env: Env, cwd: string = process.cwd()): Parsed {
   const errors: string[] = []
+  for (const name of Object.keys(env)) {
+    if (REFUSED_ENV_PATTERN.test(name)) errors.push(`${name} is not supported: this server has no way to skip permission checks. Remove it.`)
+  }
 
   const host = read(env, 'HOST') ?? '127.0.0.1'
-  if (!LOOPBACK.includes(host)) errors.push(`HOST must be a loopback address (127.0.0.1, ::1 or localhost) until origin checks are added (got "${host}").`)
+  if (!LOOPBACK.includes(host)) errors.push(`HOST must be a loopback address (127.0.0.1, ::1 or localhost) (got "${host}"). Remote access needs TLS and authentication, which this server does not have yet.`)
 
   let port = 8787
   const rawPort = read(env, 'PORT')
@@ -62,10 +72,17 @@ export function parseConfig(env: Env, cwd: string = process.cwd()): Parsed {
   if (errors.length === errorsBeforeBytes && maxMessageBytes > maxTaskOutputBytes) errors.push('MAX_MESSAGE_BYTES must not exceed MAX_TASK_OUTPUT_BYTES.')
   const eventBufferSize = positive('EVENT_BUFFER_SIZE', 500)
 
+  let auditLogMaxBytes = 5242880
+  const rawAudit = read(env, 'AUDIT_LOG_MAX_BYTES')
+  if (rawAudit !== undefined) {
+    if (/^\d+$/.test(rawAudit) && Number(rawAudit) >= 65536 && Number(rawAudit) <= 1073741824) auditLogMaxBytes = Number(rawAudit)
+    else errors.push(`AUDIT_LOG_MAX_BYTES must be from 65536 to 1073741824 (got "${rawAudit}").`)
+  }
+
   if (errors.length > 0) return { ok: false, errors }
   return {
     ok: true,
-    config: { host, port, dataDir, runtime: rawRuntime as RuntimeKind, taskTimeoutMs, cancelGraceMs, approvalTimeoutMs, maxMessageBytes, maxTaskOutputBytes, eventBufferSize, credentialsConfigured: (read(env, 'ANTHROPIC_API_KEY') ?? '').trim() !== '' },
+    config: { host, port, dataDir, runtime: rawRuntime as RuntimeKind, taskTimeoutMs, cancelGraceMs, approvalTimeoutMs, maxMessageBytes, maxTaskOutputBytes, eventBufferSize, auditLogMaxBytes, credentialsConfigured: (read(env, 'ANTHROPIC_API_KEY') ?? '').trim() !== '' },
   }
 }
 
@@ -86,5 +103,9 @@ export function loadConfig(cwd: string = process.cwd(), env: Env = process.env):
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
   }
-  return parseConfig(mergeEnv(text, env), cwd)
+  const merged = mergeEnv(text, env)
+  const parsed = parseConfig(merged, cwd)
+  // Self-check: the key may only ever reach the config as a flag.
+  if (parsed.ok && findSecretInConfig(parsed.config, merged.ANTHROPIC_API_KEY)) return { ok: false, errors: ['Refusing to start: a secret value reached the server config.'] }
+  return parsed
 }

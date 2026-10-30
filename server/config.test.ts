@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { formatConfigErrors, mergeEnv, parseConfig } from './config'
+import { readFileSync } from 'node:fs'
+import { CONFIG_VARIABLES, formatConfigErrors, mergeEnv, parseConfig } from './config'
 
-const DEFAULTS = { host: '127.0.0.1', port: 8787, dataDir: '/repo/data', runtime: 'mock', taskTimeoutMs: 600000, cancelGraceMs: 5000, approvalTimeoutMs: 300000, maxMessageBytes: 32768, maxTaskOutputBytes: 262144, eventBufferSize: 500, credentialsConfigured: false }
-const NAMES = ['HOST', 'PORT', 'DATA_DIR', 'RUNTIME', 'TASK_TIMEOUT_MS', 'CANCEL_GRACE_MS', 'APPROVAL_TIMEOUT_MS', 'MAX_MESSAGE_BYTES', 'MAX_TASK_OUTPUT_BYTES', 'EVENT_BUFFER_SIZE', 'ANTHROPIC_API_KEY']
+const DEFAULTS = { host: '127.0.0.1', port: 8787, dataDir: '/repo/data', runtime: 'mock', taskTimeoutMs: 600000, cancelGraceMs: 5000, approvalTimeoutMs: 300000, maxMessageBytes: 32768, maxTaskOutputBytes: 262144, eventBufferSize: 500, auditLogMaxBytes: 5242880, credentialsConfigured: false }
+const NAMES = CONFIG_VARIABLES
 
 describe('parseConfig', () => {
   it('uses the defaults for an empty environment', () => {
@@ -14,8 +15,8 @@ describe('parseConfig', () => {
   })
 
   it('reads every variable', () => {
-    const r = parseConfig({ HOST: 'localhost', PORT: '9000', DATA_DIR: 'tmp/x', RUNTIME: 'claude', TASK_TIMEOUT_MS: '1000', CANCEL_GRACE_MS: '200', APPROVAL_TIMEOUT_MS: '3000', MAX_MESSAGE_BYTES: '100', MAX_TASK_OUTPUT_BYTES: '1000', EVENT_BUFFER_SIZE: '20', ANTHROPIC_API_KEY: 'k' }, '/repo')
-    expect(r).toEqual({ ok: true, config: { host: 'localhost', port: 9000, dataDir: '/repo/tmp/x', runtime: 'claude', taskTimeoutMs: 1000, cancelGraceMs: 200, approvalTimeoutMs: 3000, maxMessageBytes: 100, maxTaskOutputBytes: 1000, eventBufferSize: 20, credentialsConfigured: true } })
+    const r = parseConfig({ HOST: 'localhost', PORT: '9000', DATA_DIR: 'tmp/x', RUNTIME: 'claude', TASK_TIMEOUT_MS: '1000', CANCEL_GRACE_MS: '200', APPROVAL_TIMEOUT_MS: '3000', MAX_MESSAGE_BYTES: '100', MAX_TASK_OUTPUT_BYTES: '1000', EVENT_BUFFER_SIZE: '20', AUDIT_LOG_MAX_BYTES: '65536', ANTHROPIC_API_KEY: 'k' }, '/repo')
+    expect(r).toEqual({ ok: true, config: { host: 'localhost', port: 9000, dataDir: '/repo/tmp/x', runtime: 'claude', taskTimeoutMs: 1000, cancelGraceMs: 200, approvalTimeoutMs: 3000, maxMessageBytes: 100, maxTaskOutputBytes: 1000, eventBufferSize: 20, auditLogMaxBytes: 65536, credentialsConfigured: true } })
   })
 
   it('collects every error with readable copy', () => {
@@ -26,7 +27,7 @@ describe('parseConfig', () => {
   })
 
   it('refuses a non-loopback HOST', () => {
-    expect(parseConfig({ HOST: '0.0.0.0' }, '/repo')).toEqual({ ok: false, errors: ['HOST must be a loopback address (127.0.0.1, ::1 or localhost) until origin checks are added (got "0.0.0.0").'] })
+    expect(parseConfig({ HOST: '0.0.0.0' }, '/repo')).toEqual({ ok: false, errors: ['HOST must be a loopback address (127.0.0.1, ::1 or localhost) (got "0.0.0.0"). Remote access needs TLS and authentication, which this server does not have yet.'] })
     expect(parseConfig({ HOST: 'localhost' }, '/repo').ok).toBe(true)
     expect(parseConfig({ HOST: '::1' }, '/repo').ok).toBe(true)
   })
@@ -74,3 +75,36 @@ describe('formatConfigErrors', () => {
     expect(formatConfigErrors(['A', 'B'])).toBe('Server config is invalid:\n- A\n- B')
   })
 })
+
+describe('security-related config', () => {
+  it('reads AUDIT_LOG_MAX_BYTES and enforces its range', () => {
+    const copy = (v: string) => `AUDIT_LOG_MAX_BYTES must be from 65536 to 1073741824 (got "${v}").`
+    expect(parseConfig({ AUDIT_LOG_MAX_BYTES: '1000' }, '/repo')).toEqual({ ok: false, errors: [copy('1000')] })
+    expect(parseConfig({ AUDIT_LOG_MAX_BYTES: 'abc' }, '/repo')).toEqual({ ok: false, errors: [copy('abc')] })
+    expect(parseConfig({ AUDIT_LOG_MAX_BYTES: '2000000000' }, '/repo')).toEqual({ ok: false, errors: [copy('2000000000')] })
+    expect(parseConfig({ AUDIT_LOG_MAX_BYTES: '65536' }, '/repo')).toMatchObject({ ok: true, config: { auditLogMaxBytes: 65536 } })
+  })
+
+  it('refuses permission-bypass variables', () => {
+    const r = parseConfig({ DANGEROUSLY_SKIP_PERMISSIONS: '1', CLAUDE_PERMISSION_MODE: 'x', BYPASS_PERMISSIONS: '' }, '/repo')
+    expect(r).toEqual({
+      ok: false,
+      errors: [
+        'DANGEROUSLY_SKIP_PERMISSIONS is not supported: this server has no way to skip permission checks. Remove it.',
+        'CLAUDE_PERMISSION_MODE is not supported: this server has no way to skip permission checks. Remove it.',
+        'BYPASS_PERMISSIONS is not supported: this server has no way to skip permission checks. Remove it.',
+      ],
+    })
+  })
+
+  it('no config variable suggests a bypass', () => {
+    expect(CONFIG_VARIABLES.filter((n) => /bypass|danger|skip|unsafe|yolo|permission/i.test(n))).toEqual([])
+  })
+
+  it('.env.example lists exactly the config variables', () => {
+    const text = readFileSync(new URL('../.env.example', import.meta.url), 'utf8')
+    const names = new Set(text.split('\n').flatMap((l) => (/^([A-Z0-9_]+)=/.exec(l) ? [/^([A-Z0-9_]+)=/.exec(l)![1]] : [])))
+    expect(names).toEqual(new Set([...CONFIG_VARIABLES, 'VITE_WORKFORCE_API_URL']))
+  })
+})
+

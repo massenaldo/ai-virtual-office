@@ -1,7 +1,7 @@
 # Milestone 3A — AI Agent Workforce UI and Mock Runtime: Tasks
 
 **Spec:** [`plan.md`](plan.md) (Milestone 3A brief). This file is my working task list for that spec.
-**Status:** Approved, 2026-10-30. Q1–Q4 answered (see "Decisions" at the end); Stage A is next, after the Vitest upgrade PR.
+**Status:** Approved, 2026-10-30. Q1–Q4 answered (see "Decisions" at the end). Stage A is in review; Stage B is next.
 **Earlier milestones:** [`docs/milestones/milestone-2-tasks.md`](docs/milestones/milestone-2-tasks.md) and [`milestone-2-plan.md`](docs/milestones/milestone-2-plan.md).
 
 ## What this milestone is
@@ -67,12 +67,12 @@ The office gets a staff of **AI agents** you can manage. You can create agents, 
 
 ## Stage A — Domain model, storage and mock runtime (no UI)
 
-- [ ] Types in `src/workforce/types.ts`: `Agent`, `AgentTask`, `AgentActivity`, `AgentStatus`, `TaskStatus`, `RuntimeMode` (`mock` | `real`), `ActivitySource`. Use discriminated unions for activity events.
-- [ ] Pure operations in `src/workforce/operations.ts`: create, update, remove an agent; assign or unassign a desk (one agent per desk); assign a task, and block a second active task. Removing an agent cancels its active task.
-- [ ] Storage in `src/workforce/storage.ts`: separate versioned key, strict validation, backup of unreadable data, activity limit, reference checks (task ↔ agent, activity ↔ agent/task). Demo seed only when nothing is stored.
-- [ ] Runtime interface plus `MockRuntimeProvider` in `src/workforce/runtime/`: start, events, cancel, force waiting or error, complete; cleans up its timers; reload recovery.
-- [ ] `ClaudeRuntimeProvider` placeholder, with a comment block on the server-side-only rule (no credentials in the browser).
-- [ ] Tests for all of the above, using Vitest fake timers for the runtime.
+- [x] Types in `src/workforce/types.ts`: `Agent`, `AgentTask`, `AgentActivity`, `AgentStatus`, `TaskStatus`, `RuntimeMode` (`mock` | `real`), `ActivitySource`. Use discriminated unions for activity events.
+- [x] Pure operations in `src/workforce/operations.ts`: create, update, remove an agent; assign or unassign a desk (one agent per desk); assign a task, and block a second active task. Removing an agent cancels its active task.
+- [x] Storage in `src/workforce/storage.ts`: separate versioned key, strict validation, backup of unreadable data, activity limit, reference checks (task ↔ agent, activity ↔ agent/task). Demo seed only when nothing is stored.
+- [x] Runtime interface plus `MockRuntimeProvider` in `src/workforce/runtime/`: start, events, cancel, force waiting or error, complete; cleans up its timers; reload recovery.
+- [x] `ClaudeRuntimeProvider` placeholder, with a comment block on the server-side-only rule (no credentials in the browser).
+- [x] Tests for all of the above, using Vitest fake timers for the runtime.
 - [ ] PR
 
 ## Stage B — Workforce panel and task UI

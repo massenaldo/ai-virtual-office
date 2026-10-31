@@ -164,6 +164,23 @@ describe('stale or unwanted approvals never reach perform: tool and input', () =
     expect(seen).toEqual([original.tool, original.input])
   })
 
+  it('perform sees the task signal abort when the task is cancelled during an async perform', async () => {
+    const { id, ctx } = await run()
+    let signal: AbortSignal | null = null
+    let release!: () => void
+    const held = new Promise<void>((resolve) => { release = resolve })
+    const pending = ctx.tools.use(write(), async (action) => { signal = action.signal; await held; return 'done' })
+    expect(approve(id).ok).toBe(true)
+    await tick()
+    expect(signal).not.toBeNull()
+    expect(signal!.aborted).toBe(false)
+    manager.cancelTask(id)
+    await vi.advanceTimersByTimeAsync(CONFIG.cancelGraceMs)
+    expect(signal!.aborted).toBe(true)
+    release()
+    await pending
+  })
+
   it('a second request while one is pending is refused and the first still performs only its own input', async () => {
     const { id, ctx } = await run()
     const first = vi.fn(() => 'first')

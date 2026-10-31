@@ -406,7 +406,7 @@ Branch: `feat/3b12-5-write-review`. It depends on 2.1. Opus reviews the PR befor
 
 Branch: `fix/3b12-6-reliability`. It depends on 2.1 and 2.2.
 
-- [ ] **6.1 Hard links, the abort signal and checked paths on `GatedAction`.** (Decision 11)
+- [x] **6.1 Hard links, the abort signal and checked paths on `GatedAction`.** (Decision 11)
   - Files: `server/workspaces.ts` (`nlink > 1` → `unsafe_link` for an existing regular file), `server/toolPolicy.ts` (`DenyReason` plus text), `server/runtime/types.ts` (`GatedAction.signal`, `GatedAction.paths`), `server/toolGate.ts` (`deps.signal`; refuse `cancelled` if aborted just before `perform`), `server/taskManager.ts` (passes `run.abort.signal`), `server/runtime/mockProvider.ts` (unchanged behaviour), and the tests.
   - RED first:
     - `fs.linkSync(outside, ws/inside.txt)`: Read, Write and Edit of `inside.txt` are each denied `unsafe_link`;
@@ -417,7 +417,7 @@ Branch: `fix/3b12-6-reliability`. It depends on 2.1 and 2.2.
     - `action.paths` lists `{ arg: 'file_path', relative }` with no absolute path;
     - an `expectTypeOf<GatedAction>()` check.
   - Verify: `npx vitest run server/workspaces.test.ts server/toolPolicy.test.ts server/toolGate.test.ts server/toolGate.integration.test.ts server/runtime/mockProvider.test.ts`, then `npm test` and `npx tsc -b`.
-- [ ] **6.2 Open items: E2E gap and audit suppression record.**
+- [x] **6.2 Open items: E2E gap and audit suppression record.**
   - Files: `server/e2e/realServer.test.ts`, `server/audit.ts` and `server/audit.test.ts`.
   - E2E: replace the vacuous `readdirSync` check with real assertions on `audit.log`:
     - `tool.asked` for `Write` with the summary's relative path;

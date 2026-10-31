@@ -43,11 +43,14 @@ const ALLOWED_FIELDS: Record<string, readonly string[]> = {
 
 export type ToolPolicy = { readonly allowedTools: ReadonlySet<string> }
 
-export type DenyReason = 'unknown_tool' | 'not_allowed' | 'invalid_input' | 'invalid_path' | 'missing_path' | 'outside_workspace' | 'unsafe_symlink' | 'no_workspace' | 'approval_pending' | 'not_reviewable'
+export type DenyReason = 'unknown_tool' | 'not_allowed' | 'invalid_input' | 'invalid_path' | 'missing_path' | 'outside_workspace' | 'unsafe_symlink' | 'no_workspace' | 'approval_pending' | 'not_reviewable' | 'unsafe_link'
+
+/** A path argument that passed the workspace check: the argument name and the path relative to the workspace. */
+export type CheckedPath = { readonly arg: string; readonly relative: string }
 
 export type ToolDecision =
-  | { decision: 'allow'; reason: 'read_only'; summary: string }
-  | { decision: 'ask'; reason: 'needs_approval'; summary: string; /** Write and Edit only: the exact content or change to review. */ review?: ToolReviewBody }
+  | { decision: 'allow'; reason: 'read_only'; summary: string; paths?: CheckedPath[] }
+  | { decision: 'ask'; reason: 'needs_approval'; summary: string; paths?: CheckedPath[]; /** Write and Edit only: the exact content or change to review. */ review?: ToolReviewBody }
   | { decision: 'deny'; reason: DenyReason; summary: string }
 
 const DENY_TEXT: Record<DenyReason, string> = {
@@ -61,6 +64,7 @@ const DENY_TEXT: Record<DenyReason, string> = {
   no_workspace: 'the task has no workspace',
   approval_pending: 'another tool approval is already pending for this task',
   not_reviewable: 'the request cannot be shown to a reviewer in full',
+  unsafe_link: 'the file has more than one name (a hard link)',
 }
 
 export function toolPolicyFrom(config: Pick<ServerConfig, 'allowedTools'>): ToolPolicy {
@@ -155,22 +159,25 @@ export function decideToolUse(policy: ToolPolicy, toolName: string, input: unkno
   if (spec.needsWorkspace && workspace === null) return denied('no_workspace')
 
   let rel: string | null = null
+  const paths: CheckedPath[] = []
   for (const arg of spec.pathArgs) {
     if (input[arg] === undefined) continue
     const checked = checkPathInWorkspace(workspace!.path, input[arg])
     if (!checked.ok) return denied(checked.reason)
     rel = checked.relative
+    paths.push({ arg, relative: checked.relative })
   }
+  const withPaths = paths.length > 0 ? { paths } : {}
 
   const raw = summaryFor(spec.name, input, rel)
-  if (spec.category === 'read') return { decision: 'allow', reason: 'read_only', summary: sanitizeSummary(raw) }
+  if (spec.category === 'read') return { decision: 'allow', reason: 'read_only', summary: sanitizeSummary(raw), ...withPaths }
   // A human approves what the summary says, so it must be the whole action: if redaction or the length cap would change
   // it, nothing is asked. (Only control characters and repeated spaces are flattened.)
   const flat = raw.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/ {2,}/g, ' ').trim()
   if (flat.length > SUMMARY_MAX_CHARS || redactSecrets(flat) !== flat) return denied('not_reviewable')
   if (spec.name === 'Write' || spec.name === 'Edit') {
     const review = buildReview(spec.name, input, rel!, workspace!.path)
-    return review ? { decision: 'ask', reason: 'needs_approval', summary: flat, review } : denied('not_reviewable')
+    return review ? { decision: 'ask', reason: 'needs_approval', summary: flat, review, ...withPaths } : denied('not_reviewable')
   }
-  return { decision: 'ask', reason: 'needs_approval', summary: flat }
+  return { decision: 'ask', reason: 'needs_approval', summary: flat, ...withPaths }
 }

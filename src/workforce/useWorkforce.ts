@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import { getBrowserStorage } from '../layout/storage'
-import { createWorkforceController, type WorkforceController, type WorkforceSnapshot } from './controller'
+import type { WorkforceController, WorkforceSnapshot } from './controller'
+import { createControllerFor, resolveWorkforceSource } from './source'
 
 export type Workforce = WorkforceSnapshot & { actions: WorkforceController }
 
@@ -11,7 +12,7 @@ export type Workforce = WorkforceSnapshot & { actions: WorkforceController }
 export function useWorkforce(): Workforce | null {
   const [controller, setController] = useState<WorkforceController | null>(null)
   useEffect(() => {
-    const c = createWorkforceController({ storage: getBrowserStorage() })
+    const c = createControllerFor(resolveWorkforceSource(import.meta.env.VITE_WORKFORCE_API_URL), { storage: getBrowserStorage() })
     setController(c)
     return () => c.dispose()
   }, [])

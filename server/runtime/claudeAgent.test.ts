@@ -1,10 +1,12 @@
 /// <reference types="vite/client" />
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { createDemoWorkforce } from '../../src/workforce/demo'
 import { assignTask } from '../../src/workforce/operations'
 import { testStartContext } from '../test/startContext'
-import { ClaudeAgentRuntimeProvider, claudeUnavailableReason } from './claudeAgent'
+import { ClaudeAgentRuntimeProvider, claudeUnavailableReason, SDK_INSTALLED } from './claudeAgent'
 
+const allServer = import.meta.glob<string>(['../**/*.ts', '!../**/*.test.ts'], { query: '?raw', import: 'default', eager: true })
 const source = Object.values(import.meta.glob<string>('./claudeAgent.ts', { query: '?raw', import: 'default', eager: true }))[0]
 
 describe('ClaudeAgentRuntimeProvider', () => {
@@ -39,7 +41,16 @@ describe('ClaudeAgentRuntimeProvider', () => {
   })
 
   it('documents the boundary', () => {
-    for (const word of ['requestToolApproval', 'ctx.workspace.path', 'canUseTool', 'AbortController', 'CANCEL_GRACE_MS']) expect(source).toContain(word)
+    for (const word of ['ctx.tools.use', 'ctx.workspace.path', 'canUseTool', 'permissionMode', 'settingSources', 'updatedInput', 'in-process SDK MCP', 'AbortController', 'CANCEL_GRACE_MS']) expect(source).toContain(word)
+    expect(source).not.toContain('requestToolApproval')
+  })
+
+  it('is not wired to the SDK: not installed, no import, still unavailable', () => {
+    expect(SDK_INSTALLED).toBe(false)
+    expect(new ClaudeAgentRuntimeProvider({ credentialsConfigured: true }).availability).toEqual({ available: false, reason: 'Claude Agent SDK not installed' })
+    expect(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).not.toContain('@anthropic-ai')
+    const importers = Object.entries(allServer).filter(([, text]) => /from ['"]@anthropic-ai|require\(['"]@anthropic-ai/.test(text)).map(([file]) => file)
+    expect(importers).toEqual([])
   })
 })
 

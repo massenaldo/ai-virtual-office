@@ -1,7 +1,7 @@
 # Milestone 3B.1.1 — Security Hardening & E2E Verification: Tasks
 
 **Spec:** [`plan.md`](plan.md) (Milestone 3B.1.1 brief). This file is my working task list for that spec.
-**Status:** Approved, 2026-10-31. Q1–Q3 answered with the recommendations (see "Decisions"). Stage A is in progress.
+**Status:** Approved, 2026-10-31. Q1–Q3 answered with the recommendations (see "Decisions"). Stage A is merged; Stage B is in review.
 **Earlier milestones:** [`milestone-3b1-tasks.md`](docs/milestones/milestone-3b1-tasks.md) ([report](docs/milestone-3b1-report.md)), [`milestone-3a-tasks.md`](docs/milestones/milestone-3a-tasks.md) ([report](docs/milestone-3a-report.md)).
 
 ## What this milestone is
@@ -178,7 +178,7 @@ Branch: `fix/3b11-a-workspace-redaction`.
 
 Branch: `feat/3b11-b-tool-gate`. It depends on A (workspace required, canonical root).
 
-- [ ] **B1. `ToolGate` and digest-bound approval.**
+- [x] **B1. `ToolGate` and digest-bound approval.**
   - Files: new `server/toolGate.ts` and `server/toolGate.test.ts`. Changes to `server/runtime/types.ts` (replace `requestToolApproval` with `tools: ToolGate`; the policy stays reachable only through the gate), `server/taskManager.ts` (`requestToolApproval` becomes private gate plumbing; `toolWaiter` stores the digest; `decideApproval` unchanged for the API), and `server/test/fakeProvider.ts`.
   - RED first:
     - `perform` is not called on deny, on human deny, on approval timeout or after cancel;
@@ -191,7 +191,7 @@ Branch: `feat/3b11-b-tool-gate`. It depends on A (workspace required, canonical 
     - a type-level test (`expectTypeOf<StartContext>()`) shows there is no `requestToolApproval` and no raw policy bypass.
     - Existing `taskManager.test.ts` approval tests must still pass, adapted only to the new context shape.
   - Verify: `npx vitest run server/toolGate.test.ts server/taskManager.test.ts`, then `npm test` and `npx tsc -b`.
-- [ ] **B2. The mock goes through the gate.**
+- [x] **B2. The mock goes through the gate.**
   - Files: `server/runtime/mockProvider.ts` and its tests, plus `server/http/routes.test.ts` (demo flow over HTTP).
   - RED first:
     - the demo approval goes through `ctx.tools.use` and its `perform` is a no-op;
@@ -199,7 +199,7 @@ Branch: `feat/3b11-b-tool-gate`. It depends on A (workspace required, canonical 
     - an approval timeout and a cancel behave as today;
     - nothing is written in the workspace (check the directory listing in the test).
   - Verify: `npx vitest run server/runtime/mockProvider.test.ts server/http/routes.test.ts`, then `npm test`.
-- [ ] **B3. Claude SDK integration doc block.**
+- [x] **B3. Claude SDK integration doc block.**
   - Files: `server/runtime/claudeAgent.ts` (header only, per decision 6) and `claudeAgent.test.ts`.
   - The test asserts that the provider is still unavailable, that `SDK_INSTALLED === false`, and that no `@anthropic-ai` import exists in `package.json` or `server/`.
   - Verify: `npx vitest run server/runtime/claudeAgent.test.ts server/noProcessExecution.test.ts`, then `npm test`, `npx tsc -b`, `npm run build` and `npm run server:build`.

@@ -9,13 +9,14 @@ import type { Logger } from './log'
 import { redactSecrets } from './redact'
 import { sourceFor, type DemoProvider, type ServerRuntimeProvider, type ToolGateResult, type ToolRequest } from './runtime/types'
 import type { WorkforceStore } from './store'
+import { createToolGate } from './toolGate'
 import { decideToolUse, sanitizeSummary, toolDeniedMessage, type DenyReason, type ToolPolicy } from './toolPolicy'
 import { resolveWorkspace, WORKSPACE_ID_RE, type ResolvedWorkspace, type WorkspaceReason } from './workspaces'
 
 export type ManagerError = { ok: false; code: 'not_found' | 'invalid' | 'conflict' | 'unavailable' | 'bad_request'; error: string }
 export type ManagerResult<T = Record<never, never>> = ({ ok: true } & T) | ManagerError
 
-export type LifecycleAction = 'task.start' | 'task.cancel' | 'task.force_cancelled' | 'task.timeout' | 'approval.requested' | 'approval.decided' | 'approval.timeout' | 'tool.allowed' | 'tool.denied' | 'tool.asked' | 'workspace.rejected' | 'runtime.note'
+export type LifecycleAction = 'task.start' | 'task.cancel' | 'task.force_cancelled' | 'task.timeout' | 'approval.requested' | 'approval.decided' | 'approval.timeout' | 'tool.allowed' | 'tool.denied' | 'tool.asked' | 'tool.stale' | 'workspace.rejected' | 'runtime.note'
 
 export type LifecycleActor = 'api' | 'system' | 'runtime'
 
@@ -157,8 +158,18 @@ export class TaskManager {
         agent,
         signal: run.abort.signal,
         workspace: run.workspace,
-        tools: this.policy,
-        requestToolApproval: (request) => this.requestToolApproval(taskId, request),
+        tools: createToolGate({
+          taskId,
+          policy: this.policy,
+          workspace: () => {
+            if (run.workspace === null) return { ok: true, workspace: null }
+            const r = resolveWorkspace(this.config, run.workspace.id)
+            return r.ok ? { ok: true, workspace: r.workspace } : { ok: false }
+          },
+          isLive: () => { const t = this.task(taskId); return !!t && (t.status === 'running' || t.status === 'waiting_for_approval') },
+          approve: (request) => this.approveTool(taskId, request),
+          stale: (tool, detail) => { const t = this.task(taskId); if (t) this.report('tool.stale', t, { actor: 'runtime', tool, decision: 'deny', reason: 'stale_approval', detail }) },
+        }),
         audit: (note) => { const t = this.task(taskId); if (t) this.report('runtime.note', t, { actor: 'runtime', detail: note }) },
       })
     } catch (error) {
@@ -326,7 +337,7 @@ export class TaskManager {
    * The gate a runtime goes through before using a tool. The policy decides; an `ask` becomes the existing
    * waiting_for_approval state, approval timer and approval endpoint. Every state change happens before this returns.
    */
-  requestToolApproval(taskId: string, request: ToolRequest): Promise<ToolGateResult> {
+  private approveTool(taskId: string, request: ToolRequest): Promise<ToolGateResult> {
     const run = this.runs.get(taskId)
     const task = this.task(taskId)
     if (!run || !task || (task.status !== 'running' && task.status !== 'waiting_for_approval')) return Promise.resolve(CANCELLED)

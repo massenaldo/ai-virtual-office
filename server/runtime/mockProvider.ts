@@ -6,7 +6,7 @@ import type { DemoProvider, ExecutionResult, ExecutionStatus, StartContext, Star
 /** innerApprovalId is the simulated run's own approval while the demo tool request waits on the manager. */
 type Record = { executionId: string; pendingApprovalId: string | null; innerApprovalId: string | null; ctx: StartContext; outcome: 'running' | 'completed' | 'failed' | 'cancelled'; summary: string; error: string }
 
-/** The simulated request the demo button makes. It goes through the real policy and approval flow, and nothing is ever written. */
+/** The simulated request the demo button makes. It goes through the real tool gate (policy, approval, use-time check), and nothing is ever written. */
 export const MOCK_DEMO_WRITE = { file_path: 'simulated.txt', content: 'Simulated content (nothing is written).' }
 
 const KEEP_ENDED = 200
@@ -50,14 +50,15 @@ export class ServerMockProvider implements DemoProvider {
     this.inner.requestApproval(taskId)
     if (r.ctx.workspace === null) return // no workspace: the simulated run's own approval was forwarded by onInner
     if (r.innerApprovalId === null) return // the simulated run had not started yet
-    void r.ctx.requestToolApproval({ tool: 'Write', input: MOCK_DEMO_WRITE }).then((result) => {
+    // `perform` is a no-op: the mock runs every tool request through the real gate and nothing is ever written.
+    void r.ctx.tools.use({ tool: 'Write', input: MOCK_DEMO_WRITE }, () => 'simulated').then((result) => {
       const innerId = r.innerApprovalId
       r.innerApprovalId = null
       r.pendingApprovalId = null
       if (innerId === null) return
       if (result.behavior === 'allow') this.inner.respondToApproval(taskId, innerId, 'approve')
       else if (result.outcome === 'denied') this.inner.respondToApproval(taskId, innerId, 'deny')
-      else if (result.outcome === 'denied_by_policy') this.inner.forceError(taskId, result.message)
+      else if (result.outcome === 'denied_by_policy' || result.outcome === 'stale_approval') this.inner.forceError(taskId, result.message)
       // expired or cancelled: the manager has already ended the task and cancelled this run.
     })
   }

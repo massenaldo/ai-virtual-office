@@ -5,7 +5,7 @@ import { assignTask } from '../../src/workforce/operations'
 import type { AgentTask } from '../../src/workforce/types'
 import { testStartContext } from '../test/startContext'
 import { MOCK_DEMO_WRITE, ServerMockProvider } from './mockProvider'
-import type { StartContext, ToolGateResult } from './types'
+import type { GatedOutcome, StartContext } from './types'
 
 const NOW = '2026-10-31T09:00:00.000Z'
 const demo = createDemoWorkforce(NOW)
@@ -67,13 +67,13 @@ describe('ServerMockProvider', () => {
   })
 
   describe('the demo tool request', () => {
-    const settle = (value: ToolGateResult) => { resolveGate(value) }
-    let resolveGate: (r: ToolGateResult) => void
+    const settle = (value: GatedOutcome<string>) => { resolveGate(value) }
+    let resolveGate: (r: GatedOutcome<string>) => void
     let asked: ReturnType<typeof vi.fn>
     const startWithGate = async () => {
       const task = newTask()
-      asked = vi.fn(() => new Promise<ToolGateResult>((resolve) => { resolveGate = resolve }))
-      await provider.start(task, testStartContext(forge, { workspace: { id: 'sandbox', path: '/tmp/sandbox' }, requestToolApproval: asked as unknown as StartContext['requestToolApproval'] }))
+      asked = vi.fn(() => new Promise<GatedOutcome<string>>((resolve) => { resolveGate = resolve }))
+      await provider.start(task, testStartContext(forge, { workspace: { id: 'sandbox', path: '/tmp/sandbox' }, tools: { use: asked as unknown as StartContext['tools']['use'] } }))
       await vi.advanceTimersByTimeAsync(0)
       return task
     }
@@ -81,7 +81,7 @@ describe('ServerMockProvider', () => {
     it('without a workspace the simulated run keeps its own approval and the gate is not asked', async () => {
       const task = newTask()
       const gate = vi.fn()
-      await provider.start(task, testStartContext(forge, { requestToolApproval: gate as unknown as StartContext['requestToolApproval'] }))
+      await provider.start(task, testStartContext(forge, { tools: { use: gate as unknown as StartContext['tools']['use'] } }))
       await vi.advanceTimersByTimeAsync(0)
       const before = events.length
       provider.requestApproval(task.id)
@@ -100,7 +100,7 @@ describe('ServerMockProvider', () => {
       const task = await startWithGate()
       const before = events.length
       provider.requestApproval(task.id)
-      expect(asked).toHaveBeenCalledWith({ tool: 'Write', input: MOCK_DEMO_WRITE })
+      expect(asked).toHaveBeenCalledWith({ tool: 'Write', input: MOCK_DEMO_WRITE }, expect.any(Function))
       const status = provider.status(task.id)
       expect(status.state === 'running' && status.pendingApprovalId).toMatch(/^approval-/)
       expect(events.slice(before).some((e) => e.type === 'approval_requested')).toBe(false)
@@ -112,7 +112,7 @@ describe('ServerMockProvider', () => {
     it('approve continues to completion', async () => {
       const task = await startWithGate()
       provider.requestApproval(task.id)
-      settle({ behavior: 'allow', outcome: 'approved' })
+      settle({ behavior: 'allow', outcome: 'approved', value: 'simulated' })
       await vi.advanceTimersByTimeAsync(0)
       await vi.advanceTimersByTimeAsync(200)
       expect(provider.result(task.id)).toMatchObject({ outcome: 'completed' })
@@ -138,8 +138,8 @@ describe('ServerMockProvider', () => {
 
     it('ignores a second request and a request before the run started', async () => {
       const task = newTask()
-      asked = vi.fn(() => new Promise<ToolGateResult>(() => {}))
-      await provider.start(task, testStartContext(forge, { workspace: { id: 'sandbox', path: '/tmp/sandbox' }, requestToolApproval: asked as unknown as StartContext['requestToolApproval'] }))
+      asked = vi.fn(() => new Promise<GatedOutcome<string>>(() => {}))
+      await provider.start(task, testStartContext(forge, { workspace: { id: 'sandbox', path: '/tmp/sandbox' }, tools: { use: asked as unknown as StartContext['tools']['use'] } }))
       provider.requestApproval(task.id)
       expect(asked).not.toHaveBeenCalled()
       await vi.advanceTimersByTimeAsync(0)

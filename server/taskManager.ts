@@ -15,6 +15,9 @@ import { actionHash, createToolGate } from './toolGate'
 import { decideToolUse, sanitizeSummary, toolDeniedMessage, type DenyReason, type ToolPolicy } from './toolPolicy'
 import { resolveWorkspace, WORKSPACE_ID_RE, type ResolvedWorkspace, type WorkspaceReason } from './workspaces'
 
+/** What a person can answer an approval with. `approve` and `deny` are the older spellings of `allow_once` and `reject`. */
+export type ApprovalChoice = ApprovalDecision | 'allow_once' | 'allow_task' | 'allow_agent' | 'reject'
+
 export type ManagerError = { ok: false; code: 'not_found' | 'invalid' | 'conflict' | 'unavailable' | 'bad_request'; error: string }
 export type ManagerResult<T = Record<never, never>> = ({ ok: true } & T) | ManagerError
 
@@ -304,23 +307,27 @@ export class TaskManager {
   }
 
   /** An approval with a digest is for one exact action: the decision must name the same digest, or it is refused. */
-  decideApproval(taskId: string, approvalId: string, decision: ApprovalDecision, opts: CallOptions = {}, digest?: string): ManagerResult<{ task: AgentTask }> {
+  decideApproval(taskId: string, approvalId: string, choice: ApprovalChoice, opts: CallOptions = {}, digest?: string): ManagerResult<{ task: AgentTask }> {
     const task = this.task(taskId)
     if (!task) return { ok: false, code: 'not_found', error: 'Task not found.' }
     if (task.status !== 'waiting_for_approval' || !task.pendingApproval) return { ok: false, code: 'conflict', error: 'Task is not waiting for approval.' }
     if (task.pendingApproval.id !== approvalId || (task.pendingApproval.digest !== null && task.pendingApproval.digest !== digest)) return { ok: false, code: 'conflict', error: 'That approval is no longer pending.' }
+    // The workforce state only knows approve and deny; the scope of an allow lives in the permission rule.
+    const decision: ApprovalDecision = choice === 'deny' || choice === 'reject' ? 'deny' : 'approve'
+    const scope = choice === 'allow_task' ? 'task' : choice === 'allow_agent' ? 'agent' : 'once'
     const run = this.runs.get(taskId)
     const waiter = run?.toolWaiter?.approvalId === approvalId ? run.toolWaiter : null
+    if (!waiter && decision === 'approve' && scope !== 'once') return { ok: false, code: 'invalid', error: 'That approval can only be allowed once.' }
     // The permission is recorded before the decision and before the runtime is answered: if it cannot be, the approval stays pending.
     let granted: { ruleId?: string } = {}
     if (waiter && decision === 'approve') {
-      const g = this.permissions.grant({ scope: 'once', effect: 'allow', tool: waiter.tool, agentId: task.agentId, taskId, digest: waiter.digest })
-      if (!g.ok) return { ok: false, code: 'unavailable', error: 'The permission could not be recorded.' }
+      const g = this.permissions.grant({ scope, effect: 'allow', tool: waiter.tool, agentId: task.agentId, ...(scope === 'agent' ? {} : { taskId }), ...(scope === 'once' ? { digest: waiter.digest } : {}) })
+      if (!g.ok) return g.error === 'scope_not_allowed_for_tool' ? { ok: false, code: 'invalid', error: 'That tool can only be allowed once.' } : { ok: false, code: 'unavailable', error: 'The permission could not be recorded.' }
       granted = { ruleId: g.rule.id }
     }
     this.store.commit(recordDecision(this.state, taskId, approvalId, decision, this.now(), this.source))
     if (run) this.clearApproval(run)
-    this.report('approval.decided', task, { actor: actorFor(opts), requestId: opts.requestId, decision, ...granted, ...(waiter ? { digest: waiter.digest.slice(0, 12), actionHash: waiter.actionHash } : {}) })
+    this.report('approval.decided', task, { actor: actorFor(opts), requestId: opts.requestId, decision: choice, ...granted, ...(waiter ? { digest: waiter.digest.slice(0, 12), actionHash: waiter.actionHash } : {}) })
     if (run?.toolWaiter?.approvalId === approvalId) {
       // A tool request the manager is holding: answer the runtime's promise; the runtime decides what happens next.
       this.settleTool(run, decision === 'approve' ? { behavior: 'allow', outcome: 'approved' } : { behavior: 'deny', outcome: 'denied', message: 'Denied by a human reviewer.' })

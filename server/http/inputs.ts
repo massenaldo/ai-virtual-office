@@ -1,5 +1,5 @@
 import type { AgentInput, TaskInput } from '../../src/workforce/operations'
-import type { ApprovalDecision } from '../../src/workforce/types'
+import type { ApprovalChoice } from '../taskManager'
 import { HttpError, type RejectCode } from './router'
 
 // Strict parsing of what the browser sends. Unknown keys are rejected, so a path, working directory or command can
@@ -52,10 +52,12 @@ export function parseCreateTask(b: Body): CreateTaskRequest {
   return { title: text(b, 'title'), description, workspaceId }
 }
 
-export function parseApproval(b: Body): { approvalId: string; decision: ApprovalDecision; digest: string | undefined } {
+const APPROVAL_CHOICES: readonly ApprovalChoice[] = ['allow_once', 'allow_task', 'allow_agent', 'reject', 'approve', 'deny']
+
+export function parseApproval(b: Body): { approvalId: string; decision: ApprovalChoice; digest: string | undefined } {
   allow(b, ['approvalId', 'decision', 'digest'])
   if (typeof b.approvalId !== 'string' || b.approvalId === '') throw bad('"approvalId" must be a non-empty string.')
-  if (b.decision !== 'approve' && b.decision !== 'deny') throw bad('"decision" must be "approve" or "deny".')
+  if (!APPROVAL_CHOICES.includes(b.decision as ApprovalChoice)) throw bad('"decision" must be "allow_once", "allow_task", "allow_agent", "reject", "approve" or "deny".')
   if (b.digest !== undefined && !(typeof b.digest === 'string' && /^[0-9a-f]{64}$/.test(b.digest))) throw bad('"digest" must be 64 lowercase hex characters.')
-  return { approvalId: b.approvalId, decision: b.decision, digest: b.digest }
+  return { approvalId: b.approvalId, decision: b.decision as ApprovalChoice, digest: b.digest }
 }

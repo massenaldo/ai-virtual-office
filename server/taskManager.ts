@@ -85,7 +85,8 @@ export class TaskManager {
     this.log = opts.log
     this.onLifecycle = opts.onLifecycle
     this.source = sourceFor(opts.provider.kind)
-    this.unsubscribe = opts.provider.subscribe((event) => this.onEvent(event))
+    // Only the mock may raise an approval on its own (its demo without a workspace); a real runtime asks through the tool gate.
+    this.unsubscribe = opts.provider.subscribe((event) => { if (event.type === 'approval_requested' && opts.provider.kind !== 'mock') return; this.onEvent(event) })
   }
 
   private get state(): WorkforceState {
@@ -304,8 +305,8 @@ export class TaskManager {
       // A tool request the manager is holding: answer the runtime's promise; the runtime decides what happens next.
       this.settleTool(run, decision === 'approve' ? { behavior: 'allow', outcome: 'approved' } : { behavior: 'deny', outcome: 'denied', message: 'Denied by a human reviewer.' })
     } else {
-      // An approval the provider raised itself: its reaction arrives as events.
-      this.provider.respondToApproval(taskId, approvalId, decision)
+      // An approval the (mock) provider raised itself: its reaction arrives as events.
+      if (this.provider.kind === 'mock') this.provider.respondToApproval(taskId, approvalId, decision)
     }
     return { ok: true, task: this.task(taskId) ?? task }
   }
@@ -425,7 +426,7 @@ export class TaskManager {
       }
       case 'progress': return { ...event, message: cut(clean(event.message)) }
       case 'failed': return { ...event, error: cut(clean(event.error)) }
-      case 'approval_requested': return { ...event, summary: sanitizeSummary(event.summary) }
+      case 'approval_requested': return { ...event, summary: this.hidePaths(run, sanitizeSummary(event.summary)) }
       case 'completed': {
         const t = truncateUtf8(clean(event.summary), perMessage)
         return { ...event, summary: fit(t.truncated ? t.text + messageTruncatedMarker(perMessage) : t.text) }

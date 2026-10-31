@@ -22,9 +22,11 @@ export function resolveApiToken(opts: { configured: string | null; dataDir: stri
     return { value: opts.configured, source: 'configured' }
   }
   const value = randomBytes(32).toString('base64url')
-  mkdirSync(opts.dataDir, { recursive: true })
+  mkdirSync(opts.dataDir, { recursive: true, mode: 0o700 })
   const tmp = `${file}.tmp`
-  const fd = openSync(tmp, 'w', 0o600)
+  // A leftover or planted file (or a symlink) at the temporary name is removed, never opened: 'wx' fails rather than following it.
+  try { unlinkSync(tmp) } catch { /* nothing to remove */ }
+  const fd = openSync(tmp, 'wx', 0o600)
   try {
     writeSync(fd, `${value}\n`)
     fsyncSync(fd)

@@ -1,7 +1,7 @@
 # Milestone 3B.1.1 — Security Hardening & E2E Verification: Tasks
 
 **Spec:** [`plan.md`](plan.md) (Milestone 3B.1.1 brief). This file is my working task list for that spec.
-**Status:** Approved, 2026-10-31. Q1–Q3 answered with the recommendations (see "Decisions"). Stage A is merged; Stage B is merged; Stage C is merged; Stage D is in review.
+**Status:** Approved, 2026-10-31. Q1–Q3 answered with the recommendations (see "Decisions"). Stage A is merged; Stage B is merged; Stage C is merged; Stages A–D are merged; Stage E is in review. The final report is `docs/milestone-3b11-report.md`.
 **Earlier milestones:** [`milestone-3b1-tasks.md`](docs/milestones/milestone-3b1-tasks.md) ([report](docs/milestone-3b1-report.md)), [`milestone-3a-tasks.md`](docs/milestones/milestone-3a-tasks.md) ([report](docs/milestone-3a-report.md)).
 
 ## What this milestone is
@@ -265,7 +265,7 @@ Branch: `docs/3b11-d-sandbox`.
 
 Branch: `test/3b11-e-e2e`.
 
-- [ ] **E1. `server/e2e/realServer.test.ts`.**
+- [x] **E1. `server/e2e/realServer.test.ts`.**
   - It uses the real `startServer` (per Q2) on `PORT=0` with `parseConfig`, a temp `DATA_DIR` and a temp workspace, and drives it only through real `fetch` and `openEventStream`. No fakes, no direct manager calls.
   - Steps:
     1. `GET /api/health` without a token returns 200.
@@ -279,7 +279,7 @@ Branch: `test/3b11-e-e2e`.
     9. Close SSE, open it again with `Last-Event-ID`, and get only newer events. An old boot id gets `state.reset`.
   - RED: written before C is merged it fails on the 401 steps, so it is written at the start of E against `main` with A–C merged, and run once with the token header removed to confirm it fails.
   - Verify: `npx vitest run server/e2e`.
-- [ ] **E2. Compatibility pass, README, report.**
+- [x] **E2. Compatibility pass, README, report.**
   - Run and record:
     - `npm test`;
     - the new security tests;

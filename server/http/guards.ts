@@ -3,8 +3,8 @@ import { tokenMatches } from '../auth'
 import type { Guard, RejectInfo, Reply } from './router'
 
 // The browser-facing guards. Order matters: Host first (it stops DNS rebinding, where a hostile page reaches the API under
-// its own name), then Origin (it stops other web pages), then preflight, then the bearer token (it stops every other local
-// program), then the JSON-only rule (it turns a cross-origin
+// its own name), then Origin (it stops other web pages), then preflight, then the bearer token (it stops programs that talk to the backend directly; a program that can reach the dev
+// proxy can still send a request that looks same-origin, see the README), then the JSON-only rule (it turns a cross-origin
 // "simple request" into one that needs a preflight, which the Origin guard denies).
 
 export const ALLOWED_HOST_NAMES = ['127.0.0.1', 'localhost', '[::1]'] as const

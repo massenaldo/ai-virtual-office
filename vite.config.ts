@@ -13,6 +13,10 @@ export default defineConfig(({ mode }) => {
       host: '127.0.0.1',
       port: 5173,
       strictPort: true,
+      // The data folder holds the API token, the audit log and the whole workforce state: never serve it (Vite serves every file under the root).
+      fs: { deny: ['.env', '.env.*', '*.{crt,pem}', '**/.git/**', '**/data/**', '**/api-token*'] },
+      // The proxy rewrites Host for the backend, so this is the only Host check proxied requests get. Keep it explicit.
+      allowedHosts: ['localhost', '127.0.0.1'],
       ...(api ? { proxy: api.proxy } : {}),
     },
     // Let tests read stylesheets as text (Vitest replaces CSS with an empty string by default).

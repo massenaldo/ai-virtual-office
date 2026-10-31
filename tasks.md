@@ -190,7 +190,7 @@ I also assume the same scope restrictions as 3B.1.1, and a final report in the s
 
 Branch: `fix/3b12-1-info-disclosure`.
 
-- [ ] **1.1 Safe persistence and audit status.** (Decision 1)
+- [x] **1.1 Safe persistence and audit status.** (Decision 1)
   - Files: `server/store.ts` (`SaveErrorCode`, `saveErrorCode(error)`, `saveErrorText(code)`), `server/audit.ts` (allowlisted code), `server/http/routes.ts` (health and state), `src/workforce/api.ts` (types only; `saveError` stays `string | null`), and the tests `server/store.test.ts`, `server/http/routes.test.ts` and `server/audit.test.ts`.
   - RED first:
     - Using the existing `writeFile` test seam, make it throw a real-shaped fs error, e.g. `Object.assign(new Error(\`EACCES: permission denied, open '${dataDir}/workforce.json.tmp-1'\`), { code: 'EACCES' })`.
@@ -201,7 +201,7 @@ Branch: `fix/3b12-1-info-disclosure`.
     - The audit log failing with `EISDIR` gives `audit: { ok: false, error: 'EISDIR' }`.
     - The server log line still has the full message.
   - Verify: `npx vitest run server/store.test.ts server/audit.test.ts server/http/routes.test.ts`, then `npm test` and `npx tsc -b`.
-- [ ] **1.2 Disclosure sweep of every unauthenticated response and error path.** (Decision 2)
+- [x] **1.2 Disclosure sweep of every unauthenticated response and error path.** (Decision 2)
   - Files: new `server/http/disclosure.test.ts`; `server/taskManager.ts` (`launch()` catch, `hidePaths` extra labels; the manager gets `dataDir` through `config`), `server/http/router.ts` (log `pathOf(req)`, never the query string), and `server/taskManager.test.ts`.
   - RED first:
     - A table-driven test against a real `startTestServer` with a workspace. For each response it asserts that the body and headers contain no `dataDir`, workspace root, `process.cwd()`, `os.homedir()`, `TEST_TOKEN`, `"stack"`, `at ` frames or `Error:`. The responses are:

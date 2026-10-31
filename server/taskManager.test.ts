@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentTask } from '../src/workforce/types'
@@ -16,7 +16,7 @@ import { makeWorkspaceRoot } from './test/workspaces'
 const NOW = '2026-10-31T09:00:00.000Z'
 const FORGE = 'agent-demo-backend'
 const INPUT = { title: 'Build API', description: '' }
-const BASE_CONFIG = { taskTimeoutMs: 600000, cancelGraceMs: 5000, approvalTimeoutMs: 300000, maxMessageBytes: 32768, maxTaskOutputBytes: 262144, workspaceRoot: null as string | null, workspaces: [] as Array<{ id: string; relativePath: string }> }
+const BASE_CONFIG = { taskTimeoutMs: 600000, cancelGraceMs: 5000, approvalTimeoutMs: 300000, maxMessageBytes: 32768, maxTaskOutputBytes: 262144, workspaceRoot: null as string | null, workspaces: [] as Array<{ id: string; relativePath: string }>, dataDir: undefined as string | undefined }
 
 let dir: string
 let store: WorkforceStore
@@ -107,7 +107,7 @@ describe('start and the full mock lifecycle', () => {
     await tick()
     fake.rejectStart(new Error('crash'))
     await tick()
-    expect(task(id)).toMatchObject({ status: 'failed', errorMessage: 'Runtime failed to start: crash' })
+    expect(task(id)).toMatchObject({ status: 'failed', errorMessage: 'Runtime failed to start.' })
   })
 
   it('stops a run whose start finished after it was cancelled', async () => {
@@ -562,6 +562,26 @@ describe('tool approvals', () => {
     await expect(gate(ctx, write)).resolves.toEqual(cancelled)
   })
 
+  it('shows a generic message when the runtime fails to start, and logs the real one', async () => {
+    const logged: string[] = []
+    const m = make(fake, wsConfig({ dataDir: '/srv/vo/data' }), undefined)
+    ;(m as unknown as { log: { error(msg: string, err?: unknown): void } }).log = { ...silentLogger, error: (msg, err) => { logged.push(`${msg} ${String(err)}`) } }
+    fake.defer = true
+    const r = m.startTask(FORGE, INPUT, { workspaceId: 'sandbox' })
+    const id = r.ok ? r.task.id : ''
+    await tick()
+    fake.rejectStart(new Error("ENOENT: open '/srv/vo/data/x'"))
+    await tick()
+    expect(task(id).errorMessage).toBe('Runtime failed to start.')
+    expect(logged.join('\n')).toContain('/srv/vo/data/x')
+  })
+
+  it('hides the data folder, the working folder and the home folder in runtime output', async () => {
+    const { id } = await running({ dataDir: '/srv/vo/data' })
+    fake.emit({ type: 'message', taskId: id, text: `see /srv/vo/data/audit.log, ${process.cwd()}/src and ${homedir()}/.ssh` })
+    expect(store.state.activities.at(-1)?.message).toBe('see <data-dir>/audit.log, <cwd>/src and <home>/.ssh')
+  })
+
   it('hides the workspace path in an approval summary', async () => {
     const { id, ctx } = await running({}, ['Bash'])
     void gate(ctx, { tool: 'Bash', input: { command: `cat ${ws.path('sandbox')}/notes.md` } })
@@ -601,7 +621,7 @@ describe('tool approvals', () => {
     await tick()
     fake.rejectStart(new Error(`ENOENT '${ws.path('sandbox')}/missing'`))
     await tick()
-    expect(task(id).errorMessage).toBe("Runtime failed to start: ENOENT '<workspace>/missing'")
+    expect(task(id).errorMessage).toBe('Runtime failed to start.')
     expect(JSON.stringify(store.state)).not.toContain(ws.root)
   })
 

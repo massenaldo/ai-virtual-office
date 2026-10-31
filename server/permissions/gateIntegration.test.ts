@@ -432,3 +432,74 @@ describe('concurrent requests in one task', () => {
     })
   })
 })
+
+describe('revoking while a call is running', () => {
+  /** A perform that stays open until released, and reports the signal it was given. */
+  function slow() {
+    let release!: () => void
+    const done = new Promise<void>((resolve) => { release = resolve })
+    const seen: { signal: AbortSignal | null } = { signal: null }
+    return { seen, release, perform: async (a: { signal: AbortSignal }) => { seen.signal = a.signal; await done; return 'finished' } }
+  }
+  const taskRule = (id: string) => { const r = permissions.grant({ scope: 'task', effect: 'allow', tool: 'Write', agentId: FORGE, taskId: id }); if (!r.ok) throw new Error(r.error); return r.rule }
+
+  it('aborts the call of a revoked task rule', async () => {
+    const { id, ctx } = await run()
+    const rule = taskRule(id)
+    const s = slow()
+    const pending = ctx.tools.use(write(), s.perform)
+    await tick()
+    expect(s.seen.signal!.aborted).toBe(false)
+    expect(manager.revokePermission(rule.id)).toMatchObject({ ok: true, rule: { id: rule.id } })
+    expect(s.seen.signal!.aborted).toBe(true)
+    s.release()
+    await pending
+  })
+
+  it('does not abort a call allowed by an agent rule, but the next request asks', async () => {
+    const rule = agentAllow()
+    const { id, ctx } = await run()
+    const s = slow()
+    const pending = ctx.tools.use(write(), s.perform)
+    await tick()
+    expect(manager.revokePermission(rule.id).ok).toBe(true)
+    expect(s.seen.signal!.aborted).toBe(false)
+    s.release()
+    await expect(pending).resolves.toMatchObject({ behavior: 'allow', value: 'finished' })
+    void ctx.tools.use(write('sub/next.txt'), vi.fn())
+    expect(task(id).status).toBe('waiting_for_approval')
+  })
+
+  it('stops tracking once the call has finished', async () => {
+    const { id, ctx } = await run()
+    const rule = taskRule(id)
+    const s = slow()
+    const pending = ctx.tools.use(write(), s.perform)
+    await tick()
+    s.release()
+    await pending
+    manager.revokePermission(rule.id)
+    expect(s.seen.signal!.aborted).toBe(false)
+  })
+
+  it('revokeAgentPermissions aborts task and once calls of that agent only and revokes the rules', async () => {
+    const { id, ctx } = await run()
+    const rule = taskRule(id)
+    const s = slow()
+    const pending = ctx.tools.use(write(), s.perform)
+    await tick()
+    const out = manager.revokeAgentPermissions(FORGE)
+    expect(out.ok && out.revoked.map((r) => r.id)).toEqual([rule.id])
+    expect(s.seen.signal!.aborted).toBe(true)
+    expect(manager.revokeAgentPermissions('agent-missing')).toMatchObject({ ok: false, code: 'not_found' })
+    s.release()
+    await pending
+  })
+
+  it('answers conflict for a rule that is already inactive and not_found for an unknown id', async () => {
+    const rule = agentAllow()
+    expect(manager.revokePermission(rule.id).ok).toBe(true)
+    expect(manager.revokePermission(rule.id)).toMatchObject({ ok: false, code: 'conflict', error: 'That permission is no longer active.' })
+    expect(manager.revokePermission('perm-nope')).toMatchObject({ ok: false, code: 'not_found', error: 'Permission not found.' })
+  })
+})

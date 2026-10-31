@@ -54,7 +54,13 @@ export type ToolGateDeps = {
    * The last check before `perform`: are the permission rules still willing? A once-grant is consumed here, so it can be
    * used once. A revoked, expired or already used permission refuses.
    */
-  permit(request: ToolRequest, digest: string, paths: ReadonlyArray<{ readonly arg: string; readonly relative: string }>): { ok: true } | { ok: false }
+  permit(request: ToolRequest, digest: string, paths: ReadonlyArray<{ readonly arg: string; readonly relative: string }>): { ok: true; ruleId: string | null } | { ok: false }
+  /**
+   * Registers the call that is about to run, by the rule that allowed it, so revoking a task permission can abort it. The
+   * signal it returns also aborts when the task's does. Called right after `permit` with nothing in between; `end` is called
+   * when the call is over, however it ends.
+   */
+  track(ruleId: string | null): { signal: AbortSignal; end(): void }
 }
 
 const deny = (outcome: 'denied_by_policy' | 'stale_approval' | 'cancelled' | 'revoked', message: string): GatedOutcome<never> => ({ behavior: 'deny', outcome, message })
@@ -91,9 +97,16 @@ export function createToolGate(deps: ToolGateDeps): ToolGate {
       if (recheck.decision === 'deny') return refuse(`path or policy check failed (${recheck.reason})`)
 
       const paths = recheck.paths ?? []
-      if (!deps.permit({ tool, input }, digest, paths).ok) return deny('revoked', `The permission for tool "${tool}" was withdrawn or already used; it was not run.`)
+      const permitted = deps.permit({ tool, input }, digest, paths)
+      if (!permitted.ok) return deny('revoked', `The permission for tool "${tool}" was withdrawn or already used; it was not run.`)
 
-      const value = await perform({ tool, input, workspace: now.workspace, signal: deps.signal, paths })
+      const call = deps.track(permitted.ruleId)
+      let value: T
+      try {
+        value = await perform({ tool, input, workspace: now.workspace, signal: call.signal, paths })
+      } finally {
+        call.end()
+      }
       return { behavior: 'allow', outcome: answer.outcome, value }
     },
   }

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AUDIT_FILE, type AuditRecord } from './audit'
 import { PERMISSIONS_FILE } from './permissions/store'
 import { parsePermissions } from './permissions/storage'
+import type { PermissionChangedEvent } from '../src/workforce/api'
 import { openEventStream, type SseStream } from './test/sseClient'
 import { startTestServer, tempDataDir, type TestServer } from './test/helpers'
 import { makeWorkspaceRoot } from './test/workspaces'
@@ -117,5 +118,51 @@ describe('permission rules in the running server', () => {
     const id = started.body.task.id as string
     await until(async () => (await task(s!, id)).status === 'running')
     await askDemoWrite(id)
+  })
+})
+
+describe('permission changes over the event stream', () => {
+  const permissionEvents = (x: SseStream) => x.events.filter((e) => e.type === 'permission.changed') as PermissionChangedEvent[]
+
+  it('a POST then a DELETE over HTTP are streamed as granted and revoked, in order, with the rule state', async () => {
+    await start()
+    const stream = await openEventStream(s!.url, { token: s!.app.apiToken.value })
+    streams.push(stream)
+    const made = await s!.api('POST', '/api/permissions', { scope: 'global', effect: 'deny', tool: 'Grep' })
+    const granted = await stream.next((e) => e.type === 'permission.changed') as PermissionChangedEvent
+    expect(granted).toMatchObject({ kind: 'granted', rule: { id: made.body.rule.id, state: 'active', effect: 'deny' } })
+    await s!.api('DELETE', `/api/permissions/${made.body.rule.id}`)
+    const revoked = await stream.next((e) => e.type === 'permission.changed') as PermissionChangedEvent
+    expect(revoked).toMatchObject({ kind: 'revoked', rule: { id: made.body.rule.id, state: 'revoked' } })
+    expect(Number(revoked.id.split(':')[1])).toBeGreaterThan(Number(granted.id.split(':')[1]))
+    expect(JSON.stringify(permissionEvents(stream))).not.toContain('digest')
+  })
+
+  it('a client that resumes with its last event id gets the missed permission events in order', async () => {
+    await start()
+    const first = await openEventStream(s!.url, { token: s!.app.apiToken.value })
+    streams.push(first)
+    const a = await s!.api('POST', '/api/permissions', { scope: 'global', effect: 'deny', tool: 'Grep' })
+    const seen = await first.next((e) => e.type === 'permission.changed')
+    first.close()
+    await s!.api('DELETE', `/api/permissions/${a.body.rule.id}`)
+    await s!.api('POST', '/api/permissions', { scope: 'global', effect: 'ask', tool: 'Glob' })
+    const resumed = await openEventStream(s!.url, { token: s!.app.apiToken.value, lastEventId: seen.id })
+    streams.push(resumed)
+    const got = await resumed.until((e) => e.type === 'permission.changed' && (e as PermissionChangedEvent).kind === 'granted')
+    // The mock task may report progress in between; only the permission events matter here.
+    expect(got.filter((e) => e.type === 'permission.changed').map((e) => (e as PermissionChangedEvent).kind)).toEqual(['revoked', 'granted'])
+  })
+
+  it('the grant and the use of a one-time permission are streamed', async () => {
+    const id = await start()
+    const stream = await openEventStream(s!.url, { token: s!.app.apiToken.value })
+    streams.push(stream)
+    await askDemoWrite(id)
+    const pending = (await task(s!, id)).pendingApproval
+    await s!.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'allow_once', digest: pending.digest })
+    const kinds: string[] = []
+    await stream.until((e) => { if (e.type === 'permission.changed') kinds.push((e as PermissionChangedEvent).kind); return kinds.includes('used') })
+    expect(kinds).toEqual(['granted', 'used'])
   })
 })

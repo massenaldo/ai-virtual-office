@@ -124,6 +124,8 @@ A small Node server (`server/`, no framework, no runtime dependencies) owns agen
 - *Other clients:* `curl -H "Authorization: Bearer $(cat data/api-token)" http://127.0.0.1:8787/api/state`.
 - `/vo` and `npm run dev` stay browser-only and need no token.
 
+**Sandbox.** There is none yet: [`docs/sandbox-architecture.md`](docs/sandbox-architecture.md) is a design only (Docker, one workspace mounted, no network, resource limits) with its blockers. No isolation is active.
+
 **Persistence.** `data/workforce.json` (atomic writes, mode 0600). An unreadable file is backed up before a fresh start. A task running at shutdown is marked failed with "Interrupted by a server restart". The event buffer is in memory, so a restart makes every old event id a `state.reset`.
 
 ## Layout data

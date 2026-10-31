@@ -286,7 +286,7 @@ Branch: `test/3b12-2-tool-gate-integration`.
 
 Branch: `fix/3b12-3-auth-proxy`. Opus reviews the PR before merge.
 
-- [ ] **3.1 `/api` prefix edge cases.** (Decision 6)
+- [x] **3.1 `/api` prefix edge cases.** (Decision 6)
   - Files: `scripts/apiProxy.ts` (`createApiGate` canonical-path check; proxy key `'^/api/'`) and `scripts/apiProxy.test.ts`.
   - RED first:
     - `/api`, `/apiX`, `/api?x=1`, `/API/state`, `/Api/state`, `/%61pi/state`, `/api%2Fstate`, `/%2Fapi/state` and `//api/state` each get 404 from the gate, `next()` is not called, and no `authorization` header is set;
@@ -294,7 +294,7 @@ Branch: `fix/3b12-3-auth-proxy`. Opus reviews the PR before merge.
     - `/`, `/src/main.tsx` and `/@vite/client` are untouched;
     - `apiProxyFor(...).proxy` has exactly the key `'^/api/'`.
   - Verify: `npx vitest run scripts/apiProxy.test.ts`, then `npm test`.
-- [ ] **3.2 A real Vite server, the real backend and SSE, in one automated test.**
+- [x] **3.2 A real Vite server, the real backend and SSE, in one automated test.**
   - Files: new `scripts/viteProxy.test.ts`.
     - It starts `startServer` on `PORT=0` with a temp `DATA_DIR` and a generated token.
     - Then Vite `createServer({ configFile: 'vite.config.ts', server: { port: 0 } })`, with `VITE_WORKFORCE_API_URL=/`, `PORT` and `DATA_DIR` set in `process.env` before creation and restored after.
@@ -310,7 +310,7 @@ Branch: `fix/3b12-3-auth-proxy`. Opus reviews the PR before merge.
     - no response body or header contains the token;
     - `data/api-token` is still not served (as in `viteServes.test.ts`).
   - Verify: `npx vitest run scripts/viteProxy.test.ts scripts/viteServes.test.ts`, then `npm test`.
-- [ ] **3.3 One server per `DATA_DIR`, and the token kept out of config text.** (Decisions 7 and 8)
+- [x] **3.3 One server per `DATA_DIR`, and the token kept out of config text.** (Decisions 7 and 8)
   - Files: new `server/dataDirLock.ts` and `server/dataDirLock.test.ts`; `server/app.ts` (lock before `resolveApiToken`, release in `close()`); `server/config.ts` and new `server/secret.ts` (`Secret`); `server/auth.ts`; `server/index.ts`; `scripts/devFull.ts` (clear message); `server/test/helpers.ts` if needed.
   - RED first:
     - a second `startServer` on the same `DATA_DIR` rejects with "Another server is using DATA_DIR", and the first server's token file and token are unchanged and still accepted;
@@ -321,7 +321,7 @@ Branch: `fix/3b12-3-auth-proxy`. Opus reviews the PR before merge.
     - with a capturing logger and audit log, a full E2E-style run (start, 401, 200, SSE, error paths, the second-server refusal) never prints the token;
     - after `npm run build`, `grep -r` for the test token and `api-token` in `dist/` finds nothing (this extends `check:secrets`).
   - Verify: `npx vitest run server/dataDirLock.test.ts server/auth.test.ts server/config.test.ts server/app.test.ts server/e2e`, then `npm test`, `npx tsc -b`, `npm run build`, `npm run server:build` and `npm run check:secrets`.
-- [ ] **3.4 Doc: long-term browser authentication.** (Decision 9)
+- [x] **3.4 Doc: long-term browser authentication.** (Decision 9)
   - Files: new `docs/browser-auth.md` and a README link.
   - The doc covers:
     - the threat model: other local programs, web pages, the LAN, and a future VPS;

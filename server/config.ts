@@ -1,4 +1,5 @@
 import { MIN_TOKEN_CHARS } from './auth'
+import { Secret } from './secret'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { parseEnv } from 'node:util'
@@ -8,7 +9,7 @@ import { parseWorkspaces, type WorkspaceEntry } from './workspaces'
 
 export type RuntimeKind = 'mock' | 'claude'
 
-export type ServerConfig = { host: string; port: number; dataDir: string; runtime: RuntimeKind; taskTimeoutMs: number; cancelGraceMs: number; approvalTimeoutMs: number; maxMessageBytes: number; maxTaskOutputBytes: number; eventBufferSize: number; auditLogMaxBytes: number; workspaceRoot: string | null; workspaces: WorkspaceEntry[]; allowedTools: string[]; allowedOrigins: string[]; credentialsConfigured: boolean; /** Server-only secret; null means one is generated at start. Never log or serialise the config with it. */ apiToken: string | null }
+export type ServerConfig = { host: string; port: number; dataDir: string; runtime: RuntimeKind; taskTimeoutMs: number; cancelGraceMs: number; approvalTimeoutMs: number; maxMessageBytes: number; maxTaskOutputBytes: number; eventBufferSize: number; auditLogMaxBytes: number; workspaceRoot: string | null; workspaces: WorkspaceEntry[]; allowedTools: string[]; allowedOrigins: string[]; credentialsConfigured: boolean; /** Server-only secret, wrapped so it cannot print; null means one is generated at start. */ apiToken: Secret | null }
 
 export type Env = Record<string, string | undefined>
 
@@ -118,11 +119,11 @@ export function parseConfig(env: Env, cwd: string = process.cwd()): Parsed {
     else allowedTools = items.length === 1 && items[0] === 'none' ? [] : [...new Set(items)]
   }
 
-  let apiToken: string | null = null
+  let apiToken: Secret | null = null
   const rawToken = read(env, 'API_TOKEN')
   if (rawToken !== undefined) {
     if (rawToken.length < MIN_TOKEN_CHARS || /\s/.test(rawToken)) errors.push(`API_TOKEN must be at least ${MIN_TOKEN_CHARS} characters with no spaces.`)
-    else apiToken = rawToken
+    else apiToken = new Secret(rawToken)
   }
 
   const ws = parseWorkspaces(read(env, 'WORKSPACE_ROOT'), read(env, 'WORKSPACES'), dataDir)

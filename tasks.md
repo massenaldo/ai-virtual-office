@@ -1,7 +1,7 @@
 # Milestone 3B.1 — Real Agent Runtime Foundation: Tasks
 
 **Spec:** [`plan.md`](plan.md) (Milestone 3B.1 brief). This file is my working task list for that spec.
-**Status:** Approved, 2026-10-31. Q1–Q5 answered with the recommendations (see "Decisions" at the end). Stages A–C are done and merged; Stage D is done (in review); Stage E is next.
+**Status:** Approved, 2026-10-31. Q1–Q5 answered with the recommendations (see "Decisions" at the end). Stages A–C are done and merged; Stage E is done (in review). The final report is `docs/milestone-3b1-report.md`.
 **Earlier milestones:** [`milestone-3a-tasks.md`](docs/milestones/milestone-3a-tasks.md) ([report](docs/milestone-3a-report.md)), and [`milestone-2-tasks.md`](docs/milestones/milestone-2-tasks.md).
 
 ## What this milestone is
@@ -189,10 +189,10 @@ The app gets a small **local backend**. It owns agents, tasks and activity, runs
 
 ## Stage E — Verify, document, report
 
-- [ ] All 10 checks in plan.md §9, actually run: backend alone, frontend ↔ backend, browser mock, state consistency, SSE reconnection, bad workspace paths, unauthorised commands and origins, cancellation and timeout, 3D office and editor regression, build and tests. Also `/vo`.
-- [ ] README: architecture, how to run each mode, env variables, API and events, security boundaries, persistence limits.
-- [ ] Final report (plan.md "Final report"), stating explicitly that the Claude Agent SDK is **not installed or integrated** (unless Q1 changes that) and that no real agent execution exists.
-- [ ] PR
+- [x] All 10 checks in plan.md §9, actually run: backend alone, frontend ↔ backend, browser mock, state consistency, SSE reconnection, bad workspace paths, unauthorised commands and origins, cancellation and timeout, 3D office and editor regression, build and tests. Also `/vo`.
+- [x] README: architecture, how to run each mode, env variables, API and events, security boundaries, persistence limits.
+- [x] Final report (plan.md "Final report"), stating explicitly that the Claude Agent SDK is **not installed or integrated** (unless Q1 changes that) and that no real agent execution exists.
+- [x] PR
 
 ## Questions for you
 

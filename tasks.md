@@ -389,7 +389,7 @@ Branch: `feat/3b12-5-write-review`. It depends on 2.1. Opus reviews the PR befor
     - the review survives a `workforce.json` round trip, and an oversized or mismatched review on load is rejected;
     - Bash with a long command is still `not_reviewable`.
   - Verify: `npx vitest run server/toolPolicy.test.ts server/taskManager.test.ts server/toolGate.integration.test.ts src/workforce/storage.test.ts`, then `npm test` and `npx tsc -b`.
-- [ ] **5.2 UI: the review pane.** (Decision 5)
+- [x] **5.2 UI: the review pane.** (Decision 5)
   - Files: new `src/workforce/ui/ApprovalReview.tsx` (and its test), `src/workforce/ui/AgentDetail.tsx` (renders it; Approve is disabled until it has been opened; sends `digest`), `src/workforce/view.ts` (`formatReviewLines`, whitespace markers), its CSS, and `src/workforce/view.test.ts`.
   - RED first:
     - with a Write review, the pane shows the workspace id, path, size, digest prefix and every line, numbered (a 2,000-line file renders all 2,000 lines, with no ellipsis);

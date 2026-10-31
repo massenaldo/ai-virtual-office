@@ -1,6 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, renameSync, unlinkSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
+import { inspect } from 'node:util'
 
 // The local API token. It lives in the server process and, when generated, in DATA_DIR/api-token (mode 0600) so a
 // separately started Vite dev server can read it. It is never put in a URL, a log line, an audit record, a response or a
@@ -9,7 +10,14 @@ import { join } from 'node:path'
 export const TOKEN_FILE = 'api-token'
 export const MIN_TOKEN_CHARS = 32
 
-export type ApiToken = { value: string; source: 'configured' | 'generated' }
+/** The token in use. The value sits behind a getter (not an own property) so JSON, console and inspect never show it. */
+export class ApiToken {
+  readonly #value: string
+  constructor(value: string, readonly source: 'configured' | 'generated') { this.#value = value }
+  get value(): string { return this.#value }
+  toJSON(): { source: string } { return { source: this.source } }
+  [inspect.custom](): string { return `ApiToken(${this.source})` }
+}
 
 /**
  * A configured token is used as is and never written to disk (a stale generated file is removed, so nothing else can
@@ -19,7 +27,7 @@ export function resolveApiToken(opts: { configured: string | null; dataDir: stri
   const file = join(opts.dataDir, TOKEN_FILE)
   if (opts.configured !== null) {
     try { unlinkSync(file) } catch { /* nothing stale to remove */ }
-    return { value: opts.configured, source: 'configured' }
+    return new ApiToken(opts.configured, 'configured')
   }
   const value = randomBytes(32).toString('base64url')
   mkdirSync(opts.dataDir, { recursive: true, mode: 0o700 })
@@ -35,7 +43,7 @@ export function resolveApiToken(opts: { configured: string | null; dataDir: stri
   }
   renameSync(tmp, file)
   chmodSync(file, 0o600)
-  return { value, source: 'generated' }
+  return new ApiToken(value, 'generated')
 }
 
 const digest = (text: string) => createHash('sha256').update(text).digest()

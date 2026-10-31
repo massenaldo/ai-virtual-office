@@ -38,7 +38,7 @@ export type WorkspacesResponse = { workspaces: { id: string }[] }
 
 /** Send on every POST, PUT, PATCH and DELETE, even without a body: the server refuses state changes without it (Stage C). */
 export const MUTATION_HEADERS = { 'Content-Type': 'application/json' } as const
-export type ApprovalBody = { approvalId: string; decision: ApprovalDecision }
+export type ApprovalBody = { approvalId: string; decision: ApprovalDecision; digest?: string }
 
 /** Event ids are '<boot>:<seq>': seq rises within one server run, and the boot part tells a client its id predates a restart. */
 export function parseEventId(id: string): { boot: string; seq: number } | null {

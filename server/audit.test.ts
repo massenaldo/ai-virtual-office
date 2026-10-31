@@ -58,6 +58,8 @@ describe('openAuditLog', () => {
     expect(a.detail).toBe('path <workspace-root>/a key [REDACTED]')
     audit.write({ action: 'runtime.note', actor: 'runtime', detail: 'AKIAIOSFODNN7EXAMPLE and https://u:p@h.test' })
     expect(JSON.parse(lines().at(-1)!).detail).toBe('[REDACTED] and https://[REDACTED]@h.test')
+    audit.write({ action: 'runtime.note', actor: 'runtime', detail: `redis://:p@ss@host and ${['AIza', 'SyA-1234567890abcdefghijklmnopqrstu'].join('')}` })
+    expect(JSON.parse(lines().at(-1)!).detail).toBe('redis://[REDACTED]@host and [REDACTED]')
     expect(b.taskId).toHaveLength(64)
     expect(b.taskId.endsWith('…')).toBe(true)
     expect(c.detail).toHaveLength(512)
@@ -97,9 +99,40 @@ describe('openAuditLog', () => {
   })
 })
 
+describe('the suppressed-count record', () => {
+  it('is written before the first record of any kind in the next window', () => {
+    const { audit } = open()
+    for (let i = 0; i < 36; i++) audit.write({ action: 'request.rejected', actor: 'api', reason: 'origin' })
+    clock = '2026-10-31T09:01:30.000Z'
+    audit.write({ action: 'task.start', actor: 'api', taskId: 't1' })
+    const all = lines().map((l) => JSON.parse(l))
+    expect(all.at(-2)).toMatchObject({ action: 'request.rejected', actor: 'system', reason: 'suppressed', detail: '6 rejected requests were not logged' })
+    expect(all.at(-1)).toMatchObject({ action: 'task.start', taskId: 't1' })
+    audit.write({ action: 'task.start', actor: 'api', taskId: 't2' })
+    expect(lines().filter((l) => l.includes('suppressed'))).toHaveLength(1)
+  })
+
+  it('is written when the log is closed, so a count is never lost', () => {
+    const { audit } = open()
+    for (let i = 0; i < 33; i++) audit.write({ action: 'request.rejected', actor: 'api', reason: 'origin' })
+    audit.close()
+    expect(JSON.parse(lines().at(-1)!)).toMatchObject({ reason: 'suppressed', detail: '3 rejected requests were not logged' })
+    audit.close()
+    expect(lines().filter((l) => l.includes('suppressed'))).toHaveLength(1)
+  })
+
+  it('writes nothing extra when nothing was suppressed', () => {
+    const { audit } = open()
+    audit.write({ action: 'task.start', actor: 'api' })
+    audit.close()
+    expect(lines()).toHaveLength(1)
+  })
+})
+
 describe('nullAudit', () => {
   it('does nothing', () => {
     nullAudit.write({ action: 'task.start', actor: 'api' })
+    nullAudit.close()
     expect(nullAudit.status).toEqual({ ok: true, error: null })
     expect(nullAudit.filePath).toBe('')
   })

@@ -12,7 +12,8 @@ export type ToolGateResult =
   | { behavior: 'deny'; outcome: 'denied_by_policy' | 'denied' | 'expired' | 'cancelled'; message: string }
 
 /** What `perform` receives: a deep-frozen copy of the request's input and the workspace as it was checked just before. */
-export type GatedAction = { readonly tool: string; readonly input: unknown; readonly workspace: ResolvedWorkspace | null }
+/** `signal` aborts when the task is cancelled, times out or ends; `paths` are the checked targets, relative, never absolute. */
+export type GatedAction = { readonly tool: string; readonly input: unknown; readonly workspace: ResolvedWorkspace | null; readonly signal: AbortSignal; readonly paths: ReadonlyArray<{ readonly arg: string; readonly relative: string }> }
 
 /** `stale_approval`: the action changed (a path now resolves elsewhere, the workspace moved) between approval and use. */
 export type GatedOutcome<T> =

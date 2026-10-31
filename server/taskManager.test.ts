@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentTask } from '../src/workforce/types'
@@ -9,6 +9,7 @@ import { ServerMockProvider } from './runtime/mockProvider'
 import type { ServerRuntimeProvider, StartContext } from './runtime/types'
 import { openWorkforceStore, type WorkforceStore } from './store'
 import { TaskManager, type LifecycleAction, type TaskManagerOptions } from './taskManager'
+import { actionDigest } from './toolGate'
 import { DEFAULT_ALLOWED_TOOLS } from './toolPolicy'
 import { FakeProvider } from './test/fakeProvider'
 import { makeWorkspaceRoot } from './test/workspaces'
@@ -16,7 +17,7 @@ import { makeWorkspaceRoot } from './test/workspaces'
 const NOW = '2026-10-31T09:00:00.000Z'
 const FORGE = 'agent-demo-backend'
 const INPUT = { title: 'Build API', description: '' }
-const BASE_CONFIG = { taskTimeoutMs: 600000, cancelGraceMs: 5000, approvalTimeoutMs: 300000, maxMessageBytes: 32768, maxTaskOutputBytes: 262144, workspaceRoot: null as string | null, workspaces: [] as Array<{ id: string; relativePath: string }> }
+const BASE_CONFIG = { taskTimeoutMs: 600000, cancelGraceMs: 5000, approvalTimeoutMs: 300000, maxMessageBytes: 32768, maxTaskOutputBytes: 262144, workspaceRoot: null as string | null, workspaces: [] as Array<{ id: string; relativePath: string }>, dataDir: undefined as string | undefined }
 
 let dir: string
 let store: WorkforceStore
@@ -107,7 +108,7 @@ describe('start and the full mock lifecycle', () => {
     await tick()
     fake.rejectStart(new Error('crash'))
     await tick()
-    expect(task(id)).toMatchObject({ status: 'failed', errorMessage: 'Runtime failed to start: crash' })
+    expect(task(id)).toMatchObject({ status: 'failed', errorMessage: 'Runtime failed to start.' })
   })
 
   it('stops a run whose start finished after it was cancelled', async () => {
@@ -209,7 +210,7 @@ describe('approvals', () => {
     const m = make(mock(), wc())
     const id = await waiting(m)
     expect(agent().status).toBe('waiting')
-    const r = m.decideApproval(id, task(id).pendingApproval!.id, 'approve')
+    const r = m.decideApproval(id, task(id).pendingApproval!.id, 'approve', {}, task(id).pendingApproval!.digest ?? undefined)
     expect(r.ok && r.task.status).toBe('running')
     expect(agent().status).toBe('working')
     await tick()
@@ -221,7 +222,7 @@ describe('approvals', () => {
   it('deny fails with the simulated message', async () => {
     const m = make(mock(), wc())
     const id = await waiting(m)
-    const r = m.decideApproval(id, task(id).pendingApproval!.id, 'deny')
+    const r = m.decideApproval(id, task(id).pendingApproval!.id, 'deny', {}, task(id).pendingApproval!.digest ?? undefined)
     // A human deny tells the runtime "no"; the task itself carries on until the runtime decides what to do.
     expect(r.ok && r.task.status).toBe('running')
     await tick()
@@ -243,7 +244,7 @@ describe('approvals', () => {
     const m = make(mock(), wc())
     const id = await waiting(m)
     const approvalId = task(id).pendingApproval!.id
-    expect(m.decideApproval(id, approvalId, 'approve').ok).toBe(true)
+    expect(m.decideApproval(id, approvalId, 'approve', {}, task(id).pendingApproval!.digest ?? undefined).ok).toBe(true)
     expect(m.decideApproval(id, approvalId, 'deny')).toEqual({ ok: false, code: 'conflict', error: 'Task is not waiting for approval.' })
   })
 
@@ -261,7 +262,7 @@ describe('approvals', () => {
   it('deciding clears the approval timer', async () => {
     const m = make(mock(), { ...wc(), approvalTimeoutMs: 2000 })
     const id = await waiting(m)
-    m.decideApproval(id, task(id).pendingApproval!.id, 'approve')
+    m.decideApproval(id, task(id).pendingApproval!.id, 'approve', {}, task(id).pendingApproval!.digest ?? undefined)
     await vi.advanceTimersByTimeAsync(1900)
     expect(task(id).status).toBe('completed')
   })
@@ -375,7 +376,7 @@ describe('limits and housekeeping', () => {
     const m2id = started(m, 'sandbox')
     await tick()
     m.requestApproval(m2id)
-    m.decideApproval(m2id, task(m2id).pendingApproval!.id, 'approve')
+    m.decideApproval(m2id, task(m2id).pendingApproval!.id, 'approve', {}, task(m2id).pendingApproval!.digest ?? undefined)
     await vi.advanceTimersByTimeAsync(1000)
     expect(seen).toContain('approval.decided')
     tws.cleanup()
@@ -489,15 +490,59 @@ describe('tool approvals', () => {
     expect(denied.every((e) => e.detail === undefined)).toBe(true)
   })
 
+  describe('the digest travels with the approval', () => {
+    const digestOf = (id: string) => actionDigest({ taskId: id, workspaceId: 'sandbox', workspacePath: ws.path('sandbox'), tool: 'Write', input: write.input })
+
+    it('puts the review, with workspace and digest, on the pending approval', async () => {
+      const { id, ctx } = await running()
+      void gate(ctx, write)
+      const p = task(id).pendingApproval!
+      expect(p.review).toEqual({ kind: 'write', path: 'notes.md', bytes: 5, lines: 1, content: 'hello', workspaceId: 'sandbox', digest: digestOf(id) })
+      expect(p.review?.digest).toBe(p.digest)
+      expect(JSON.stringify(store.state)).not.toContain(ws.root)
+    })
+
+    it('puts the action digest on the pending approval', async () => {
+      const { id, ctx } = await running()
+      void gate(ctx, write)
+      expect(task(id).pendingApproval?.digest).toBe(digestOf(id))
+    })
+
+    it('refuses a wrong or missing digest and does not perform', async () => {
+      const { m, id, ctx } = await running()
+      const perform = vi.fn(() => 'done')
+      const pending = ctx.tools.use(write, perform)
+      const approval = task(id).pendingApproval!
+      const conflict = { ok: false, code: 'conflict', error: 'That approval is no longer pending.' }
+      expect(m.decideApproval(id, approval.id, 'approve', {}, 'f'.repeat(64))).toEqual(conflict)
+      expect(m.decideApproval(id, approval.id, 'approve')).toEqual(conflict)
+      expect(m.decideApproval(id, approval.id, 'approve', {}, digestOf('other-task'))).toEqual(conflict)
+      await tick()
+      expect(perform).not.toHaveBeenCalled()
+      expect(task(id).status).toBe('waiting_for_approval')
+      expect(m.decideApproval(id, approval.id, 'approve', {}, approval.digest ?? undefined).ok).toBe(true)
+      await expect(pending).resolves.toMatchObject({ behavior: 'allow', outcome: 'approved' })
+      expect(perform).toHaveBeenCalledTimes(1)
+    })
+
+    it('lets a deny through with the right digest and still needs it', async () => {
+      const { m, id, ctx } = await running()
+      void gate(ctx, write)
+      const approval = task(id).pendingApproval!
+      expect(m.decideApproval(id, approval.id, 'deny').ok).toBe(false)
+      expect(m.decideApproval(id, approval.id, 'deny', {}, approval.digest ?? undefined).ok).toBe(true)
+    })
+  })
+
   it('asks for a write and waits for approval', async () => {
     const { m, id, ctx } = await running()
     let settled: unknown = 'pending'
     void gate(ctx, write).then((r) => { settled = r })
-    expect(task(id)).toMatchObject({ status: 'waiting_for_approval', pendingApproval: { tool: 'Write', summary: 'Write notes.md (5 B): "hello"' } })
+    expect(task(id)).toMatchObject({ status: 'waiting_for_approval', pendingApproval: { tool: 'Write', summary: 'Write notes.md (5 B, 1 line): review the full content' } })
     expect(agent().status).toBe('waiting')
     await tick()
     expect(settled).toBe('pending')
-    expect(m.decideApproval(id, task(id).pendingApproval!.id, 'approve').ok).toBe(true)
+    expect(m.decideApproval(id, task(id).pendingApproval!.id, 'approve', {}, task(id).pendingApproval!.digest ?? undefined).ok).toBe(true)
     await tick()
     expect(settled).toEqual({ behavior: 'allow', outcome: 'approved' })
     expect(fake.responses).toEqual([])
@@ -508,7 +553,7 @@ describe('tool approvals', () => {
   it('a human deny resolves denied and the task keeps running', async () => {
     const { m, id, ctx } = await running()
     const p = gate(ctx, write)
-    m.decideApproval(id, task(id).pendingApproval!.id, 'deny')
+    m.decideApproval(id, task(id).pendingApproval!.id, 'deny', {}, task(id).pendingApproval!.digest ?? undefined)
     await expect(p).resolves.toEqual({ behavior: 'deny', outcome: 'denied', message: 'Denied by a human reviewer.' })
     expect(task(id).status).toBe('running')
   })
@@ -562,6 +607,26 @@ describe('tool approvals', () => {
     await expect(gate(ctx, write)).resolves.toEqual(cancelled)
   })
 
+  it('shows a generic message when the runtime fails to start, and logs the real one', async () => {
+    const logged: string[] = []
+    const m = make(fake, wsConfig({ dataDir: '/srv/vo/data' }), undefined)
+    ;(m as unknown as { log: { error(msg: string, err?: unknown): void } }).log = { ...silentLogger, error: (msg, err) => { logged.push(`${msg} ${String(err)}`) } }
+    fake.defer = true
+    const r = m.startTask(FORGE, INPUT, { workspaceId: 'sandbox' })
+    const id = r.ok ? r.task.id : ''
+    await tick()
+    fake.rejectStart(new Error("ENOENT: open '/srv/vo/data/x'"))
+    await tick()
+    expect(task(id).errorMessage).toBe('Runtime failed to start.')
+    expect(logged.join('\n')).toContain('/srv/vo/data/x')
+  })
+
+  it('hides the data folder, the working folder and the home folder in runtime output', async () => {
+    const { id } = await running({ dataDir: '/srv/vo/data' })
+    fake.emit({ type: 'message', taskId: id, text: `see /srv/vo/data/audit.log, ${process.cwd()}/src and ${homedir()}/.ssh` })
+    expect(store.state.activities.at(-1)?.message).toBe('see <data-dir>/audit.log, <cwd>/src and <home>/.ssh')
+  })
+
   it('hides the workspace path in an approval summary', async () => {
     const { id, ctx } = await running({}, ['Bash'])
     void gate(ctx, { tool: 'Bash', input: { command: `cat ${ws.path('sandbox')}/notes.md` } })
@@ -601,7 +666,7 @@ describe('tool approvals', () => {
     await tick()
     fake.rejectStart(new Error(`ENOENT '${ws.path('sandbox')}/missing'`))
     await tick()
-    expect(task(id).errorMessage).toBe("Runtime failed to start: ENOENT '<workspace>/missing'")
+    expect(task(id).errorMessage).toBe('Runtime failed to start.')
     expect(JSON.stringify(store.state)).not.toContain(ws.root)
   })
 
@@ -616,6 +681,8 @@ describe('tool approvals', () => {
     const gh = `ghp_${'a1B2c3D4e5'.repeat(4)}`
     fake.emit({ type: 'message', taskId: id, text: `cloning https://bob:pw@example.com with ${gh}` })
     expect(store.state.activities.at(-1)?.message).toBe('cloning https://[REDACTED]@example.com with [REDACTED]')
+    fake.emit({ type: 'message', taskId: id, text: `slack ${['xoxb', '123456789012', '1234567890123', 'AbCdEfGhIjKlMnOpQrStUvWx'].join('-')} and mysql -uroot -pS3cret db` })
+    expect(store.state.activities.at(-1)?.message).toBe('slack [REDACTED] and mysql -uroot -p[REDACTED] db')
     fake.emit({ type: 'failed', taskId: id, error: 'mysql --password hunter2 failed' })
     expect(task(id).errorMessage).toBe('mysql --password [REDACTED] failed')
   })

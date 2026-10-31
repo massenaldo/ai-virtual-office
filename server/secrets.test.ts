@@ -46,7 +46,7 @@ describe('secrets and paths', () => {
     const get = async () => (await s!.api('GET', '/api/state')).body.state.tasks[0]
     await until(async () => (await get()).status === 'running')
     keep(await s.api('POST', `/api/demo/tasks/${id}/request-approval`))
-    keep(await s.api('POST', `/api/tasks/${id}/approval`, { approvalId: (await get()).pendingApproval.id, decision: 'approve' }))
+    keep(await s.api('POST', `/api/tasks/${id}/approval`, { approvalId: (await get()).pendingApproval.id, decision: 'approve', digest: (await get()).pendingApproval.digest }))
     await until(async () => (await get()).status === 'completed')
     keep(await s.api('GET', '/api/state'))
 
@@ -68,7 +68,7 @@ describe('secrets and paths', () => {
     await new Promise((r) => setTimeout(r, 10))
     fake.rejectStart(new Error('auth failed for sk-ant-api03-abcdefghijk'))
     await until(async () => (await s!.api('GET', '/api/state')).body.state.tasks[0].status === 'failed')
-    expect((await s.api('GET', '/api/state')).body.state.tasks[0].errorMessage).toBe('Runtime failed to start: auth failed for [REDACTED]')
+    expect((await s.api('GET', '/api/state')).body.state.tasks[0].errorMessage).toBe('Runtime failed to start.')
     const text = rec.lines.join('\n')
     expect(text).toContain('[REDACTED]')
     expect(text).not.toContain('sk-ant-api03-abcdefghijk')

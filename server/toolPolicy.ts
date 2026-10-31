@@ -1,4 +1,5 @@
 import type { ServerConfig } from './config'
+import { REVIEW_MAX_BYTES, type ToolReviewBody } from '../src/workforce/types'
 import { formatBytes } from './limits'
 import { redactSecrets, scrub } from './redact'
 import { checkPathInWorkspace, type ResolvedWorkspace } from './workspaces'
@@ -42,11 +43,14 @@ const ALLOWED_FIELDS: Record<string, readonly string[]> = {
 
 export type ToolPolicy = { readonly allowedTools: ReadonlySet<string> }
 
-export type DenyReason = 'unknown_tool' | 'not_allowed' | 'invalid_input' | 'invalid_path' | 'missing_path' | 'outside_workspace' | 'unsafe_symlink' | 'no_workspace' | 'approval_pending' | 'not_reviewable'
+export type DenyReason = 'unknown_tool' | 'not_allowed' | 'invalid_input' | 'invalid_path' | 'missing_path' | 'outside_workspace' | 'unsafe_symlink' | 'no_workspace' | 'approval_pending' | 'not_reviewable' | 'unsafe_link'
+
+/** A path argument that passed the workspace check: the argument name and the path relative to the workspace. */
+export type CheckedPath = { readonly arg: string; readonly relative: string }
 
 export type ToolDecision =
-  | { decision: 'allow'; reason: 'read_only'; summary: string }
-  | { decision: 'ask'; reason: 'needs_approval'; summary: string }
+  | { decision: 'allow'; reason: 'read_only'; summary: string; paths?: CheckedPath[] }
+  | { decision: 'ask'; reason: 'needs_approval'; summary: string; paths?: CheckedPath[]; /** Write and Edit only: the exact content or change to review. */ review?: ToolReviewBody }
   | { decision: 'deny'; reason: DenyReason; summary: string }
 
 const DENY_TEXT: Record<DenyReason, string> = {
@@ -60,6 +64,7 @@ const DENY_TEXT: Record<DenyReason, string> = {
   no_workspace: 'the task has no workspace',
   approval_pending: 'another tool approval is already pending for this task',
   not_reviewable: 'the request cannot be shown to a reviewer in full',
+  unsafe_link: 'the file has more than one name (a hard link)',
 }
 
 export function toolPolicyFrom(config: Pick<ServerConfig, 'allowedTools'>): ToolPolicy {
@@ -105,14 +110,41 @@ function globInside(pattern: string): boolean {
   return !pattern.startsWith('/') && !pattern.startsWith('~') && !pattern.includes('\\') && !pattern.includes('..')
 }
 
+const lineCount = (text: string): number => (text === '' ? 0 : text.split('\n').length - (text.endsWith('\n') ? 1 : 0))
+const byteLength = (text: string): number => Buffer.byteLength(text)
+
+/**
+ * Characters that make what a person reads differ from what is run or written, or that cannot be seen at all: C1 controls,
+ * every format character (bidi overrides and isolates, zero-width and joiner characters, the byte order mark, soft hyphen,
+ * tag characters), line and paragraph separators (U+2028 and U+2029 end a line in JavaScript), private use, lone
+ * surrogates, variation selectors and the Hangul fillers. (A joiner also splits an emoji sequence, so those are refused too.)
+ */
+const INVISIBLE = /[\u0080-\u009f\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cs}\u180e\ufe00-\ufe0f\u{e0100}-\u{e01ef}\u115f\u1160\u3164\uffa0]/u
+/** Content may keep tab, newline and carriage return; every other control character and everything in INVISIBLE is refused. */
+const UNSAFE_TO_SHOW = new RegExp(`[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]|${INVISIBLE.source}`, 'u')
+
+/**
+ * The exact content or change of a Write or Edit, for a person to read. Null when it cannot be shown safely and whole:
+ * too big, characters that would make what is shown differ from what is written, a secret that redaction would change,
+ * or the workspace's own path (it must never reach state).
+ */
+function buildReview(tool: string, i: Record<string, unknown>, rel: string, workspacePath: string): ToolReviewBody | null {
+  const texts = tool === 'Write' ? [i.content as string] : [i.old_string as string, i.new_string as string]
+  const total = [rel, ...texts].reduce((n, t) => n + byteLength(t), 0)
+  if (total > REVIEW_MAX_BYTES) return null
+  if (texts.some((t) => UNSAFE_TO_SHOW.test(t) || redactSecrets(t) !== t || t.includes(workspacePath))) return null
+  if (tool === 'Write') return { kind: 'write', path: rel, bytes: byteLength(texts[0]), lines: lineCount(texts[0]), content: texts[0] }
+  return { kind: 'edit', path: rel, bytes: byteLength(texts[0]) + byteLength(texts[1]), lines: lineCount(texts[0]) + lineCount(texts[1]), oldString: texts[0], newString: texts[1], replaceAll: i.replace_all === true }
+}
+
 function summaryFor(tool: string, i: Record<string, unknown>, rel: string | null): string {
   switch (tool) {
     case 'Read': return `Read ${rel}`
     case 'Glob': return `Find files matching ${i.pattern} in ${rel ?? '.'}`
     case 'Grep': return `Search for ${i.pattern} in ${rel ?? '.'}`
-    // The whole content / change, JSON-escaped so newlines and quotes are visible. If it does not fit, nothing is asked.
-    case 'Write': return `Write ${rel} (${formatBytes(Buffer.byteLength(i.content as string))}): ${JSON.stringify(i.content)}`
-    case 'Edit': return `Edit ${rel}: replace ${JSON.stringify(i.old_string)} with ${JSON.stringify(i.new_string)}${i.replace_all === true ? ' (all occurrences)' : ''}`
+    // Write and Edit show a short line here; the full content or change is the review (see buildReview).
+    case 'Write': return `Write ${rel} (${formatBytes(Buffer.byteLength(i.content as string))}, ${lineCount(i.content as string)} ${lineCount(i.content as string) === 1 ? 'line' : 'lines'}): review the full content`
+    case 'Edit': return `Edit ${rel}: review the full change`
     case 'Bash': return `Run command: ${i.command}`
     case 'WebFetch': { const u = new URL(i.url as string); return `Fetch ${u.origin}${u.pathname}${u.search}` }
     default: return `Search the web for ${i.query}`
@@ -134,18 +166,27 @@ export function decideToolUse(policy: ToolPolicy, toolName: string, input: unkno
   if (spec.needsWorkspace && workspace === null) return denied('no_workspace')
 
   let rel: string | null = null
+  const paths: CheckedPath[] = []
   for (const arg of spec.pathArgs) {
     if (input[arg] === undefined) continue
     const checked = checkPathInWorkspace(workspace!.path, input[arg])
     if (!checked.ok) return denied(checked.reason)
     rel = checked.relative
+    paths.push({ arg, relative: checked.relative })
   }
+  const withPaths = paths.length > 0 ? { paths } : {}
 
   const raw = summaryFor(spec.name, input, rel)
-  if (spec.category === 'read') return { decision: 'allow', reason: 'read_only', summary: sanitizeSummary(raw) }
+  if (spec.category === 'read') return { decision: 'allow', reason: 'read_only', summary: sanitizeSummary(raw), ...withPaths }
+  // What a person approves must read the way it runs: invisible and reordering characters are refused in every ask summary.
+  if (INVISIBLE.test(raw)) return denied('not_reviewable')
   // A human approves what the summary says, so it must be the whole action: if redaction or the length cap would change
   // it, nothing is asked. (Only control characters and repeated spaces are flattened.)
   const flat = raw.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/ {2,}/g, ' ').trim()
   if (flat.length > SUMMARY_MAX_CHARS || redactSecrets(flat) !== flat) return denied('not_reviewable')
-  return { decision: 'ask', reason: 'needs_approval', summary: flat }
+  if (spec.name === 'Write' || spec.name === 'Edit') {
+    const review = buildReview(spec.name, input, rel!, workspace!.path)
+    return review ? { decision: 'ask', reason: 'needs_approval', summary: flat, review, ...withPaths } : denied('not_reviewable')
+  }
+  return { decision: 'ask', reason: 'needs_approval', summary: flat, ...withPaths }
 }

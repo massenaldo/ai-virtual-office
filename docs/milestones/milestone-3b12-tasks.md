@@ -1,7 +1,7 @@
 # Milestone 3B.1.2 — Final Security Hardening: Tasks
 
 **Spec:** [`plan.md`](plan.md) (Milestone 3B.1.2 brief). This file is my working task list for that spec.
-**Status:** Approved for execution, 2026-10-31. The decisions below are applied as written; no stage has started.
+**Status:** Done, 2026-10-31. All seven stages are implemented; stage PRs #33 to #38 and this one (#39 or the next free number). The final report is `docs/milestone-3b12-report.md`.
 **Earlier milestones:** [`milestone-3b11-tasks.md`](docs/milestones/milestone-3b11-tasks.md) ([report](docs/milestone-3b11-report.md)), [`milestone-3b1-tasks.md`](docs/milestones/milestone-3b1-tasks.md) ([report](docs/milestone-3b1-report.md)).
 
 **Note on the brief:** `plan.md` stops mid-word in Phase 6 ("Digest visibility at approval time. - Hard"). I read Phase 6 as the deferred findings in section 10 of `docs/milestone-3b11-report.md`:
@@ -190,7 +190,7 @@ I also assume the same scope restrictions as 3B.1.1, and a final report in the s
 
 Branch: `fix/3b12-1-info-disclosure`.
 
-- [ ] **1.1 Safe persistence and audit status.** (Decision 1)
+- [x] **1.1 Safe persistence and audit status.** (Decision 1)
   - Files: `server/store.ts` (`SaveErrorCode`, `saveErrorCode(error)`, `saveErrorText(code)`), `server/audit.ts` (allowlisted code), `server/http/routes.ts` (health and state), `src/workforce/api.ts` (types only; `saveError` stays `string | null`), and the tests `server/store.test.ts`, `server/http/routes.test.ts` and `server/audit.test.ts`.
   - RED first:
     - Using the existing `writeFile` test seam, make it throw a real-shaped fs error, e.g. `Object.assign(new Error(\`EACCES: permission denied, open '${dataDir}/workforce.json.tmp-1'\`), { code: 'EACCES' })`.
@@ -201,7 +201,7 @@ Branch: `fix/3b12-1-info-disclosure`.
     - The audit log failing with `EISDIR` gives `audit: { ok: false, error: 'EISDIR' }`.
     - The server log line still has the full message.
   - Verify: `npx vitest run server/store.test.ts server/audit.test.ts server/http/routes.test.ts`, then `npm test` and `npx tsc -b`.
-- [ ] **1.2 Disclosure sweep of every unauthenticated response and error path.** (Decision 2)
+- [x] **1.2 Disclosure sweep of every unauthenticated response and error path.** (Decision 2)
   - Files: new `server/http/disclosure.test.ts`; `server/taskManager.ts` (`launch()` catch, `hidePaths` extra labels; the manager gets `dataDir` through `config`), `server/http/router.ts` (log `pathOf(req)`, never the query string), and `server/taskManager.test.ts`.
   - RED first:
     - A table-driven test against a real `startTestServer` with a workspace. For each response it asserts that the body and headers contain no `dataDir`, workspace root, `process.cwd()`, `os.homedir()`, `TEST_TOKEN`, `"stack"`, `at ` frames or `Error:`. The responses are:
@@ -225,7 +225,7 @@ Branch: `fix/3b12-1-info-disclosure`.
 
 Branch: `test/3b12-2-tool-gate-integration`.
 
-- [ ] **2.1 The digest travels with the approval.** (Decision 3)
+- [x] **2.1 The digest travels with the approval.** (Decision 3)
   - Files:
     - `server/taskManager.ts`: `approveTool(taskId, request, digest)`; `toolWaiter: { approvalId, tool, digest, resolve }`; `decideApproval(taskId, approvalId, decision, opts, digest?)`.
     - `server/http/inputs.ts`: `parseApproval` accepts optional `digest`, 64 lowercase hex characters.
@@ -245,7 +245,7 @@ Branch: `test/3b12-2-tool-gate-integration`.
     - A storage round trip keeps `digest`, and a v2 file without the field loads.
     - The UI test shows the 12-character prefix.
   - Verify: `npx vitest run server/taskManager.test.ts server/http src/workforce`, then `npm test`, `npx tsc -b` and `npm run build`.
-- [ ] **2.2 Stale-approval integration tests through the real `TaskManager`.**
+- [x] **2.2 Stale-approval integration tests through the real `TaskManager`.**
   - Files: new `server/toolGate.integration.test.ts` (real `TaskManager`, real store in a temp `DATA_DIR`, real workspace from `server/test/workspaces.ts`, and `server/test/fakeProvider.ts` extended with a `useTool(taskId, request, perform)` hook that records `perform` calls). Fixes go in `toolGate.ts` or `taskManager.ts` only if a test exposes a gap.
   - RED first (each must assert `perform` was **never** called, the outcome, and the audit record `tool.stale`, `tool.denied` or none):
     - **Task state:**
@@ -266,7 +266,7 @@ Branch: `test/3b12-2-tool-gate-integration`.
       - an approval decided after its task finished → 409.
   - If a case finds a real gap, the fix goes in this branch with that test as the RED.
   - Verify: `npx vitest run server/toolGate.integration.test.ts server/toolGate.test.ts server/taskManager.test.ts`, then `npm test` and `npx tsc -b`.
-- [ ] **2.3 Doc: the gated in-process Write/Edit tool.** (Decisions 11 and 12)
+- [x] **2.3 Doc: the gated in-process Write/Edit tool.** (Decisions 11 and 12)
   - Files: new `docs/gated-tools.md`, the header of `server/runtime/claudeAgent.ts` (a pointer only), and `server/runtime/claudeAgent.test.ts`.
   - The doc covers:
     - why SDK built-in `Write` and `Edit` are never used (they execute after `canUseTool` returns);
@@ -286,7 +286,7 @@ Branch: `test/3b12-2-tool-gate-integration`.
 
 Branch: `fix/3b12-3-auth-proxy`. Opus reviews the PR before merge.
 
-- [ ] **3.1 `/api` prefix edge cases.** (Decision 6)
+- [x] **3.1 `/api` prefix edge cases.** (Decision 6)
   - Files: `scripts/apiProxy.ts` (`createApiGate` canonical-path check; proxy key `'^/api/'`) and `scripts/apiProxy.test.ts`.
   - RED first:
     - `/api`, `/apiX`, `/api?x=1`, `/API/state`, `/Api/state`, `/%61pi/state`, `/api%2Fstate`, `/%2Fapi/state` and `//api/state` each get 404 from the gate, `next()` is not called, and no `authorization` header is set;
@@ -294,7 +294,7 @@ Branch: `fix/3b12-3-auth-proxy`. Opus reviews the PR before merge.
     - `/`, `/src/main.tsx` and `/@vite/client` are untouched;
     - `apiProxyFor(...).proxy` has exactly the key `'^/api/'`.
   - Verify: `npx vitest run scripts/apiProxy.test.ts`, then `npm test`.
-- [ ] **3.2 A real Vite server, the real backend and SSE, in one automated test.**
+- [x] **3.2 A real Vite server, the real backend and SSE, in one automated test.**
   - Files: new `scripts/viteProxy.test.ts`.
     - It starts `startServer` on `PORT=0` with a temp `DATA_DIR` and a generated token.
     - Then Vite `createServer({ configFile: 'vite.config.ts', server: { port: 0 } })`, with `VITE_WORKFORCE_API_URL=/`, `PORT` and `DATA_DIR` set in `process.env` before creation and restored after.
@@ -310,7 +310,7 @@ Branch: `fix/3b12-3-auth-proxy`. Opus reviews the PR before merge.
     - no response body or header contains the token;
     - `data/api-token` is still not served (as in `viteServes.test.ts`).
   - Verify: `npx vitest run scripts/viteProxy.test.ts scripts/viteServes.test.ts`, then `npm test`.
-- [ ] **3.3 One server per `DATA_DIR`, and the token kept out of config text.** (Decisions 7 and 8)
+- [x] **3.3 One server per `DATA_DIR`, and the token kept out of config text.** (Decisions 7 and 8)
   - Files: new `server/dataDirLock.ts` and `server/dataDirLock.test.ts`; `server/app.ts` (lock before `resolveApiToken`, release in `close()`); `server/config.ts` and new `server/secret.ts` (`Secret`); `server/auth.ts`; `server/index.ts`; `scripts/devFull.ts` (clear message); `server/test/helpers.ts` if needed.
   - RED first:
     - a second `startServer` on the same `DATA_DIR` rejects with "Another server is using DATA_DIR", and the first server's token file and token are unchanged and still accepted;
@@ -321,7 +321,7 @@ Branch: `fix/3b12-3-auth-proxy`. Opus reviews the PR before merge.
     - with a capturing logger and audit log, a full E2E-style run (start, 401, 200, SSE, error paths, the second-server refusal) never prints the token;
     - after `npm run build`, `grep -r` for the test token and `api-token` in `dist/` finds nothing (this extends `check:secrets`).
   - Verify: `npx vitest run server/dataDirLock.test.ts server/auth.test.ts server/config.test.ts server/app.test.ts server/e2e`, then `npm test`, `npx tsc -b`, `npm run build`, `npm run server:build` and `npm run check:secrets`.
-- [ ] **3.4 Doc: long-term browser authentication.** (Decision 9)
+- [x] **3.4 Doc: long-term browser authentication.** (Decision 9)
   - Files: new `docs/browser-auth.md` and a README link.
   - The doc covers:
     - the threat model: other local programs, web pages, the LAN, and a future VPS;
@@ -337,7 +337,7 @@ Branch: `fix/3b12-3-auth-proxy`. Opus reviews the PR before merge.
 
 Branch: `feat/3b12-4-redaction`.
 
-- [ ] **4.1 JWT, Slack, Google, PEM, `-p` and URL passwords with `@` or `/`.** (Decision 10)
+- [x] **4.1 JWT, Slack, Google, PEM, `-p` and URL passwords with `@` or `/`.** (Decision 10)
   - Files: `server/redact.ts` (new `PATTERNS` entries, `redactPrivateKeys` scanner run first in `redactSecrets`, and a replacement for the URL userinfo rule) and `server/redact.test.ts`. Plus one sink test each in `server/taskManager.test.ts` (runtime message), `server/audit.test.ts` (detail) and `server/toolPolicy.test.ts` (a Bash command containing a JWT → `not_reviewable`).
   - RED first, positive cases:
     - a real-shaped JWT;
@@ -371,7 +371,7 @@ Branch: `feat/3b12-4-redaction`.
 
 Branch: `feat/3b12-5-write-review`. It depends on 2.1. Opus reviews the PR before merge.
 
-- [ ] **5.1 Server: the bounded `review` payload.** (Decision 4)
+- [x] **5.1 Server: the bounded `review` payload.** (Decision 4)
   - Files:
     - `server/toolPolicy.ts`: `buildReview(tool, input, rel, workspaceId)`, `REVIEW_MAX_BYTES`, `reviewable(text)` (control, C1 and bidi check plus the redaction check). The Write/Edit summary becomes the short line. `decideToolUse` returns `review` on `ask` for Write and Edit.
     - `server/taskManager.ts`: `approveTool` puts `review` (with the digest) on `approval_requested`; `cap()` applies `hidePaths` to `path` only and never cuts content.
@@ -389,7 +389,7 @@ Branch: `feat/3b12-5-write-review`. It depends on 2.1. Opus reviews the PR befor
     - the review survives a `workforce.json` round trip, and an oversized or mismatched review on load is rejected;
     - Bash with a long command is still `not_reviewable`.
   - Verify: `npx vitest run server/toolPolicy.test.ts server/taskManager.test.ts server/toolGate.integration.test.ts src/workforce/storage.test.ts`, then `npm test` and `npx tsc -b`.
-- [ ] **5.2 UI: the review pane.** (Decision 5)
+- [x] **5.2 UI: the review pane.** (Decision 5)
   - Files: new `src/workforce/ui/ApprovalReview.tsx` (and its test), `src/workforce/ui/AgentDetail.tsx` (renders it; Approve is disabled until it has been opened; sends `digest`), `src/workforce/view.ts` (`formatReviewLines`, whitespace markers), its CSS, and `src/workforce/view.test.ts`.
   - RED first:
     - with a Write review, the pane shows the workspace id, path, size, digest prefix and every line, numbered (a 2,000-line file renders all 2,000 lines, with no ellipsis);
@@ -406,7 +406,7 @@ Branch: `feat/3b12-5-write-review`. It depends on 2.1. Opus reviews the PR befor
 
 Branch: `fix/3b12-6-reliability`. It depends on 2.1 and 2.2.
 
-- [ ] **6.1 Hard links, the abort signal and checked paths on `GatedAction`.** (Decision 11)
+- [x] **6.1 Hard links, the abort signal and checked paths on `GatedAction`.** (Decision 11)
   - Files: `server/workspaces.ts` (`nlink > 1` → `unsafe_link` for an existing regular file), `server/toolPolicy.ts` (`DenyReason` plus text), `server/runtime/types.ts` (`GatedAction.signal`, `GatedAction.paths`), `server/toolGate.ts` (`deps.signal`; refuse `cancelled` if aborted just before `perform`), `server/taskManager.ts` (passes `run.abort.signal`), `server/runtime/mockProvider.ts` (unchanged behaviour), and the tests.
   - RED first:
     - `fs.linkSync(outside, ws/inside.txt)`: Read, Write and Edit of `inside.txt` are each denied `unsafe_link`;
@@ -417,7 +417,7 @@ Branch: `fix/3b12-6-reliability`. It depends on 2.1 and 2.2.
     - `action.paths` lists `{ arg: 'file_path', relative }` with no absolute path;
     - an `expectTypeOf<GatedAction>()` check.
   - Verify: `npx vitest run server/workspaces.test.ts server/toolPolicy.test.ts server/toolGate.test.ts server/toolGate.integration.test.ts server/runtime/mockProvider.test.ts`, then `npm test` and `npx tsc -b`.
-- [ ] **6.2 Open items: E2E gap and audit suppression record.**
+- [x] **6.2 Open items: E2E gap and audit suppression record.**
   - Files: `server/e2e/realServer.test.ts`, `server/audit.ts` and `server/audit.test.ts`.
   - E2E: replace the vacuous `readdirSync` check with real assertions on `audit.log`:
     - `tool.asked` for `Write` with the summary's relative path;
@@ -436,7 +436,7 @@ Branch: `fix/3b12-6-reliability`. It depends on 2.1 and 2.2.
 
 Branch: `docs/3b12-7-report`, stacked on the last merged stage.
 
-- [ ] **7.1 Full verification and Opus security review.**
+- [x] **7.1 Full verification and Opus security review.**
   - Run and record:
     - `npm test` (count and files compared with 822/63);
     - `npx tsc -b`;
@@ -452,7 +452,7 @@ Branch: `docs/3b12-7-report`, stacked on the last merged stage.
   - Then an **Opus security review** of the whole milestone diff (`git diff 1938776..HEAD`), focused on disclosure, the gate and digest binding, the review payload (truncation, rendering, Trojan Source), proxy canonicalisation, the lock, and redaction ReDoS.
   - Each Critical or High finding is fixed in this branch with a RED test first. Medium and lower findings are fixed or ruled on in the report.
   - Verify: all of the above green after the fixes.
-- [ ] **7.2 README, report and status.**
+- [x] **7.2 README, report and status.**
   - Files: `README.md` and new `docs/milestone-3b12-report.md`.
   - README changes:
     - the health shape;

@@ -1,3 +1,4 @@
+import { errorCode } from './errorCodes'
 import { appendFileSync, chmodSync, mkdirSync, renameSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Logger } from './log'
@@ -26,14 +27,14 @@ export type AuditRecord = { at: string; seq: number } & AuditInput
 
 export type AuditStatus = { ok: boolean; error: string | null }
 
-export type AuditLog = { write(entry: AuditInput): void; readonly status: AuditStatus; readonly filePath: string }
+export type AuditLog = { write(entry: AuditInput): void; /** Writes the pending suppressed-count record, if any. Safe to call more than once. */ close(): void; readonly status: AuditStatus; readonly filePath: string }
 
 /** hide: absolute paths that are replaced by '<workspace-root>' wherever they appear in `detail`. */
 export type AuditOptions = { dataDir: string; maxBytes: number; now: () => string; log: Logger; hide?: string[] }
 
-export const nullAudit: AuditLog = { write: () => {}, status: { ok: true, error: null }, filePath: '' }
+export const nullAudit: AuditLog = { write: () => {}, close: () => {}, status: { ok: true, error: null }, filePath: '' }
 
-const codeOf = (error: unknown): string => (error as NodeJS.ErrnoException).code ?? 'write failed'
+const codeOf = errorCode
 
 export function openAuditLog({ dataDir, maxBytes, now, log, hide = [] }: AuditOptions): AuditLog {
   const filePath = join(dataDir, AUDIT_FILE)
@@ -98,24 +99,30 @@ export function openAuditLog({ dataDir, maxBytes, now, log, hide = [] }: AuditOp
     }
   }
 
+  const flushSuppressed = () => {
+    if (suppressed === 0) return
+    const count = suppressed
+    suppressed = 0
+    emit({ action: 'request.rejected', actor: 'system', reason: 'suppressed', detail: `${count} rejected requests were not logged` })
+  }
+
   return {
     get status() { return status },
     filePath,
     write(entry) {
+      // A new window starts with the first record of any kind, so the count of what was dropped comes right before it.
+      const window = Math.floor(Date.parse(now()) / 60000)
+      if (window !== windowStart) {
+        windowStart = window
+        inWindow = 0
+        flushSuppressed()
+      }
       if (entry.action === 'request.rejected' && entry.reason !== 'suppressed') {
-        const window = Math.floor(Date.parse(now()) / 60000)
-        if (window !== windowStart) {
-          windowStart = window
-          inWindow = 0
-          if (suppressed > 0) {
-            emit({ action: 'request.rejected', actor: 'system', reason: 'suppressed', detail: `${suppressed} rejected requests were not logged` })
-            suppressed = 0
-          }
-        }
         if (inWindow >= REJECTED_PER_MINUTE) { suppressed++; return }
         inWindow++
       }
       emit(entry)
     },
+    close: flushSuppressed,
   }
 }

@@ -1,7 +1,8 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { linkSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { REVIEW_MAX_BYTES } from '../src/workforce/types'
 import { MOCK_DEMO_WRITE } from './runtime/mockProvider'
 import { decideToolUse, DEFAULT_ALLOWED_TOOLS, sanitizeSummary, TOOL_CATALOGUE, toolDeniedMessage, type ToolDecision } from './toolPolicy'
 import { makeWorkspaceRoot } from './test/workspaces'
@@ -44,15 +45,15 @@ describe('decideToolUse', () => {
   })
 
   it('allows read-only tools inside the workspace', () => {
-    expect(decide('Read', { file_path: join(W.path, 'notes.md') })).toEqual({ decision: 'allow', reason: 'read_only', summary: 'Read notes.md' })
+    expect(decide('Read', { file_path: join(W.path, 'notes.md') })).toEqual({ decision: 'allow', reason: 'read_only', summary: 'Read notes.md', paths: [{ arg: 'file_path', relative: 'notes.md' }] })
     expect(decide('Glob', { pattern: '**/*.md' })).toMatchObject({ decision: 'allow', summary: 'Find files matching **/*.md in .' })
     expect(decide('Grep', { pattern: 'TODO', path: '.' })).toMatchObject({ decision: 'allow', summary: 'Search for TODO in .' })
   })
 
   it('always asks for write, execute and network tools even when allowlisted', () => {
     const ask = (summary: string): ToolDecision => ({ decision: 'ask', reason: 'needs_approval', summary })
-    expect(decide('Write', { file_path: 'notes.md', content: 'hello' })).toEqual(ask('Write notes.md (5 B): "hello"'))
-    expect(decide('Edit', { file_path: 'notes.md', old_string: 'h', new_string: 'H' })).toEqual(ask('Edit notes.md: replace "h" with "H"'))
+    expect(decide('Write', { file_path: 'notes.md', content: 'hello' })).toMatchObject(ask('Write notes.md (5 B, 1 line): review the full content'))
+    expect(decide('Edit', { file_path: 'notes.md', old_string: 'h', new_string: 'H' })).toMatchObject(ask('Edit notes.md: review the full change'))
     expect(decide('Bash', { command: 'npm test' })).toEqual(ask('Run command: npm test'))
     expect(decide('WebFetch', { url: 'https://example.com/a?x=1#h', prompt: 'p' })).toEqual(ask('Fetch https://example.com/a?x=1'))
     expect(decide('WebSearch', { query: 'vite ssr' })).toEqual(ask('Search the web for vite ssr'))
@@ -112,13 +113,98 @@ describe('decideToolUse', () => {
     expect(decide('Bash', { command: 'echo 1\nls -l' })).toMatchObject({ decision: 'ask', summary: 'Run command: echo 1 ls -l' })
   })
 
-  it('shows the whole content of a Write and the whole change of an Edit, or refuses to ask', () => {
+  describe('the review of a Write or Edit', () => {
     const ask = (summary: string): ToolDecision => ({ decision: 'ask', reason: 'needs_approval', summary })
-    expect(decide('Write', { file_path: 'run.sh', content: 'echo hi\nrm -rf x' })).toEqual(ask('Write run.sh (16 B): "echo hi\\nrm -rf x"'))
-    expect(decide('Edit', { file_path: 'a.txt', old_string: 'x', new_string: 'y', replace_all: true })).toEqual(ask('Edit a.txt: replace "x" with "y" (all occurrences)'))
-    expect(decide('Write', { file_path: 'big.txt', content: 'x'.repeat(500) })).toEqual(deny('not_reviewable'))
-    expect(decide('Edit', { file_path: 'a.txt', old_string: 'x'.repeat(150), new_string: 'y'.repeat(150) })).toEqual(deny('not_reviewable'))
-    expect(decide('Write', { file_path: 'k.txt', content: 'api_key=abc123456' })).toEqual(deny('not_reviewable'))
+    const review = (tool: string, input: unknown) => { const d = decide(tool, input); return d.decision === 'ask' ? d.review : undefined }
+    const secret = ['sk', 'ant', 'api03', 'abcdefghijklmnop'].join('-')
+
+    it('gives a short summary and the exact content for a large multi-line Write', () => {
+      const content = `${'tab\there  \r\n'.repeat(400)}emoji 😀 end`
+      expect(content.length).toBeGreaterThan(4000)
+      const d = decide('Write', { file_path: 'sub/big.txt', content })
+      expect(d.decision).toBe('ask')
+      expect(d.summary.length).toBeLessThanOrEqual(200)
+      expect(d.summary).toBe('Write sub/big.txt (5 KB, 401 lines): review the full content')
+      expect(review('Write', { file_path: 'sub/big.txt', content })).toEqual({ kind: 'write', path: 'sub/big.txt', bytes: Buffer.byteLength(content), lines: 401, content })
+    })
+
+    it('gives an Edit its old and new text and the all-occurrences flag', () => {
+      expect(review('Edit', { file_path: 'a.txt', old_string: 'x\ny', new_string: 'z', replace_all: true })).toEqual({ kind: 'edit', path: 'a.txt', bytes: 4, lines: 3, oldString: 'x\ny', newString: 'z', replaceAll: true })
+      expect(review('Edit', { file_path: 'a.txt', old_string: 'x', new_string: 'y' })).toMatchObject({ replaceAll: false })
+      expect(decide('Edit', { file_path: 'a.txt', old_string: 'x', new_string: 'y' })).toMatchObject(ask('Edit a.txt: review the full change'))
+    })
+
+    it('allows exactly the size limit and refuses one byte more', () => {
+      const room = REVIEW_MAX_BYTES - Buffer.byteLength('f.txt')
+      expect(decide('Write', { file_path: 'f.txt', content: 'a'.repeat(room) }).decision).toBe('ask')
+      expect(decide('Write', { file_path: 'f.txt', content: 'a'.repeat(room + 1) })).toEqual(deny('not_reviewable'))
+      const half = Math.floor(room / 2)
+      expect(decide('Edit', { file_path: 'f.txt', old_string: 'a'.repeat(half), new_string: 'b'.repeat(room - half) }).decision).toBe('ask')
+      expect(decide('Edit', { file_path: 'f.txt', old_string: 'a'.repeat(half), new_string: 'b'.repeat(room - half + 1) })).toEqual(deny('not_reviewable'))
+    })
+
+    it.each([
+      ['a bidi override', 'a\u202eb'],
+      ['a bidi isolate', 'a\u2066b'],
+      ['a bell', 'a\u0007b'],
+      ['a C1 control', 'a\u0085b'],
+      ['a null', 'a\u0000b'],
+      ['a line separator', 'a\u2028b'],
+      ['a paragraph separator', 'a\u2029b'],
+      ['a zero-width space', 'a\u200bb'],
+      ['a left-to-right mark', 'a\u200eb'],
+      ['a byte order mark', 'a\ufeffb'],
+      ['a soft hyphen', 'a\u00adb'],
+      ['a tag character', 'a\u{e0041}b'],
+      ['a variation selector', 'a\ufe0fb'],
+      ['a Hangul filler', 'a\u3164b'],
+      ['a lone surrogate', 'a\ud800b'],
+      ['a secret', `key ${secret}`],
+      ['a key=value secret', 'api_key=abc123456'],
+    ])('refuses content with %s', (_name, content) => {
+      expect(decide('Write', { file_path: 'f.txt', content })).toEqual(deny('not_reviewable'))
+      expect(decide('Edit', { file_path: 'f.txt', old_string: 'x', new_string: content })).toEqual(deny('not_reviewable'))
+    })
+
+    it('refuses invisible and reordering characters in a command or any other approval summary too', () => {
+      for (const bad of ['\u202e', '\u2028', '\u200b', '\ufeff', '\u0085']) expect(decide('Bash', { command: `echo a${bad}b` })).toEqual(deny('not_reviewable'))
+      expect(decide('WebSearch', { query: 'a\u202eb' })).toEqual(deny('not_reviewable'))
+      expect(decide('Bash', { command: 'echo 1\nls -l' })).toMatchObject({ decision: 'ask', summary: 'Run command: echo 1 ls -l' })
+    })
+
+    it('shows tabs, newlines and carriage returns as they are', () => {
+      expect(decide('Write', { file_path: 'f.txt', content: 'a\tb\r\nc\n' }).decision).toBe('ask')
+    })
+
+    it('keeps the path relative and refuses content that contains the workspace path', () => {
+      expect(review('Write', { file_path: join(W.path, 'sub', 'x.txt'), content: 'x' })).toMatchObject({ path: 'sub/x.txt' })
+      expect(decide('Write', { file_path: 'f.txt', content: `root=${W.path}` })).toEqual(deny('not_reviewable'))
+    })
+
+    it('refuses a target path too long for the summary line', () => {
+      expect(decide('Write', { file_path: `${'d/'.repeat(120)}f.txt`, content: 'x' })).toEqual(deny('not_reviewable'))
+    })
+
+    it('gives no review to other tools, and a long command is still not reviewable', () => {
+      expect(review('Bash', { command: 'ls' })).toBeUndefined()
+      expect(decide('Bash', { command: 'x'.repeat(500) })).toEqual(deny('not_reviewable'))
+      expect(decide('Read', { file_path: 'notes.md' })).not.toHaveProperty('review')
+    })
+  })
+
+  it('refuses Read, Write and Edit of a hard-linked file', () => {
+    linkSync(join(outside, 'secret.txt'), join(W.path, 'inside.txt'))
+    expect(decide('Read', { file_path: 'inside.txt' })).toEqual(deny('unsafe_link'))
+    expect(decide('Write', { file_path: 'inside.txt', content: 'x' })).toEqual(deny('unsafe_link'))
+    expect(decide('Edit', { file_path: 'inside.txt', old_string: 'a', new_string: 'b' })).toEqual(deny('unsafe_link'))
+    expect(toolDeniedMessage('Read', 'unsafe_link')).toBe('Tool "Read" denied by policy: the file has more than one name (a hard link).')
+  })
+
+  it('lists the checked paths, relative, with the argument they came from', () => {
+    expect(decide('Read', { file_path: join(W.path, 'notes.md') })).toMatchObject({ decision: 'allow', paths: [{ arg: 'file_path', relative: 'notes.md' }] })
+    expect(decide('Grep', { pattern: 'x', path: 'sub' })).toMatchObject({ paths: [{ arg: 'path', relative: 'sub' }] })
+    expect(decide('Bash', { command: 'ls' })).not.toHaveProperty('paths')
+    expect(JSON.stringify(decide('Write', { file_path: 'sub/a.txt', content: 'x' }))).not.toContain(W.path)
   })
 
   it('refuses glob patterns that expand to a parent directory', () => {
@@ -128,7 +214,7 @@ describe('decideToolUse', () => {
   })
 
   it('refuses to ask about a command that contains a secret of the new shapes', () => {
-    for (const command of [`git clone https://u:p@example.com/r.git`, `echo ghp_${'a1B2c3D4e5'.repeat(4)}`, 'mysql --password hunter2', 'export AWS=AKIAIOSFODNN7EXAMPLE'])
+    for (const command of [`curl -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6y' x`, 'mysql -uroot -pS3cret db', 'psql postgres://u:pa/ss@db/app', `git clone https://u:p@example.com/r.git`, `echo ghp_${'a1B2c3D4e5'.repeat(4)}`, 'mysql --password hunter2', 'export AWS=AKIAIOSFODNN7EXAMPLE'])
       expect(decide('Bash', { command })).toEqual(deny('not_reviewable'))
   })
 

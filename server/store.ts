@@ -1,3 +1,4 @@
+import { errorCode, type ErrorCode } from './errorCodes'
 import { closeSync, copyFileSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
 import { createDemoWorkforce } from '../src/workforce/demo'
@@ -21,7 +22,7 @@ export type StoreOptions = {
   writeFile?: (path: string, text: string) => void
 }
 
-export type WorkforceStore = { readonly state: WorkforceState; readonly load: StoreLoad; readonly saveError: string | null; readonly filePath: string; commit(next: WorkforceState): boolean }
+export type WorkforceStore = { readonly state: WorkforceState; readonly load: StoreLoad; readonly saveError: ErrorCode | null; readonly filePath: string; commit(next: WorkforceState): boolean }
 
 /** Write to a private temp file, flush it, then rename over the target: a crash leaves the old file or the new one, never half of one. */
 export function writeFileAtomic(path: string, text: string): void {
@@ -51,7 +52,7 @@ export function openWorkforceStore({ dataDir, now, log, onCommit, writeFile = wr
   mkdirSync(dataDir, { recursive: true })
   const filePath = join(dataDir, WORKFORCE_FILE)
   const backupPath = join(dataDir, WORKFORCE_BACKUP_FILE)
-  let saveError: string | null = null
+  let saveError: ErrorCode | null = null
   const logged = new Set<string>()
 
   const save = (state: WorkforceState) => {
@@ -59,10 +60,12 @@ export function openWorkforceStore({ dataDir, now, log, onCommit, writeFile = wr
       writeFile(filePath, serializeWorkforce(state))
       saveError = null
     } catch (error) {
-      saveError = error instanceof Error ? error.message : 'Saving failed.'
-      if (!logged.has(saveError)) {
-        logged.add(saveError)
-        log.error(`Couldn't save workforce data to ${filePath}: ${saveError}`)
+      // Only the code is kept (it reaches /api/health and /api/state); the full message, with the path, goes to the server log only.
+      saveError = errorCode(error)
+      const message = error instanceof Error ? error.message : 'Saving failed.'
+      if (!logged.has(message)) {
+        logged.add(message)
+        log.error(`Couldn't save workforce data to ${filePath}: ${message}`)
       }
     }
   }

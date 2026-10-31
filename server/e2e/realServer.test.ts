@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { WorkforceEvent } from '../../src/workforce/api'
 import { startServer, type RunningServer } from '../app'
+import { AUDIT_FILE } from '../audit'
 import { TOKEN_FILE } from '../auth'
 import { parseConfig } from '../config'
 import { silentLogger } from '../log'
@@ -47,7 +48,7 @@ async function call(method: string, path: string, opts: { body?: unknown; auth?:
   try { body = text === '' ? null : JSON.parse(text) } catch { /* not JSON */ }
   return { status: res.status, body, headers: res.headers }
 }
-const state = async () => (await call('GET', '/api/state')).body.state as { agents: Array<{ id: string; status: string }>; tasks: Array<{ id: string; agentId: string; status: string; pendingApproval: { id: string; tool: string } | null }> }
+const state = async () => (await call('GET', '/api/state')).body.state as { agents: Array<{ id: string; status: string }>; tasks: Array<{ id: string; agentId: string; status: string; pendingApproval: { id: string; tool: string; digest: string | null } | null }> }
 const open = async (opts?: Parameters<typeof openEventStream>[1]) => {
   const x = await openEventStream(server.url, { token, ...opts })
   streams.push(x)
@@ -96,12 +97,25 @@ describe('the real server, end to end', () => {
 
   it('takes the demo approval through the gate: waiting, approve, completed', async () => {
     expect((await call('POST', `/api/demo/tasks/${forgeTask}/request-approval`)).status).toBe(202)
-    await stream.until((e) => e.type === 'task.waiting_for_approval')
+    const waitingEvents = await stream.until((e) => e.type === 'task.waiting_for_approval')
+    const patched = (waitingEvents.at(-1) as { patch: { tasks: Array<{ id: string; pendingApproval: { digest: string; review: { kind: string } } | null }> } }).patch.tasks.find((t) => t.id === forgeTask)
+    expect(patched?.pendingApproval?.digest).toMatch(/^[0-9a-f]{64}$/)
+    expect(patched?.pendingApproval?.review.kind).toBe('write')
     const task = (await state()).tasks.find((t) => t.id === forgeTask)!
     expect(task).toMatchObject({ status: 'waiting_for_approval', pendingApproval: { tool: 'Write' } })
-    expect((await call('POST', `/api/tasks/${forgeTask}/approval`, { body: { approvalId: task.pendingApproval!.id, decision: 'approve' } })).status).toBe(200)
+    expect(task.pendingApproval!.digest).toMatch(/^[0-9a-f]{64}$/)
+    const wrong = await call('POST', `/api/tasks/${forgeTask}/approval`, { body: { approvalId: task.pendingApproval!.id, decision: 'approve', digest: '0'.repeat(64) } })
+    expect(wrong.status).toBe(409)
+    expect((await call('POST', `/api/tasks/${forgeTask}/approval`, { body: { approvalId: task.pendingApproval!.id, decision: 'approve' } })).status).toBe(409)
+    expect((await call('POST', `/api/tasks/${forgeTask}/approval`, { body: { approvalId: task.pendingApproval!.id, decision: 'approve', digest: task.pendingApproval!.digest } })).status).toBe(200)
     await stream.until((e) => e.type === 'task.completed', 5000)
     expect((await state()).tasks.find((t) => t.id === forgeTask)!.status).toBe('completed')
+    // The audit log tells the same story the stream did: the gate asked about the Write, a person decided, nothing went stale.
+    const audit = readFileSync(join(dataDir, AUDIT_FILE), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.taskId === forgeTask)
+    expect(audit.find((r) => r.action === 'tool.asked')).toMatchObject({ tool: 'Write', decision: 'ask', detail: 'Write simulated.txt (39 B, 1 line): review the full content' })
+    expect(audit.find((r) => r.action === 'approval.decided')).toMatchObject({ decision: 'approve' })
+    expect(audit.map((r) => r.action)).not.toContain('tool.stale')
+    // The mock's perform writes nothing.
     expect(readdirSync(ws.path('sandbox'))).toEqual([])
   })
 

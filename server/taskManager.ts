@@ -1,4 +1,5 @@
 import { realpathSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { activeTaskFor, applyRuntimeEvent, assignTask, cancelTask as forceCancel, decideApproval as recordDecision, isActiveTask, markStarting, removeAgent as dropAgent, requestCancel, timeOutTask, validateTaskInput, type TaskInput } from '../src/workforce/operations'
 import { createId } from '../src/layout/operations'
 import type { RuntimeEvent } from '../src/workforce/runtime/types'
@@ -41,7 +42,7 @@ export type TaskManagerOptions = {
   store: WorkforceStore
   provider: ServerRuntimeProvider
   policy: ToolPolicy
-  config: Pick<ServerConfig, 'taskTimeoutMs' | 'cancelGraceMs' | 'approvalTimeoutMs' | 'maxMessageBytes' | 'maxTaskOutputBytes' | 'workspaceRoot' | 'workspaces'>
+  config: Pick<ServerConfig, 'taskTimeoutMs' | 'cancelGraceMs' | 'approvalTimeoutMs' | 'maxMessageBytes' | 'maxTaskOutputBytes' | 'workspaceRoot' | 'workspaces'> & { dataDir?: string }
   now: () => string
   log: Logger
   /** Audit seam: called for each lifecycle step the manager takes. */
@@ -168,14 +169,16 @@ export class TaskManager {
             return r.ok ? { ok: true, workspace: r.workspace } : { ok: false }
           },
           isLive: () => { const t = this.task(taskId); return !!t && (t.status === 'running' || t.status === 'waiting_for_approval') },
-          approve: (request) => this.approveTool(taskId, request),
+          signal: run.abort.signal,
+          approve: (request, digest) => this.approveTool(taskId, request, digest),
           stale: (tool, detail) => { const t = this.task(taskId); if (t) this.report('tool.stale', t, { actor: 'runtime', tool, decision: 'deny', reason: 'stale_approval', detail }) },
         }),
         audit: (note) => { const t = this.task(taskId); if (t) this.report('runtime.note', t, { actor: 'runtime', detail: note }) },
       })
     } catch (error) {
       this.log.error(`Runtime failed to start task ${taskId}`, error)
-      outcome = { ok: false as const, error: `Runtime failed to start: ${error instanceof Error ? error.message : String(error)}` }
+      // The message can name files and folders; the real one is in the server log above, state gets a fixed sentence.
+      outcome = { ok: false as const, error: 'Runtime failed to start.' }
     }
     if (!outcome.ok) {
       this.onEvent({ type: 'failed', taskId, error: outcome.error })
@@ -292,11 +295,12 @@ export class TaskManager {
     this.report('task.force_cancelled', task)
   }
 
-  decideApproval(taskId: string, approvalId: string, decision: ApprovalDecision, opts: CallOptions = {}): ManagerResult<{ task: AgentTask }> {
+  /** An approval with a digest is for one exact action: the decision must name the same digest, or it is refused. */
+  decideApproval(taskId: string, approvalId: string, decision: ApprovalDecision, opts: CallOptions = {}, digest?: string): ManagerResult<{ task: AgentTask }> {
     const task = this.task(taskId)
     if (!task) return { ok: false, code: 'not_found', error: 'Task not found.' }
     if (task.status !== 'waiting_for_approval' || !task.pendingApproval) return { ok: false, code: 'conflict', error: 'Task is not waiting for approval.' }
-    if (task.pendingApproval.id !== approvalId) return { ok: false, code: 'conflict', error: 'That approval is no longer pending.' }
+    if (task.pendingApproval.id !== approvalId || (task.pendingApproval.digest !== null && task.pendingApproval.digest !== digest)) return { ok: false, code: 'conflict', error: 'That approval is no longer pending.' }
     this.store.commit(recordDecision(this.state, taskId, approvalId, decision, this.now(), this.source))
     const run = this.runs.get(taskId)
     if (run) this.clearApproval(run)
@@ -338,7 +342,7 @@ export class TaskManager {
    * The gate a runtime goes through before using a tool. The policy decides; an `ask` becomes the existing
    * waiting_for_approval state, approval timer and approval endpoint. Every state change happens before this returns.
    */
-  private approveTool(taskId: string, request: ToolRequest): Promise<ToolGateResult> {
+  private approveTool(taskId: string, request: ToolRequest, digest: string): Promise<ToolGateResult> {
     const run = this.runs.get(taskId)
     const task = this.task(taskId)
     if (!run || !task || (task.status !== 'running' && task.status !== 'waiting_for_approval')) return Promise.resolve(CANCELLED)
@@ -359,7 +363,7 @@ export class TaskManager {
     this.report('tool.asked', task, { actor: 'runtime', tool, decision: 'ask', reason: 'needs_approval', detail: d.summary })
     const approvalId = createId('approval')
     const promise = new Promise<ToolGateResult>((resolve) => { run.toolWaiter = { approvalId, tool, resolve } })
-    this.onEvent({ type: 'approval_requested', taskId, approvalId, tool, summary: d.summary })
+    this.onEvent({ type: 'approval_requested', taskId, approvalId, tool, summary: d.summary, digest, ...(d.review && run.workspace ? { review: { ...d.review, workspaceId: run.workspace.id, digest } } : {}) })
     this.report('approval.requested', task, { actor: 'runtime', tool, detail: `approvalId=${approvalId}` })
     return promise
   }
@@ -394,7 +398,9 @@ export class TaskManager {
       roots.add(workspaceRoot)
       try { roots.add(realpathSync(workspaceRoot)) } catch { /* the root vanished: the configured spelling still gets replaced */ }
     }
-    const pairs: Array<[string, string]> = [...(run.workspace ? [[run.workspace.path, '<workspace>'] as [string, string]] : []), ...[...roots].map((r): [string, string] => [r, '<workspace-root>'])]
+    // Backstop labels for the other folders a message could name: the data folder, the working folder, the home folder.
+    const others: Array<[string, string]> = [[this.config.dataDir ?? '', '<data-dir>'], [process.cwd(), '<cwd>'], [homedir(), '<home>']]
+    const pairs: Array<[string, string]> = [...(run.workspace ? [[run.workspace.path, '<workspace>'] as [string, string]] : []), ...[...roots].map((r): [string, string] => [r, '<workspace-root>']), ...others.filter(([p]) => p.length > 1)]
     return pairs.sort((x, y) => y[0].length - x[0].length).reduce((t, [path, label]) => (path === '' ? t : t.split(path).join(label)), text)
   }
 
@@ -426,7 +432,7 @@ export class TaskManager {
       }
       case 'progress': return { ...event, message: cut(clean(event.message)) }
       case 'failed': return { ...event, error: cut(clean(event.error)) }
-      case 'approval_requested': return { ...event, summary: this.hidePaths(run, sanitizeSummary(event.summary)) }
+      case 'approval_requested': return { ...event, summary: this.hidePaths(run, sanitizeSummary(event.summary)), ...(event.review ? { review: { ...event.review, path: this.hidePaths(run, event.review.path) } } : {}) }
       case 'completed': {
         const t = truncateUtf8(clean(event.summary), perMessage)
         return { ...event, summary: fit(t.truncated ? t.text + messageTruncatedMarker(perMessage) : t.text) }

@@ -4,10 +4,11 @@ import { DEPARTMENTS } from '../../layout/catalog'
 import type { OfficeLayout } from '../../layout/types'
 import type { Workforce } from '../useWorkforce'
 import type { Awaitable } from '../controller'
+import ApprovalReview from './ApprovalReview'
 import { useBusy } from './useBusy'
 import { DESCRIPTION_MAX, TITLE_MAX, isActiveTask, type TaskInput } from '../operations'
 import type { Agent } from '../types'
-import { TASK_RUNTIME_LABEL, TASK_STATUS_LABEL, agentStatusText, agentTimeline, deskOptions, deskStatus, formatTime } from '../view'
+import { TASK_RUNTIME_LABEL, TASK_STATUS_LABEL, agentStatusText, agentTimeline, approveEnabled, shortDigest, deskOptions, deskStatus, formatTime } from '../view'
 import { StatusDot } from './AgentList'
 
 export type AgentDetailProps = { workforce: Workforce; layout: OfficeLayout; agent: Agent; onBack(): void; onEdit(): void; onRemove(): void; onFocusDesk(): void }
@@ -46,10 +47,12 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
   }
   const [actionError, setActionError] = useState<string | null>(null)
   const decision = useBusy()
+  // The approval whose full change has been opened: Approve stays disabled until then (Deny never is).
+  const [reviewOpenFor, setReviewOpenFor] = useState<string | null>(null)
   const cancel = useBusy()
   const decide = async (value: 'approve' | 'deny') => {
     if (!task?.pendingApproval) return
-    const r = await decision.run(() => actions.decideApproval(task.id, task.pendingApproval!.id, value))
+    const r = await decision.run(() => actions.decideApproval(task.id, task.pendingApproval!.id, value, task.pendingApproval!.digest))
     if (r !== undefined) setActionError(r.ok ? null : r.error)
   }
   const cancelTask = async () => {
@@ -101,8 +104,10 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
     {task?.status === 'waiting_for_approval' && task.pendingApproval && <div className="approval-card" role="status">
       <div className="task-card-head"><strong>Approval needed</strong><span className="agent-chip">{task.pendingApproval.tool}</span></div>
       <p>{task.pendingApproval.summary}</p>
+      {task.pendingApproval.review && <ApprovalReview review={task.pendingApproval.review} open={reviewOpenFor === task.pendingApproval.id} onToggle={() => setReviewOpenFor(reviewOpenFor === task.pendingApproval!.id ? null : task.pendingApproval!.id)}/>}
+      {shortDigest(task.pendingApproval.digest) && <small title={task.pendingApproval.digest ?? undefined}>Action {shortDigest(task.pendingApproval.digest)}</small>}
       <div className="panel-actions">
-        <button className="panel-button primary" disabled={decision.busy} onClick={() => decide('approve')}><Check size={13}/> Approve</button>
+        <button className="panel-button primary" disabled={decision.busy || !approveEnabled(task.pendingApproval.review, reviewOpenFor === task.pendingApproval.id)} onClick={() => decide('approve')}><Check size={13}/> Approve</button>
         <button className="panel-button danger" disabled={decision.busy} onClick={() => decide('deny')}><X size={13}/> Deny</button>
       </div>
       {actionError && <p className="form-error" role="alert">{actionError}</p>}

@@ -103,6 +103,9 @@ export function workforceNotice(problem: WorkforceLoadProblem, preserved: Preser
   return preserved ? `${lead} ${PRESERVED_SENTENCE[preserved]}` : lead
 }
 
+/** The first 12 hex characters of an approval's action digest, for display. */
+export const shortDigest = (digest: string | null): string | null => (digest === null ? null : digest.slice(0, 12))
+
 export const TASK_RUNTIME_LABEL: Record<TaskRuntime, string> = { mock: 'Simulated run', claude: 'Claude runtime' }
 
 export type EnvironmentBadge = { label: string; title: string; tone: 'browser' | 'backend' | 'unavailable' }
@@ -142,3 +145,31 @@ export function agentStatusText(s: WorkforceState, agent: Agent): string {
   const phase = markerPhase(activeTaskFor(s, agent.id))
   return phase ? TASK_STATUS_LABEL[phase] : AGENT_STATUS_LABEL[agent.status]
 }
+
+export type ReviewSegment = { kind: 'text' | 'tab' | 'trail' | 'cr'; text: string }
+export type ReviewLine = { no: number; segments: ReviewSegment[] }
+
+/**
+ * The lines of a review's text for display, numbered from 1, every one of them (nothing is cut). Tabs, trailing spaces and
+ * a carriage return are their own segments so the pane can mark them; the characters themselves are never changed.
+ */
+export function formatReviewLines(text: string): ReviewLine[] {
+  if (text === '') return []
+  const pieces = text.split('\n')
+  if (text.endsWith('\n')) pieces.pop()
+  return pieces.map((raw, i) => {
+    const cr = raw.endsWith('\r')
+    const body = cr ? raw.slice(0, -1) : raw
+    const trail = /[ ]+$/.exec(body)?.[0] ?? ''
+    const main = trail ? body.slice(0, -trail.length) : body
+    const segments: ReviewSegment[] = []
+    // Every tab and every carriage return is its own marked segment, wherever it sits in the line.
+    for (const part of main.split(/([\t\r])/)) if (part !== '') segments.push(part === '\t' ? { kind: 'tab', text: part } : part === '\r' ? { kind: 'cr', text: part } : { kind: 'text', text: part })
+    if (trail) segments.push({ kind: 'trail', text: trail })
+    if (cr) segments.push({ kind: 'cr', text: '\r' })
+    return { no: i + 1, segments }
+  })
+}
+
+/** Approve is available only after the full change has been opened; with no review (a simulated approval, Bash) it always is. */
+export const approveEnabled = (review: unknown, opened: boolean): boolean => review === null || opened

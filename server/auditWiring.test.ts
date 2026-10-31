@@ -46,13 +46,13 @@ describe('audit wiring', () => {
     await until(async () => (await state(s!)).tasks[0].status === 'running')
     await s.api('POST', `/api/demo/tasks/${id}/request-approval`)
     const pending = (await state(s)).tasks[0].pendingApproval
-    const decided = await s.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'approve' })
+    const decided = await s.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'approve', digest: pending.digest })
     const R2 = decided.headers.get('x-request-id')
     await until(async () => (await state(s!)).tasks[0].status === 'completed')
     const records = readAudit(s).filter((r) => r.taskId === id)
     expect(records.map((r) => r.action)).toEqual(['task.start', 'tool.asked', 'approval.requested', 'approval.decided'])
     expect(records[0]).toMatchObject({ actor: 'api', requestId: R, workspaceId: 'sandbox' })
-    expect(records[1]).toMatchObject({ actor: 'runtime', tool: 'Write', detail: 'Write simulated.txt (39 B): "Simulated content (nothing is written)."' })
+    expect(records[1]).toMatchObject({ actor: 'runtime', tool: 'Write', detail: 'Write simulated.txt (39 B, 1 line): review the full content' })
     expect(records[3]).toMatchObject({ decision: 'approve', requestId: R2 })
   })
 

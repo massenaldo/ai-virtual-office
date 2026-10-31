@@ -154,3 +154,18 @@ textarea.field-input{resize:vertical;min-height:54px;font-family:inherit}
 .workforce .panel-title{flex-wrap:wrap;justify-content:flex-start}
 .workforce .panel-title .connection-pill{margin-left:auto;text-transform:none;letter-spacing:0;white-space:nowrap}
 .workforce .panel-title .mock-badge{white-space:nowrap}
+.approval-review{margin-top:8px}
+.review-facts{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;margin:0 0 6px;font-size:10px}
+.review-facts div{min-width:0}
+.review-facts dt{color:#6e7a8c;font-size:9px;text-transform:uppercase;letter-spacing:.06em}
+.review-facts dd{margin:0;color:#e9edf4;overflow-wrap:anywhere;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.review-label{margin:8px 0 3px;font-size:9px;color:#aab4c3;text-transform:uppercase;letter-spacing:.06em}
+.review-pane{margin:0;max-height:320px;overflow:auto;background:#0e141c;border:1px solid #29323e;border-radius:6px;padding:6px 0;font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:#d6dde8;white-space:pre}
+.review-line{display:flex}
+.review-no{flex:none;min-width:38px;padding:0 8px;text-align:right;color:#5f6b7c;user-select:none}
+.review-text{flex:1}
+.review-empty{padding:0 10px;color:#6e7a8c}
+.ws-tab{color:#83c1df;background:#1d2b36}
+.ws-trail{color:#e5b878;background:#3a3025}
+.ws-cr{color:#c5baff}
+.review-flag{margin:6px 0 0;font-size:10px;color:#f1d6a6}

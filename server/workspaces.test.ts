@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { linkSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -86,6 +86,17 @@ describe('checkPathInWorkspace', () => {
     symlinkSync(outside, join(W, 'link'))
     symlinkSync(join(outside, 'secret.txt'), join(W, 'filelink'))
     symlinkSync(join(ws.root, 'nope'), join(W, 'dangling'))
+  })
+
+  it('refuses a file with more than one name (a hard link), and only an existing regular file', () => {
+    linkSync(join(outside, 'secret.txt'), join(W, 'inside.txt'))
+    expect(checkPathInWorkspace(W, 'inside.txt')).toEqual({ ok: false, reason: 'unsafe_link' })
+    expect(checkPathInWorkspace(W, join(W, 'inside.txt'))).toEqual({ ok: false, reason: 'unsafe_link' })
+    expect(checkPathInWorkspace(W, 'notes.md')).toEqual({ ok: true, relative: 'notes.md' })
+    expect(checkPathInWorkspace(W, 'not-yet.txt')).toEqual({ ok: true, relative: 'not-yet.txt' })
+    expect(checkPathInWorkspace(W, 'sub')).toEqual({ ok: true, relative: 'sub' })
+    rmSync(join(W, 'inside.txt'))
+    expect(checkPathInWorkspace(W, 'inside.txt')).toEqual({ ok: true, relative: 'inside.txt' })
   })
 
   it('rejects a path that goes through a regular file', () => {

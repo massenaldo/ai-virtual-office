@@ -1,3 +1,4 @@
+import { errorSentence } from '../errorCodes'
 import type { ServerResponse } from 'node:http'
 import pkg from '../../package.json' with { type: 'json' }
 import type { StateResponse, WorkspacesResponse } from '../../src/workforce/api'
@@ -58,7 +59,7 @@ export function createRoutes(deps: RouteDeps): Route[] {
       path: '/api/state',
       // The state and the last event id are read in the same tick, so a client can apply exactly the events after it.
       handler: () => {
-        const body: StateResponse = { state: store.state, lastEventId: events.lastEventId, loadProblem: store.load.problem, preserved: store.load.preserved, saveError: store.saveError }
+        const body: StateResponse = { state: store.state, lastEventId: events.lastEventId, loadProblem: store.load.problem, preserved: store.load.preserved, saveError: store.saveError === null ? null : errorSentence(store.saveError) }
         return { status: 200, body }
       },
     },
@@ -136,8 +137,8 @@ export function createRoutes(deps: RouteDeps): Route[] {
       path: '/api/tasks/:id/approval',
       body: 'json',
       handler: ({ params, body, requestId }) => {
-        const { approvalId, decision } = parseApproval(body as Record<string, unknown>)
-        return { status: 200, body: { task: must(manager.decideApproval(params.id, approvalId, decision, { requestId })).task } }
+        const { approvalId, decision, digest } = parseApproval(body as Record<string, unknown>)
+        return { status: 200, body: { task: must(manager.decideApproval(params.id, approvalId, decision, { requestId }, digest)).task } }
       },
     },
   ]

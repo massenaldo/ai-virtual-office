@@ -196,8 +196,8 @@ describe('workspaces', () => {
     await until(async () => (await w.api('GET', '/api/state')).body.state.tasks[0].status === 'running')
     expect((await w.api('POST', `/api/demo/tasks/${id}/request-approval`)).status).toBe(202)
     const pending = (await w.api('GET', '/api/state')).body.state.tasks[0].pendingApproval
-    expect(pending).toMatchObject({ tool: 'Write', summary: 'Write simulated.txt (39 B): "Simulated content (nothing is written)."' })
-    await w.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'deny' })
+    expect(pending).toMatchObject({ tool: 'Write', summary: 'Write simulated.txt (39 B, 1 line): review the full content' })
+    await w.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'deny', digest: pending.digest })
     await until(async () => (await w.api('GET', '/api/state')).body.state.tasks[0].status === 'failed')
     expect((await w.api('GET', '/api/state')).body.state.tasks[0].errorMessage).toBe('Approval denied (simulated)')
     expect(readdirSync(ws.path('sandbox'))).toEqual([])
@@ -254,7 +254,7 @@ describe('the demo tool request', () => {
       await until(async () => (await get()).status === 'running')
       await t.api('POST', `/api/demo/tasks/${id}/request-approval`)
       const pending = (await get()).pendingApproval
-      expect((await t.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'approve' })).status).toBe(200)
+      expect((await t.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'approve', digest: pending.digest })).status).toBe(200)
       await until(async () => (await get()).status === 'completed')
       expect(readdirSync(w.path('sandbox'))).toEqual([])
     } finally {

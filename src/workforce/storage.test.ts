@@ -3,7 +3,7 @@ import { LAYOUT_STORAGE_KEY } from '../layout/storage'
 import { createDemoWorkforce } from './demo'
 import { addActivity, applyRuntimeEvent, assignTask, INTERRUPTED_MESSAGE, markStarting, removeAgent } from './operations'
 import { loadWorkforce, migrateWorkforceV1, parseWorkforce, saveWorkforce, serializeWorkforce, WORKFORCE_BACKUP_KEY, WORKFORCE_STORAGE_KEY, WORKFORCE_V1_KEY } from './storage'
-import type { WorkforceState } from './types'
+import { REVIEW_MAX_BYTES, type WorkforceState } from './types'
 
 const NOW = '2026-10-30T09:00:00.000Z'
 
@@ -105,6 +105,51 @@ describe('loadWorkforce', () => {
 
 describe('parseWorkforce', () => {
   const valid = () => JSON.parse(serializeWorkforce(withRunningTask().state))
+
+  it('keeps an approval digest through a round trip and loads an approval saved without one', () => {
+    const { state, taskId } = withRunningTask()
+    const digest = 'cd'.repeat(32)
+    const waiting = applyRuntimeEvent(state, { type: 'approval_requested', taskId, approvalId: 'a1', tool: 'Write', summary: 's', digest }, NOW, 'mock')
+    expect(roundTrip(waiting)?.tasks[0].pendingApproval).toMatchObject({ id: 'a1', digest })
+    const raw = JSON.parse(serializeWorkforce(waiting))
+    delete raw.tasks[0].pendingApproval.digest
+    expect(parseWorkforce(raw)?.tasks[0].pendingApproval).toMatchObject({ id: 'a1', digest: null })
+    raw.tasks[0].pendingApproval.digest = 'not-hex'
+    expect(parseWorkforce(raw)).toBeNull()
+  })
+
+  describe('a pending review', () => {
+    const digest = 'cd'.repeat(32)
+    const review = { kind: 'write', path: 'a.txt', bytes: 3, lines: 1, content: 'abc', workspaceId: 'sandbox', digest }
+    const waiting = () => {
+      const { state, taskId } = withRunningTask()
+      const ev = { type: 'approval_requested' as const, taskId, approvalId: 'a1', tool: 'Write', summary: 's', digest, review: review as never }
+      return applyRuntimeEvent(state, ev, NOW, 'mock')
+    }
+    const withReview = (mutate: (r: any) => void) => { const raw = JSON.parse(serializeWorkforce(waiting())); mutate(raw.tasks[0].pendingApproval); return parseWorkforce(raw) }
+
+    it('survives a round trip', () => {
+      expect(roundTrip(waiting())?.tasks[0].pendingApproval?.review).toEqual(review)
+    })
+
+    it('an edit review round-trips', () => {
+      const edit = { kind: 'edit', path: 'a.txt', bytes: 2, lines: 2, oldString: 'x', newString: 'y', replaceAll: true, workspaceId: 'sandbox', digest }
+      expect(withReview((p) => { p.review = edit })?.tasks[0].pendingApproval?.review).toEqual(edit)
+    })
+
+    it('is rejected when its digest differs from the approval, its size is too big, or its shape is wrong', () => {
+      expect(withReview((p) => { p.review.digest = 'ef'.repeat(32) })).toBeNull()
+      expect(withReview((p) => { p.review.content = 'a'.repeat(REVIEW_MAX_BYTES + 1) })).toBeNull()
+      expect(withReview((p) => { p.review.kind = 'delete' })).toBeNull()
+      expect(withReview((p) => { delete p.review.content })).toBeNull()
+      expect(withReview((p) => { p.digest = null })).toBeNull()
+      expect(withReview((p) => { p.review.bytes = -1 })).toBeNull()
+    })
+
+    it('is null for an approval saved without one', () => {
+      expect(withReview((p) => { delete p.review })?.tasks[0].pendingApproval?.review).toBeNull()
+    })
+  })
 
   it('accepts a valid state', () => {
     expect(parseWorkforce(valid())).not.toBeNull()

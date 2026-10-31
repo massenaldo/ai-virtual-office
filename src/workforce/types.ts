@@ -17,7 +17,19 @@ export type TaskEndReason = 'completed' | 'failed' | 'cancelled' | 'timeout'
 export type ApprovalDecision = 'approve' | 'deny'
 
 /** A runtime's request to use a tool that needs a human decision; set exactly while the task is waiting_for_approval. */
-export type PendingApproval = { id: string; tool: string; summary: string; requestedAt: string }
+/** The most a review may show: UTF-8 bytes of the path and all text fields together. Above it nothing is asked. */
+export const REVIEW_MAX_BYTES = 32768
+
+/**
+ * What a person reads before approving a Write or Edit: the exact content or change, never cut or reformatted.
+ * `path` is relative to the workspace.
+ */
+export type ToolReviewBody = { path: string; bytes: number; lines: number } & ({ kind: 'write'; content: string } | { kind: 'edit'; oldString: string; newString: string; replaceAll: boolean })
+/** The review as it sits on a pending approval: bound to the workspace and to the same action digest as the approval. */
+export type ToolReview = ToolReviewBody & { workspaceId: string; digest: string }
+
+/** digest: the server's SHA-256 of the exact action (task, workspace, tool, input) the approval is for; null for a simulated approval. */
+export type PendingApproval = { id: string; tool: string; summary: string; requestedAt: string; digest: string | null; review: ToolReview | null }
 
 export type RuntimeMode = 'mock' | 'real'
 

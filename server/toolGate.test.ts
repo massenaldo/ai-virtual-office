@@ -1,7 +1,7 @@
-import { mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { linkSync, mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
-import type { StartContext, ToolGate, ToolGateResult } from './runtime/types'
+import type { GatedAction, StartContext, ToolGate, ToolGateResult } from './runtime/types'
 import { actionDigest, canonicalJson, createToolGate } from './toolGate'
 import { DEFAULT_ALLOWED_TOOLS } from './toolPolicy'
 import { makeWorkspaceRoot } from './test/workspaces'
@@ -19,8 +19,8 @@ const workspace = () => {
   return r.ok ? ({ ok: true, workspace: r.workspace } as const) : ({ ok: false } as const)
 }
 
-function gate(approve: (request: { tool: string; input: unknown }, digest: string) => Promise<ToolGateResult>, extra: { isLive?: () => boolean; stale?: (tool: string, detail: string) => void } = {}): ToolGate {
-  return createToolGate({ taskId: 'task-1', policy, workspace, isLive: extra.isLive ?? (() => true), approve, stale: extra.stale ?? (() => {}) })
+function gate(approve: (request: { tool: string; input: unknown }, digest: string) => Promise<ToolGateResult>, extra: { isLive?: () => boolean; stale?: (tool: string, detail: string) => void; signal?: AbortSignal } = {}): ToolGate {
+  return createToolGate({ taskId: 'task-1', policy, workspace, isLive: extra.isLive ?? (() => true), approve, stale: extra.stale ?? (() => {}), signal: extra.signal ?? new AbortController().signal })
 }
 const write = { tool: 'Write', input: { file_path: 'sub/out.txt', content: 'x' } }
 
@@ -110,6 +110,52 @@ describe('createToolGate', () => {
     const out = await gate(() => Promise.resolve(ALLOWED)).use({ tool: 'Write', input: { file_path: 'a', content: () => 1 } }, perform)
     expect(out).toMatchObject({ behavior: 'deny', outcome: 'denied_by_policy' })
     expect(perform).not.toHaveBeenCalled()
+  })
+})
+
+describe('createToolGate: signal, paths and hard links', () => {
+  it('hands perform the task signal and the checked relative paths', async () => {
+    const controller = new AbortController()
+    let seen: { signal: AbortSignal; paths: unknown } | null = null
+    await gate(() => Promise.resolve(ALLOWED), { signal: controller.signal }).use(write, (a) => { seen = { signal: a.signal, paths: a.paths } })
+    expect(seen!.signal).toBe(controller.signal)
+    expect(seen!.paths).toEqual([{ arg: 'file_path', relative: 'sub/out.txt' }])
+    expect(JSON.stringify(seen)).not.toContain(ws.root)
+  })
+
+  it('lets perform see the abort when the task is cancelled during an async perform', async () => {
+    const controller = new AbortController()
+    let during = false
+    await gate(() => Promise.resolve(ALLOWED), { signal: controller.signal }).use(write, async (a) => {
+      controller.abort()
+      await Promise.resolve()
+      during = a.signal.aborted
+    })
+    expect(during).toBe(true)
+  })
+
+  it('does not perform when the signal was aborted between approval and perform', async () => {
+    const controller = new AbortController()
+    const perform = vi.fn()
+    const out = await gate(() => { controller.abort(); return Promise.resolve(ALLOWED) }, { signal: controller.signal }).use(write, perform)
+    expect(out).toMatchObject({ behavior: 'deny', outcome: 'cancelled' })
+    expect(perform).not.toHaveBeenCalled()
+  })
+
+  it('refuses a stale approval when the target became a hard link after approval', async () => {
+    const secret = join(outside.path('x'), 'secret.txt')
+    writeFileSync(secret, 'secret')
+    const perform = vi.fn()
+    const stale = vi.fn()
+    const out = await gate(() => { linkSync(secret, join(ws.path('sandbox'), 'sub', 'out.txt')); return Promise.resolve(ALLOWED) }, { stale }).use(write, perform)
+    expect(out).toMatchObject({ behavior: 'deny', outcome: 'stale_approval' })
+    expect(perform).not.toHaveBeenCalled()
+    expect(stale).toHaveBeenCalledWith('Write', expect.stringContaining('unsafe_link'))
+  })
+
+  it('has the signal and paths in its type', () => {
+    expectTypeOf<GatedAction>().toHaveProperty('signal').toEqualTypeOf<AbortSignal>()
+    expectTypeOf<GatedAction['paths']>().toEqualTypeOf<ReadonlyArray<{ readonly arg: string; readonly relative: string }>>()
   })
 })
 

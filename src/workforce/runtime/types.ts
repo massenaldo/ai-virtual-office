@@ -1,10 +1,10 @@
-import type { Agent, AgentTask, ApprovalDecision, RuntimeMode } from '../types'
+import type { Agent, AgentTask, ApprovalDecision, RuntimeMode, ToolReview } from '../types'
 
 export type RuntimeEvent =
   | { type: 'started'; taskId: string; executionId: string; sessionId?: string }
   | { type: 'progress'; taskId: string; step: 'thinking' | 'working'; message: string }
   | { type: 'message'; taskId: string; text: string }
-  | { type: 'approval_requested'; taskId: string; approvalId: string; tool: string; summary: string }
+  | { type: 'approval_requested'; taskId: string; approvalId: string; tool: string; summary: string; digest?: string; review?: ToolReview }
   | { type: 'completed'; taskId: string; summary: string }
   | { type: 'failed'; taskId: string; error: string }
   | { type: 'cancelled'; taskId: string }

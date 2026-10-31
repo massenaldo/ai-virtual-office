@@ -158,7 +158,7 @@ function transitionFor(event: RuntimeEvent, task: AgentTask, now: string, source
     case 'message':
       return { task: {}, activity: { ...base, type: 'agent-message', message: event.text } }
     case 'approval_requested':
-      return { task: { status: 'waiting_for_approval', pendingApproval: { id: event.approvalId, tool: event.tool, summary: event.summary, requestedAt: now } }, agentStatus: 'waiting', activity: { ...base, type: 'task-approval-requested', approvalId: event.approvalId, message: `Approval needed: ${event.summary}` } }
+      return { task: { status: 'waiting_for_approval', pendingApproval: { id: event.approvalId, tool: event.tool, summary: event.summary, requestedAt: now, digest: event.digest ?? null, review: event.review ?? null } }, agentStatus: 'waiting', activity: { ...base, type: 'task-approval-requested', approvalId: event.approvalId, message: `Approval needed: ${event.summary}` } }
     case 'completed':
       return { task: { status: 'completed', completedAt: now, resultSummary: event.summary || null, endedReason: 'completed', pendingApproval: null }, agentStatus: 'completed', activity: { ...base, type: 'task-completed', message: event.summary } }
     case 'failed': {

@@ -4,7 +4,7 @@ import { createDefaultLayout } from '../layout/defaultLayout'
 import type { OfficeLayout } from '../layout/types'
 import { createDemoWorkforce } from './demo'
 import { addActivity, assignTask, cancelTask } from './operations'
-import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskClickTarget, deskMarkers, environmentBadge, environmentNote, connectionLabel, agentStatusText, workforceNotice, TASK_RUNTIME_LABEL, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, removalPrompt, TASK_STATUS_LABEL } from './view'
+import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskClickTarget, deskMarkers, shortDigest, environmentBadge, environmentNote, connectionLabel, agentStatusText, workforceNotice, TASK_RUNTIME_LABEL, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, removalPrompt, TASK_STATUS_LABEL } from './view'
 
 const NOW = '2026-10-30T09:00:00.000Z'
 const layout = createDefaultLayout()
@@ -211,3 +211,11 @@ describe('runtime indicator and lifecycle labels', () => {
     for (const p of ['queued', 'starting', 'waiting_for_approval', 'cancelling']) expect(css).toContain(`.desk-marker.phase-${p}`)
   })
 })
+
+describe('shortDigest', () => {
+  it('shows the first 12 hex characters, or nothing', () => {
+    expect(shortDigest('0123456789abcdef'.repeat(4))).toBe('0123456789ab')
+    expect(shortDigest(null)).toBeNull()
+  })
+})
+

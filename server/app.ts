@@ -17,7 +17,7 @@ import { ClaudeAgentRuntimeProvider } from './runtime/claudeAgent'
 import { ServerMockProvider } from './runtime/mockProvider'
 import type { ServerRuntimeProvider } from './runtime/types'
 import { openWorkforceStore, type WorkforceStore } from './store'
-import { openPermissionStore, type PermissionStore } from './permissions/store'
+import { openPermissionStore, type PermissionChange, type PermissionStore } from './permissions/store'
 import { TaskManager, type LifecycleEvent } from './taskManager'
 import { toolPolicyFrom } from './toolPolicy'
 
@@ -54,9 +54,23 @@ export function startupRecord(config: ServerConfig, port: number, tokenSource: A
 function toAuditInput(e: LifecycleEvent): AuditInput {
   const input: AuditInput = { action: e.action, actor: e.actor, agentId: e.agentId }
   if (e.taskId !== null) input.taskId = e.taskId
-  for (const key of ['requestId', 'workspaceId', 'tool', 'decision', 'reason', 'detail'] as const) if (e[key] !== undefined) input[key] = e[key]
+  for (const key of ['requestId', 'workspaceId', 'tool', 'decision', 'reason', 'digest', 'actionHash', 'ruleId', 'detail'] as const) if (e[key] !== undefined) input[key] = e[key]
   return input
 }
+
+/** Grants, revokes and expiry as audit records; a use or a refusal is audited where it happens, in the task manager. Task ends are not audited. */
+function permissionAudit(change: PermissionChange): AuditInput | null {
+  const { rule } = change
+  const action = change.kind === 'granted' ? 'permission.granted' : change.kind === 'revoked' ? 'permission.revoked' : change.kind === 'expired' ? 'permission.expired' : null
+  if (action === null) return null
+  const input: AuditInput = { action, actor: change.kind === 'expired' || rule.createdBy !== 'user' ? 'system' : 'api', ruleId: rule.id, tool: rule.tool, reason: rule.scope, detail: rule.effect }
+  if (rule.agentId !== null) input.agentId = rule.agentId
+  if (rule.taskId !== null) input.taskId = rule.taskId
+  return input
+}
+
+/** How often expired permissions are noticed for the audit log. Whether a rule applies is decided at each request, never by this timer. */
+export const PERMISSION_SWEEP_MS = 30000
 
 /** Wires the store, event log, provider, task manager and routes. Throws if the data file can't be read. */
 export function createApp(config: ServerConfig, deps: AppDeps = {}): App {
@@ -72,7 +86,7 @@ export function createApp(config: ServerConfig, deps: AppDeps = {}): App {
     const audit = deps.audit ?? openAuditLog({ dataDir: config.dataDir, maxBytes: config.auditLogMaxBytes, now, log, hide: config.workspaceRoot ? [config.workspaceRoot] : [] })
     const apiToken = resolveApiToken({ configured: config.apiToken?.reveal() ?? null, dataDir: config.dataDir })
     const provider = deps.provider ?? (config.runtime === 'mock' ? new ServerMockProvider({ timings: deps.mockTimings }) : new ClaudeAgentRuntimeProvider({ credentialsConfigured: config.credentialsConfigured }))
-    const permissions = deps.permissions ?? openPermissionStore({ dataDir: config.dataDir, now, log })
+    const permissions = deps.permissions ?? openPermissionStore({ dataDir: config.dataDir, now, log, onChange: (change) => { const record = permissionAudit(change); if (record) audit.write(record) } })
     const manager = new TaskManager({ store, provider, permissions, config, policy: toolPolicyFrom(config), now, log, onLifecycle: (e) => audit.write(toAuditInput(e)) })
     const streams = new Set<ServerResponse>()
     const startedAt = now()
@@ -112,6 +126,8 @@ export async function startServer(config: ServerConfig, deps: AppDeps = {}): Pro
     throw error
   }
   handler = app.handler
+  const sweep = setInterval(() => app.permissions.sweep(), PERMISSION_SWEEP_MS)
+  sweep.unref()
   const port = (server.address() as AddressInfo).port
   app.audit.write(startupRecord(config, port, app.apiToken.source))
   const host = config.host.includes(':') ? `[${config.host}]` : config.host
@@ -120,6 +136,7 @@ export async function startServer(config: ServerConfig, deps: AppDeps = {}): Pro
     port,
     app,
     close: async () => {
+      clearInterval(sweep)
       app.closeStreams()
       await app.manager.dispose()
       await stop()

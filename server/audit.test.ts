@@ -28,6 +28,31 @@ describe('openAuditLog', () => {
     expect(JSON.parse(got[1])).toMatchObject({ seq: 2, action: 'task.cancel' })
   })
 
+  it('writes the permission fields in a fixed place and leaves old records unchanged', () => {
+    const { audit } = open()
+    audit.write({ action: 'permission.revoked', actor: 'api', agentId: 'agent-1', decision: 'revoke', digest: 'abc123abc123', actionHash: 'f'.repeat(64), ruleId: 'perm-1a2b3c4d', detail: 'by a person' })
+    audit.write({ action: 'task.cancel', actor: 'system', taskId: 'task-1' })
+    const got = lines()
+    expect(got[0]).toBe('{"at":"2026-10-31T09:00:00.000Z","seq":1,"action":"permission.revoked","actor":"api","agentId":"agent-1","decision":"revoke","digest":"abc123abc123","actionHash":"' + 'f'.repeat(64) + '","ruleId":"perm-1a2b3c4d","detail":"by a person"}')
+    expect(got[1]).toBe('{"at":"2026-10-31T09:00:00.000Z","seq":2,"action":"task.cancel","actor":"system","taskId":"task-1"}')
+  })
+
+  it('caps the permission fields and keeps a control character from forging a second line', () => {
+    const { audit } = open()
+    audit.write({ action: 'permission.used', actor: 'runtime', actionHash: 'f'.repeat(200), ruleId: 'perm\u0000-1\nx', digest: 'd'.repeat(200) })
+    const record = JSON.parse(lines()[0])
+    expect(record.actionHash).toHaveLength(64)
+    expect(record.digest).toHaveLength(64)
+    expect(lines()).toHaveLength(1)
+    expect(record.ruleId).toBe('perm\u0000-1\nx')
+  })
+
+  it.each(['permission.granted', 'permission.denied', 'permission.revoked', 'permission.expired', 'permission.used'] as const)('accepts %s', (action) => {
+    const { audit } = open()
+    audit.write({ action, actor: 'api' })
+    expect(JSON.parse(lines()[0]).action).toBe(action)
+  })
+
   it('creates the file with mode 0o600 and tightens an existing one', () => {
     const { audit } = open()
     audit.write({ action: 'task.start', actor: 'api' })

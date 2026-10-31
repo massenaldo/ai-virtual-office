@@ -11,7 +11,7 @@ const anchor = new THREE.Vector3()
 /** Status markers as plain DOM over the canvas, like the room labels. They never take pointer events, so the desk below stays clickable. */
 export function DeskMarkerLayer({ markers, registry }: { markers: DeskMarker[]; registry: MarkerRegistry }) {
   return <div className="desk-marker-layer" aria-hidden="true">
-    {markers.map((m) => <div key={m.id} ref={(el) => { if (el) registry.set(m.id, el); else registry.delete(m.id) }} className={`desk-marker ${m.status}${m.selected ? ' selected' : ''}`}>
+    {markers.map((m) => <div key={m.id} ref={(el) => { if (el) registry.set(m.id, el); else registry.delete(m.id) }} className={`desk-marker ${m.status}${m.selected ? ' selected' : ''}${m.phase ? ` phase-${m.phase}` : ''}`}>
       <span className="desk-marker-dot"/>{m.label}
     </div>)}
   </div>

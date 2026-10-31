@@ -1,9 +1,10 @@
 import { DEPARTMENTS } from '../layout/catalog'
 import type { OfficeLayout } from '../layout/types'
 import type { DeskMarker } from '../scene/labels'
+import type { ConnectionStatus, RuntimeEnvironment, WorkforceSnapshot } from './controller'
 import { activeTaskFor, agentAtDesk } from './operations'
 import type { Preserved, WorkforceLoadProblem } from './storage'
-import type { Agent, AgentActivity, AgentDepartment, AgentStatus, AgentTask, TaskStatus, WorkforceState } from './types'
+import type { Agent, AgentActivity, AgentDepartment, AgentStatus, AgentTask, TaskRuntime, TaskStatus, WorkforceState } from './types'
 
 // Pure helpers for the workforce panel, so the components only render.
 
@@ -75,7 +76,7 @@ export function formatTime(iso: string): string {
 export function deskMarkers(layout: OfficeLayout, s: WorkforceState, selectedAgentId: string | null): DeskMarker[] {
   return layout.furniture.flatMap((f) => {
     const agent = f.type === 'desk' ? agentAtDesk(s, f.id) : undefined
-    return agent ? [{ id: agent.id, label: agent.name, status: agent.status, x: f.x, z: f.z, selected: agent.id === selectedAgentId }] : []
+    return agent ? [{ id: agent.id, label: agent.name, status: agent.status, x: f.x, z: f.z, selected: agent.id === selectedAgentId, phase: markerPhase(activeTaskFor(s, agent.id)) }] : []
   })
 }
 
@@ -100,4 +101,44 @@ export function workforceNotice(problem: WorkforceLoadProblem, preserved: Preser
   if (problem === 'unavailable') return 'Browser storage is unavailable, so agent changes cannot be saved in this window.'
   const lead = problem === 'unsupported-version' ? 'Saved agents come from a newer version of the app, so none are shown.' : "Saved agents couldn't be loaded, so none are shown."
   return preserved ? `${lead} ${PRESERVED_SENTENCE[preserved]}` : lead
+}
+
+export const TASK_RUNTIME_LABEL: Record<TaskRuntime, string> = { mock: 'Simulated run', claude: 'Claude runtime' }
+
+export type EnvironmentBadge = { label: string; title: string; tone: 'browser' | 'backend' | 'unavailable' }
+
+/** The panel's runtime badge. The copy says plainly that no AI is run in the browser or mock modes. */
+export function environmentBadge(env: RuntimeEnvironment): EnvironmentBadge {
+  if (env.kind === 'browser') return { label: 'Mock · browser', title: 'Tasks are simulated in the browser. No AI is run.', tone: 'browser' }
+  if (env.runtime === 'claude') return { label: 'Local backend · Claude (not available)', title: `${env.reason ?? 'Claude Agent SDK not installed'}. Tasks are refused.`, tone: 'unavailable' }
+  if (env.runtime === 'mock') return { label: 'Local backend · mock runtime', title: "Tasks run on the local backend's mock runtime. No Claude SDK is installed and no AI is run.", tone: env.available === false ? 'unavailable' : 'backend' }
+  return { label: 'Local backend', title: 'Connecting to the local backend.', tone: 'backend' }
+}
+
+export function environmentNote(env: RuntimeEnvironment): string | null {
+  return env.kind === 'backend' && env.runtime === 'mock' ? 'Mock runtime only; no Claude SDK.' : null
+}
+
+/** The connection pill text; null in the browser mock, where there is no connection. */
+export function connectionLabel(s: Pick<WorkforceSnapshot, 'connection' | 'lastSyncedAt'>): string | null {
+  const labels: Record<ConnectionStatus, () => string | null> = {
+    local: () => null,
+    connecting: () => (s.lastSyncedAt === null ? 'Connecting…' : 'Reconnecting…'),
+    live: () => 'Live',
+    offline: () => (s.lastSyncedAt === null ? 'Offline · retrying' : `Offline · last synced ${formatTime(s.lastSyncedAt)} · retrying`),
+    misconfigured: () => 'Not configured',
+  }
+  return labels[s.connection]()
+}
+
+export type MarkerPhase = 'queued' | 'starting' | 'waiting_for_approval' | 'cancelling'
+
+/** The lifecycle phases that get their own desk-marker look; running and ended tasks are already shown by the agent status colour. */
+export function markerPhase(task: AgentTask | undefined): MarkerPhase | null {
+  return task && (task.status === 'queued' || task.status === 'starting' || task.status === 'waiting_for_approval' || task.status === 'cancelling') ? task.status : null
+}
+
+export function agentStatusText(s: WorkforceState, agent: Agent): string {
+  const phase = markerPhase(activeTaskFor(s, agent.id))
+  return phase ? TASK_STATUS_LABEL[phase] : AGENT_STATUS_LABEL[agent.status]
 }

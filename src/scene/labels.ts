@@ -23,7 +23,7 @@ export function screenPosition(point: THREE.Vector3, camera: THREE.Camera, size:
 }
 
 /** A status marker over a desk. Scene-side shape, so the scene never imports workforce types. */
-export type DeskMarker = { id: string; label: string; status: string; x: number; z: number; selected: boolean }
+export type DeskMarker = { id: string; label: string; status: string; x: number; z: number; selected: boolean; phase: string | null }
 
 export const MARKER_HEIGHT = 1.45
 export const PLAN_MARKER_HEIGHT = 0.35

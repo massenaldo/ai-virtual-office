@@ -362,7 +362,7 @@ export class TaskManager {
     this.report('tool.asked', task, { actor: 'runtime', tool, decision: 'ask', reason: 'needs_approval', detail: d.summary })
     const approvalId = createId('approval')
     const promise = new Promise<ToolGateResult>((resolve) => { run.toolWaiter = { approvalId, tool, resolve } })
-    this.onEvent({ type: 'approval_requested', taskId, approvalId, tool, summary: d.summary, digest })
+    this.onEvent({ type: 'approval_requested', taskId, approvalId, tool, summary: d.summary, digest, ...(d.review && run.workspace ? { review: { ...d.review, workspaceId: run.workspace.id, digest } } : {}) })
     this.report('approval.requested', task, { actor: 'runtime', tool, detail: `approvalId=${approvalId}` })
     return promise
   }
@@ -431,7 +431,7 @@ export class TaskManager {
       }
       case 'progress': return { ...event, message: cut(clean(event.message)) }
       case 'failed': return { ...event, error: cut(clean(event.error)) }
-      case 'approval_requested': return { ...event, summary: this.hidePaths(run, sanitizeSummary(event.summary)) }
+      case 'approval_requested': return { ...event, summary: this.hidePaths(run, sanitizeSummary(event.summary)), ...(event.review ? { review: { ...event.review, path: this.hidePaths(run, event.review.path) } } : {}) }
       case 'completed': {
         const t = truncateUtf8(clean(event.summary), perMessage)
         return { ...event, summary: fit(t.truncated ? t.text + messageTruncatedMarker(perMessage) : t.text) }

@@ -196,6 +196,19 @@ describe('an approval is bound to its own task and action', () => {
     expect(task(a.id).pendingApproval!.digest).not.toBe(approvalB.digest)
   })
 
+  it('an approval for content that differs by one byte is a different action and is refused', async () => {
+    const { id, ctx } = await run()
+    const perform = vi.fn()
+    void ctx.tools.use({ tool: 'Write', input: { file_path: 'sub/out.txt', content: 'aaaa' } }, perform)
+    const p = task(id).pendingApproval!
+    expect(p.review).toMatchObject({ kind: 'write', content: 'aaaa', digest: p.digest })
+    const other = actionDigest({ taskId: id, workspaceId: 'sandbox', workspacePath: ws.path('sandbox'), tool: 'Write', input: { file_path: 'sub/out.txt', content: 'aaab' } })
+    expect(other).not.toBe(p.digest)
+    expect(manager.decideApproval(id, p.id, 'approve', {}, other)).toMatchObject({ ok: false, code: 'conflict' })
+    await tick()
+    expect(perform).not.toHaveBeenCalled()
+  })
+
   it('the same approval cannot be used twice', async () => {
     const { id, ctx } = await run()
     const perform = vi.fn(() => 'done')

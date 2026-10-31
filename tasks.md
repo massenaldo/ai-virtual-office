@@ -371,7 +371,7 @@ Branch: `feat/3b12-4-redaction`.
 
 Branch: `feat/3b12-5-write-review`. It depends on 2.1. Opus reviews the PR before merge.
 
-- [ ] **5.1 Server: the bounded `review` payload.** (Decision 4)
+- [x] **5.1 Server: the bounded `review` payload.** (Decision 4)
   - Files:
     - `server/toolPolicy.ts`: `buildReview(tool, input, rel, workspaceId)`, `REVIEW_MAX_BYTES`, `reviewable(text)` (control, C1 and bidi check plus the redaction check). The Write/Edit summary becomes the short line. `decideToolUse` returns `review` on `ask` for Write and Edit.
     - `server/taskManager.ts`: `approveTool` puts `review` (with the digest) on `approval_requested`; `cap()` applies `hidePaths` to `path` only and never cuts content.

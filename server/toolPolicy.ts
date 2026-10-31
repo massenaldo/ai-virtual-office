@@ -1,4 +1,5 @@
 import type { ServerConfig } from './config'
+import { REVIEW_MAX_BYTES, type ToolReviewBody } from '../src/workforce/types'
 import { formatBytes } from './limits'
 import { redactSecrets, scrub } from './redact'
 import { checkPathInWorkspace, type ResolvedWorkspace } from './workspaces'
@@ -46,7 +47,7 @@ export type DenyReason = 'unknown_tool' | 'not_allowed' | 'invalid_input' | 'inv
 
 export type ToolDecision =
   | { decision: 'allow'; reason: 'read_only'; summary: string }
-  | { decision: 'ask'; reason: 'needs_approval'; summary: string }
+  | { decision: 'ask'; reason: 'needs_approval'; summary: string; /** Write and Edit only: the exact content or change to review. */ review?: ToolReviewBody }
   | { decision: 'deny'; reason: DenyReason; summary: string }
 
 const DENY_TEXT: Record<DenyReason, string> = {
@@ -105,14 +106,34 @@ function globInside(pattern: string): boolean {
   return !pattern.startsWith('/') && !pattern.startsWith('~') && !pattern.includes('\\') && !pattern.includes('..')
 }
 
+const lineCount = (text: string): number => (text === '' ? 0 : text.split('\n').length - (text.endsWith('\n') ? 1 : 0))
+const byteLength = (text: string): number => Buffer.byteLength(text)
+
+/** Control characters other than tab, newline and carriage return; C1 controls; bidi overrides and isolates ("Trojan Source"). */
+const UNSAFE_TO_SHOW = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/
+
+/**
+ * The exact content or change of a Write or Edit, for a person to read. Null when it cannot be shown safely and whole:
+ * too big, characters that would make what is shown differ from what is written, a secret that redaction would change,
+ * or the workspace's own path (it must never reach state).
+ */
+function buildReview(tool: string, i: Record<string, unknown>, rel: string, workspacePath: string): ToolReviewBody | null {
+  const texts = tool === 'Write' ? [i.content as string] : [i.old_string as string, i.new_string as string]
+  const total = [rel, ...texts].reduce((n, t) => n + byteLength(t), 0)
+  if (total > REVIEW_MAX_BYTES) return null
+  if (texts.some((t) => UNSAFE_TO_SHOW.test(t) || redactSecrets(t) !== t || t.includes(workspacePath))) return null
+  if (tool === 'Write') return { kind: 'write', path: rel, bytes: byteLength(texts[0]), lines: lineCount(texts[0]), content: texts[0] }
+  return { kind: 'edit', path: rel, bytes: byteLength(texts[0]) + byteLength(texts[1]), lines: lineCount(texts[0]) + lineCount(texts[1]), oldString: texts[0], newString: texts[1], replaceAll: i.replace_all === true }
+}
+
 function summaryFor(tool: string, i: Record<string, unknown>, rel: string | null): string {
   switch (tool) {
     case 'Read': return `Read ${rel}`
     case 'Glob': return `Find files matching ${i.pattern} in ${rel ?? '.'}`
     case 'Grep': return `Search for ${i.pattern} in ${rel ?? '.'}`
-    // The whole content / change, JSON-escaped so newlines and quotes are visible. If it does not fit, nothing is asked.
-    case 'Write': return `Write ${rel} (${formatBytes(Buffer.byteLength(i.content as string))}): ${JSON.stringify(i.content)}`
-    case 'Edit': return `Edit ${rel}: replace ${JSON.stringify(i.old_string)} with ${JSON.stringify(i.new_string)}${i.replace_all === true ? ' (all occurrences)' : ''}`
+    // Write and Edit show a short line here; the full content or change is the review (see buildReview).
+    case 'Write': return `Write ${rel} (${formatBytes(Buffer.byteLength(i.content as string))}, ${lineCount(i.content as string)} ${lineCount(i.content as string) === 1 ? 'line' : 'lines'}): review the full content`
+    case 'Edit': return `Edit ${rel}: review the full change`
     case 'Bash': return `Run command: ${i.command}`
     case 'WebFetch': { const u = new URL(i.url as string); return `Fetch ${u.origin}${u.pathname}${u.search}` }
     default: return `Search the web for ${i.query}`
@@ -147,5 +168,9 @@ export function decideToolUse(policy: ToolPolicy, toolName: string, input: unkno
   // it, nothing is asked. (Only control characters and repeated spaces are flattened.)
   const flat = raw.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/ {2,}/g, ' ').trim()
   if (flat.length > SUMMARY_MAX_CHARS || redactSecrets(flat) !== flat) return denied('not_reviewable')
+  if (spec.name === 'Write' || spec.name === 'Edit') {
+    const review = buildReview(spec.name, input, rel!, workspace!.path)
+    return review ? { decision: 'ask', reason: 'needs_approval', summary: flat, review } : denied('not_reviewable')
+  }
   return { decision: 'ask', reason: 'needs_approval', summary: flat }
 }

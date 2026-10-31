@@ -111,7 +111,7 @@ A small Node server (`server/`, no framework, no runtime dependencies) owns agen
 **Security boundaries.** These are policy checks, not an OS sandbox.
 - Bound to loopback; `Host` and `Origin` allowlists (421 / 403); JSON-only mutations (415); CORS only for allowed origins; security headers.
 - No login or token yet; a startup token is planned for the VPS milestone.
-- Workspaces are named by id; the browser never sends a path. Paths are checked against the workspace real path (symlinks resolved, `..` refused).
+- Workspaces are named by id; the browser never sends a path. Paths are checked against the workspace real path (symlinks resolved, `..` refused, a path through a regular file refused) and the root stored at startup. Write and Edit always need a workspace; without one the mock demo falls back to the simulated run's own approval.
 - Tool policy: unknown tools denied; read tools allowed inside a workspace; write, execute and network tools always need a human approval whose summary shows the whole action (otherwise denied); no bypass mode.
 - Secrets are redacted from logs, state, events and the audit log; workspace paths are hidden in runtime output; `npm run check:secrets` scans the built bundles.
 - `data/audit.log` (JSONL, mode 0600, rotated at 5 MB) records lifecycle, tool and rejected-request events, never bodies.

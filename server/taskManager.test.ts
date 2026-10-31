@@ -43,8 +43,8 @@ const task = (id: string): AgentTask => store.state.tasks.find((t) => t.id === i
 const agent = (id = FORGE) => store.state.agents.find((a) => a.id === id)!
 const tick = () => vi.advanceTimersByTimeAsync(0)
 
-function started(m: TaskManager): string {
-  const r = m.startTask(FORGE, INPUT)
+function started(m: TaskManager, workspaceId?: string): string {
+  const r = m.startTask(FORGE, INPUT, workspaceId ? { workspaceId } : {})
   if (!r.ok) throw new Error(r.error)
   return r.task.id
 }
@@ -193,8 +193,12 @@ describe('timeout and cancel', () => {
 })
 
 describe('approvals', () => {
+  let aws: ReturnType<typeof makeWorkspaceRoot>
+  beforeEach(() => { aws = makeWorkspaceRoot(['sandbox']) })
+  afterEach(() => { aws.cleanup() })
+  const wc = () => ({ workspaceRoot: aws.root, workspaces: [{ id: 'sandbox', relativePath: 'sandbox' }] })
   async function waiting(m: TaskManager): Promise<string> {
-    const id = started(m)
+    const id = started(m, 'sandbox')
     await tick()
     expect(m.requestApproval(id).ok).toBe(true)
     expect(task(id).status).toBe('waiting_for_approval')
@@ -202,7 +206,7 @@ describe('approvals', () => {
   }
 
   it('approval round trip', async () => {
-    const m = make(mock())
+    const m = make(mock(), wc())
     const id = await waiting(m)
     expect(agent().status).toBe('waiting')
     const r = m.decideApproval(id, task(id).pendingApproval!.id, 'approve')
@@ -215,7 +219,7 @@ describe('approvals', () => {
   })
 
   it('deny fails with the simulated message', async () => {
-    const m = make(mock())
+    const m = make(mock(), wc())
     const id = await waiting(m)
     const r = m.decideApproval(id, task(id).pendingApproval!.id, 'deny')
     // A human deny tells the runtime "no"; the task itself carries on until the runtime decides what to do.
@@ -226,7 +230,7 @@ describe('approvals', () => {
   })
 
   it('approval conflicts', async () => {
-    const m = make(mock())
+    const m = make(mock(), wc())
     const id = started(m)
     await tick()
     expect(m.decideApproval(id, 'a', 'approve')).toEqual({ ok: false, code: 'conflict', error: 'Task is not waiting for approval.' })
@@ -236,7 +240,7 @@ describe('approvals', () => {
   })
 
   it('a second decision for the same approval conflicts', async () => {
-    const m = make(mock())
+    const m = make(mock(), wc())
     const id = await waiting(m)
     const approvalId = task(id).pendingApproval!.id
     expect(m.decideApproval(id, approvalId, 'approve').ok).toBe(true)
@@ -246,7 +250,7 @@ describe('approvals', () => {
   it('approval timeout fails the task', async () => {
     const provider = mock()
     const cancel = vi.spyOn(provider, 'cancel')
-    const m = make(provider, { approvalTimeoutMs: 2000 })
+    const m = make(provider, { ...wc(), approvalTimeoutMs: 2000 })
     const id = await waiting(m)
     await vi.advanceTimersByTimeAsync(2000)
     expect(task(id)).toMatchObject({ status: 'failed', errorMessage: 'No approval decision within 2 s', endedReason: 'failed' })
@@ -255,7 +259,7 @@ describe('approvals', () => {
   })
 
   it('deciding clears the approval timer', async () => {
-    const m = make(mock(), { approvalTimeoutMs: 2000 })
+    const m = make(mock(), { ...wc(), approvalTimeoutMs: 2000 })
     const id = await waiting(m)
     m.decideApproval(id, task(id).pendingApproval!.id, 'approve')
     await vi.advanceTimersByTimeAsync(1900)
@@ -263,7 +267,7 @@ describe('approvals', () => {
   })
 
   it('demo controls report their conflicts', async () => {
-    const m = make(mock())
+    const m = make(mock(), wc())
     expect(m.requestApproval('task-x')).toEqual({ ok: false, code: 'not_found', error: 'Task not found.' })
     const id = started(m)
     await tick()
@@ -282,7 +286,7 @@ describe('approvals', () => {
   })
 
   it('forceError ends a running task failed', async () => {
-    const m = make(mock())
+    const m = make(mock(), wc())
     const id = started(m)
     await tick()
     expect(m.forceError(id).ok).toBe(true)
@@ -361,18 +365,20 @@ describe('limits and housekeeping', () => {
 
   it('reports timeout, approval decisions and approval timeout', async () => {
     const seen: string[] = []
-    const m = make(mock(), { taskTimeoutMs: 1000, approvalTimeoutMs: 300 }, (e) => seen.push(e.action))
-    const id = started(m)
+    const tws = makeWorkspaceRoot(['sandbox'])
+    const m = make(mock(), { taskTimeoutMs: 1000, approvalTimeoutMs: 300, workspaceRoot: tws.root, workspaces: [{ id: 'sandbox', relativePath: 'sandbox' }] }, (e) => seen.push(e.action))
+    const id = started(m, 'sandbox')
     await tick()
     m.requestApproval(id)
     await vi.advanceTimersByTimeAsync(300)
     expect(seen).toEqual(['task.start', 'tool.asked', 'approval.requested', 'approval.timeout'])
-    const m2id = started(m)
+    const m2id = started(m, 'sandbox')
     await tick()
     m.requestApproval(m2id)
     m.decideApproval(m2id, task(m2id).pendingApproval!.id, 'approve')
     await vi.advanceTimersByTimeAsync(1000)
     expect(seen).toContain('approval.decided')
+    tws.cleanup()
   })
 })
 
@@ -579,6 +585,15 @@ describe('tool approvals', () => {
     const { id } = await running()
     fake.emit({ type: 'message', taskId: id, text: 'key sk-ant-api03-abcdefghijklmnop' })
     expect(store.state.activities.at(-1)?.message).toBe('key [REDACTED]')
+  })
+
+  it('scrubs new secret shapes from messages, progress and failures', async () => {
+    const { id } = await running()
+    const gh = `ghp_${'a1B2c3D4e5'.repeat(4)}`
+    fake.emit({ type: 'message', taskId: id, text: `cloning https://bob:pw@example.com with ${gh}` })
+    expect(store.state.activities.at(-1)?.message).toBe('cloning https://[REDACTED]@example.com with [REDACTED]')
+    fake.emit({ type: 'failed', taskId: id, error: 'mysql --password hunter2 failed' })
+    expect(task(id).errorMessage).toBe('mysql --password [REDACTED] failed')
   })
 
   it('state never contains the workspace path', async () => {

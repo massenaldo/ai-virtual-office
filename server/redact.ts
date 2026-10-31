@@ -9,7 +9,22 @@ import type { Logger } from './log'
 export const REDACTED = '[REDACTED]'
 export const DEFAULT_SCRUB_CHARS = 512
 
-const PATTERNS: Array<[RegExp, string]> = [
+/** `Basic <base64>` is a credential only when the base64 decodes to printable `user:password`, so "Basic configuration" survives. */
+const basicCredential = (match: string, scheme: string, encoded: string): string => {
+  if (encoded.length % 4 !== 0) return match
+  const decoded = Buffer.from(encoded, 'base64').toString('latin1')
+  return /^[\x20-\x7e]+$/.test(decoded) && decoded.indexOf(':') > 0 ? `${scheme} ${REDACTED}` : match
+}
+
+const PATTERNS: Array<[RegExp, string | ((...groups: string[]) => string)]> = [
+  // scheme://user:password@host: the userinfo is replaced; `ssh://git@host` (no password) and `/@user` paths are not credentials.
+  [/\b([a-z][a-z0-9+.-]{1,15}:\/\/)[^\s/@:]{1,128}:[^\s/@]{1,256}@/gi, `$1${REDACTED}@`],
+  [/\bgh[pousr]_[A-Za-z0-9]{36,255}/g, REDACTED],
+  [/\bgithub_pat_[A-Za-z0-9_]{22,255}/g, REDACTED],
+  [/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, REDACTED],
+  [/\b(Basic)\s+([A-Za-z0-9+/]{8,512}={0,2})/gi, basicCredential],
+  // A secret passed as a command-line argument, with `=` or a space; `--password-file path` keeps its path.
+  [/(--(?:password|passwd|pass|token|secret|api-key|apikey|access-key|secret-key))(=|\s+)("[^"]{0,256}"|'[^']{0,256}'|[^\s"']{1,256})/gi, `$1$2${REDACTED}`],
   [/sk-ant-[A-Za-z0-9_-]{8,}/g, REDACTED],
   [/\bsk-[A-Za-z0-9_-]{20,}/g, REDACTED],
   [/\b(Bearer)\s+[A-Za-z0-9._~+/=-]{8,}/gi, `$1 ${REDACTED}`],
@@ -17,7 +32,7 @@ const PATTERNS: Array<[RegExp, string]> = [
 ]
 
 export function redactSecrets(text: string): string {
-  return PATTERNS.reduce((t, [re, to]) => t.replace(re, to), text)
+  return PATTERNS.reduce((t, [re, to]) => t.replace(re, to as string), text)
 }
 
 /** Redacts, then cuts to maxChars (the last character becomes an ellipsis). */

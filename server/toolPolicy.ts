@@ -1,4 +1,3 @@
-import { posix } from 'node:path'
 import type { ServerConfig } from './config'
 import { formatBytes } from './limits'
 import { redactSecrets, scrub } from './redact'
@@ -16,8 +15,8 @@ export const TOOL_CATALOGUE: readonly ToolSpec[] = [
   { name: 'Read', category: 'read', description: 'Read a file inside the workspace', pathArgs: ['file_path'], pathRequired: true, needsWorkspace: true },
   { name: 'Glob', category: 'read', description: 'Find files by name pattern inside the workspace', pathArgs: ['path'], pathRequired: false, needsWorkspace: true },
   { name: 'Grep', category: 'read', description: 'Search file contents inside the workspace', pathArgs: ['path'], pathRequired: false, needsWorkspace: true },
-  { name: 'Write', category: 'write', description: 'Create or overwrite a file inside the workspace', pathArgs: ['file_path'], pathRequired: true, needsWorkspace: false },
-  { name: 'Edit', category: 'write', description: 'Change part of a file inside the workspace', pathArgs: ['file_path'], pathRequired: true, needsWorkspace: false },
+  { name: 'Write', category: 'write', description: 'Create or overwrite a file inside the workspace', pathArgs: ['file_path'], pathRequired: true, needsWorkspace: true },
+  { name: 'Edit', category: 'write', description: 'Change part of a file inside the workspace', pathArgs: ['file_path'], pathRequired: true, needsWorkspace: true },
   { name: 'Bash', category: 'execute', description: 'Run a shell command in the workspace', pathArgs: [], pathRequired: false, needsWorkspace: true },
   { name: 'WebFetch', category: 'network', description: 'Fetch a web page', pathArgs: [], pathRequired: false, needsWorkspace: false },
   { name: 'WebSearch', category: 'network', description: 'Search the web', pathArgs: [], pathRequired: false, needsWorkspace: false },
@@ -100,15 +99,6 @@ function fieldsValid(tool: string, i: Record<string, unknown>): boolean {
   }
 }
 
-/** With no workspace (write tools only) the check is lexical: a relative path that never climbs out. */
-function lexicalPath(value: unknown): { ok: true; relative: string } | { ok: false; reason: 'invalid_path' | 'outside_workspace' } {
-  if (typeof value !== 'string' || value === '' || value.includes('\0') || value.includes('\\')) return { ok: false, reason: 'invalid_path' }
-  if (value.startsWith('/')) return { ok: false, reason: 'outside_workspace' }
-  const normalized = posix.normalize(value)
-  if (normalized.split('/').includes('..')) return { ok: false, reason: 'outside_workspace' }
-  return { ok: true, relative: normalized }
-}
-
 /** A glob is matched inside the workspace: no absolute, home-relative or climbing pattern. */
 function globInside(pattern: string): boolean {
   return !pattern.startsWith('/') && !pattern.startsWith('~') && !pattern.includes('\\') && !pattern.split('/').includes('..')
@@ -144,7 +134,7 @@ export function decideToolUse(policy: ToolPolicy, toolName: string, input: unkno
   let rel: string | null = null
   for (const arg of spec.pathArgs) {
     if (input[arg] === undefined) continue
-    const checked = workspace === null ? lexicalPath(input[arg]) : checkPathInWorkspace(workspace.path, input[arg])
+    const checked = checkPathInWorkspace(workspace!.path, input[arg])
     if (!checked.ok) return denied(checked.reason)
     rel = checked.relative
   }

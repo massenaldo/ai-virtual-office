@@ -86,10 +86,10 @@ describe('decideToolUse', () => {
     expect(decide('Read', { file_path: 'a' }, null)).toEqual(deny('no_workspace'))
     expect(decide('Glob', { pattern: '*' }, null)).toEqual(deny('no_workspace'))
     expect(decide('Bash', { command: 'ls' }, null)).toEqual(deny('no_workspace'))
-    expect(decide('Write', MOCK_DEMO_WRITE, null)).toMatchObject({ decision: 'ask', summary: 'Write simulated.txt (39 B)' })
-    expect(decide('Write', { file_path: '/tmp/x', content: '' }, null)).toEqual(deny('outside_workspace'))
-    expect(decide('Write', { file_path: 'a/../../x', content: '' }, null)).toEqual(deny('outside_workspace'))
-    expect(decide('Write', { file_path: 'a\\b', content: '' }, null)).toEqual(deny('invalid_path'))
+    // Write and Edit always need a workspace; a lexical check is never enough to ask a human about a file.
+    expect(decide('Write', MOCK_DEMO_WRITE, null)).toEqual(deny('no_workspace'))
+    expect(decide('Write', { file_path: '/tmp/x', content: '' }, null)).toEqual(deny('no_workspace'))
+    expect(decide('Edit', { file_path: 'a', old_string: 'x', new_string: 'y' }, null)).toEqual(deny('no_workspace'))
     expect(decide('WebSearch', { query: 'q' }, null)).toMatchObject({ decision: 'ask' })
   })
 
@@ -110,6 +110,11 @@ describe('decideToolUse', () => {
     expect(decide('Bash', { command: `echo ${'a'.repeat(250)} ; rm -rf ~` })).toEqual(deny('not_reviewable'))
     expect(decide('WebFetch', { url: 'https://example.com/a?token=abc12345' })).toEqual(deny('not_reviewable'))
     expect(decide('Bash', { command: 'echo 1\nls -l' })).toMatchObject({ decision: 'ask', summary: 'Run command: echo 1 ls -l' })
+  })
+
+  it('refuses to ask about a command that contains a secret of the new shapes', () => {
+    for (const command of [`git clone https://u:p@example.com/r.git`, `echo ghp_${'a1B2c3D4e5'.repeat(4)}`, 'mysql --password hunter2', 'export AWS=AKIAIOSFODNN7EXAMPLE'])
+      expect(decide('Bash', { command })).toEqual(deny('not_reviewable'))
   })
 
   it('shows the whole URL query and refuses credentials in the URL', () => {

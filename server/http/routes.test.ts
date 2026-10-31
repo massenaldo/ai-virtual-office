@@ -115,7 +115,7 @@ describe('tasks', () => {
     expect(r.status).toBe(202)
   })
 
-  it('approval via demo controls', async () => {
+  it('approval via demo controls (without a workspace the simulated run raises its own approval)', async () => {
     const id = await startForge()
     await until(async () => (await task(id))?.status === 'running')
     expect((await s.api('POST', `/api/demo/tasks/${id}/request-approval`)).status).toBe(202)
@@ -124,10 +124,10 @@ describe('tasks', () => {
     expect(pending.tool).toBe('Write')
     expect(await s.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'maybe' })).toMatchObject({ status: 400, body: { error: '"decision" must be "approve" or "deny".' } })
     expect(await s.api('POST', `/api/tasks/${id}/approval`, { approvalId: '', decision: 'deny' })).toMatchObject({ status: 400, body: { error: '"approvalId" must be a non-empty string.' } })
-    expect(pending.summary).toBe('Write simulated.txt (39 B)')
+    expect(pending.summary).toBe('Simulated request to write a file')
     const denied = await s.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'deny' })
-    // A human deny answers the request; the mock then ends its own run as failed.
-    expect(denied).toMatchObject({ status: 200, body: { task: { status: 'running' } } })
+    // Without a workspace the simulated run owns the approval, so a deny ends it at once.
+    expect(denied).toMatchObject({ status: 200, body: { task: { status: 'failed' } } })
     await until(async () => (await task(id)).status === 'failed')
     expect(await task(id)).toMatchObject({ errorMessage: 'Approval denied (simulated)' })
     expect(await s.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'deny' })).toMatchObject({ status: 409, body: { error: 'Task is not waiting for approval.' } })
@@ -185,6 +185,12 @@ describe('workspaces', () => {
     expect(JSON.stringify(r.body)).not.toContain(ws.root)
   })
 
+  it('never puts the workspace root in a state, workspace or error response', async () => {
+    await w.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'Build API', workspaceId: 'sandbox' })
+    const bodies = [(await w.api('GET', '/api/state')).body, (await w.api('GET', '/api/workspaces')).body, (await w.api('POST', '/api/agents/agent-demo-frontend/tasks', { title: 'x', workspaceId: 'nope' })).body]
+    for (const b of bodies) expect(JSON.stringify(b)).not.toContain(ws.root)
+  })
+
   it('starts a task in a workspace', async () => {
     const r = await w.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'Build API', workspaceId: 'sandbox' })
     expect(r.status).toBe(202)
@@ -211,9 +217,10 @@ describe('workspaces', () => {
 
 describe('the demo tool request', () => {
   it('follows ALLOWED_TOOLS', async () => {
-    const t = await startTestServer({ ALLOWED_TOOLS: 'Read' }, { mockTimings: SLOW })
+    const tws = makeWorkspaceRoot(['sandbox'])
+    const t = await startTestServer({ ALLOWED_TOOLS: 'Read', ...tws.env }, { mockTimings: SLOW })
     try {
-      const r = await t.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'Build API' })
+      const r = await t.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'Build API', workspaceId: 'sandbox' })
       const id = r.body.task.id as string
       await until(async () => (await t.api('GET', '/api/state')).body.state.tasks[0].status === 'running')
       expect((await t.api('POST', `/api/demo/tasks/${id}/request-approval`)).status).toBe(202)
@@ -221,6 +228,7 @@ describe('the demo tool request', () => {
       expect((await t.api('GET', '/api/state')).body.state.tasks[0].errorMessage).toBe('Tool "Write" denied by policy: not in ALLOWED_TOOLS.')
     } finally {
       await t.close()
+      tws.cleanup()
     }
   })
 

@@ -97,8 +97,9 @@ describe('audit wiring', () => {
   })
 
   it('audits a policy denial', async () => {
-    s = await startTestServer({ ALLOWED_TOOLS: 'Read' }, { mockTimings: SLOW })
-    const started = await s.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'Build API' })
+    const ws = makeWorkspaceRoot(['sandbox'])
+    s = await startTestServer({ ALLOWED_TOOLS: 'Read', ...ws.env }, { mockTimings: SLOW })
+    const started = await s.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'Build API', workspaceId: 'sandbox' })
     const id = started.body.task.id as string
     await until(async () => (await state(s!)).tasks[0].status === 'running')
     await s.api('POST', `/api/demo/tasks/${id}/request-approval`)

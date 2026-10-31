@@ -113,8 +113,15 @@ function globInside(pattern: string): boolean {
 const lineCount = (text: string): number => (text === '' ? 0 : text.split('\n').length - (text.endsWith('\n') ? 1 : 0))
 const byteLength = (text: string): number => Buffer.byteLength(text)
 
-/** Control characters other than tab, newline and carriage return; C1 controls; bidi overrides and isolates ("Trojan Source"). */
-const UNSAFE_TO_SHOW = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/
+/**
+ * Characters that make what a person reads differ from what is run or written, or that cannot be seen at all: C1 controls,
+ * every format character (bidi overrides and isolates, zero-width and joiner characters, the byte order mark, soft hyphen,
+ * tag characters), line and paragraph separators (U+2028 and U+2029 end a line in JavaScript), private use, lone
+ * surrogates, variation selectors and the Hangul fillers. (A joiner also splits an emoji sequence, so those are refused too.)
+ */
+const INVISIBLE = /[\u0080-\u009f\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cs}\u180e\ufe00-\ufe0f\u{e0100}-\u{e01ef}\u115f\u1160\u3164\uffa0]/u
+/** Content may keep tab, newline and carriage return; every other control character and everything in INVISIBLE is refused. */
+const UNSAFE_TO_SHOW = new RegExp(`[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]|${INVISIBLE.source}`, 'u')
 
 /**
  * The exact content or change of a Write or Edit, for a person to read. Null when it cannot be shown safely and whole:
@@ -171,6 +178,8 @@ export function decideToolUse(policy: ToolPolicy, toolName: string, input: unkno
 
   const raw = summaryFor(spec.name, input, rel)
   if (spec.category === 'read') return { decision: 'allow', reason: 'read_only', summary: sanitizeSummary(raw), ...withPaths }
+  // What a person approves must read the way it runs: invisible and reordering characters are refused in every ask summary.
+  if (INVISIBLE.test(raw)) return denied('not_reviewable')
   // A human approves what the summary says, so it must be the whole action: if redaction or the length cap would change
   // it, nothing is asked. (Only control characters and repeated spaces are flattened.)
   const flat = raw.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/ {2,}/g, ' ').trim()

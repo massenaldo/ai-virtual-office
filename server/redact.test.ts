@@ -103,6 +103,22 @@ describe('redactSecrets: JWT, Slack, Google, PEM, -p and URL passwords', () => {
     expect(redactSecrets(input)).toBe(expected)
   })
 
+  it('redacts every credential URL in a text with no spaces, not only the first', () => {
+    expect(redactSecrets('{"a":"https://x.com/","b":"postgres://admin:hunter2@db:5432/app"}')).toBe('{"a":"https://x.com/","b":"postgres://[REDACTED]@db:5432/app"}')
+    expect(redactSecrets('see https://a.com,ftp://u:secretpw@h/x')).toBe('see https://a.com,ftp://[REDACTED]@h/x')
+    expect(redactSecrets('https://u:p1@h1/x;redis://:p2@h2;ssh://git@h3')).toBe('https://[REDACTED]@h1/x;redis://[REDACTED]@h2;ssh://git@h3')
+  })
+
+  it('finds a JWT anywhere in a run of text and stays linear on hostile input', () => {
+    expect(redactSecrets(`x=${JWT}&y=1`)).toContain('[REDACTED]')
+    expect(redactSecrets(`a${JWT}`)).toContain(JWT.slice(0, 20))
+    for (const text of ['eyJ-'.repeat(250000), 'eyJ'.repeat(300000), `eyJ${'a'.repeat(200000)}`, `${'eyJaaaaaaaaaaaa.'.repeat(60000)}`]) {
+      const t0 = performance.now()
+      redactSecrets(text)
+      expect(performance.now() - t0).toBeLessThan(250)
+    }
+  })
+
   it('redacts a private key block that scrub cuts short', () => {
     const cut = scrub(`log ${pem('RSA PRIVATE KEY')}`, 100)
     expect(cut).not.toContain('MIIE')

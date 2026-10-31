@@ -20,7 +20,14 @@ const basicCredential = (match: string, scheme: string, encoded: string): string
  * authority. Not credentials: `ssh://git@host` (no password), `/@scope` and `/@user` in a path, and `host:8080/...`
  * (what follows the colon is a port). Works on one bounded token, so it stays linear.
  */
-const urlCredential = (match: string, scheme: string, rest: string): string => {
+const URL_PATTERN = /\b([a-z][a-z0-9+.-]{1,15}:\/\/)([^\s]{1,512})/gi
+const NEXT_SCHEME = /[a-z][a-z0-9+.-]{1,15}:\/\//gi
+const urlCredential = (match: string, scheme: string, whole: string): string => {
+  // Another URL may start inside this token (`a://x,b://u:p@h`, JSON with no spaces): judge this one up to it, then the rest on its own.
+  NEXT_SCHEME.lastIndex = 1
+  const next = NEXT_SCHEME.exec(whole)
+  if (next) return urlCredential(`${scheme}${whole.slice(0, next.index)}`, scheme, whole.slice(0, next.index)) + redactUrls(whole.slice(next.index))
+  const rest = whole
   const slash = rest.indexOf('/')
   const authority = slash === -1 ? rest : rest.slice(0, slash)
   let at = authority.lastIndexOf('@')
@@ -35,11 +42,13 @@ const urlCredential = (match: string, scheme: string, rest: string): string => {
 }
 
 /** `mysql -uroot -pSECRET`: the attached form only. `-p 22`, `-p8080:80`, `-print` and `mkdir -p` are not passwords. */
+/** Applies the URL rule to a text that starts at a scheme (used for the rest of a token after a nested URL). */
+const redactUrls = (text: string): string => text.replace(URL_PATTERN, urlCredential)
+
 const mysqlPassword = (_match: string, head: string, _value: string): string => `${head}${REDACTED}`
 
 const PATTERNS: Array<[RegExp, string | ((...groups: string[]) => string)]> = [
-  [/\b([a-z][a-z0-9+.-]{1,15}:\/\/)([^\s]{1,512})/gi, urlCredential],
-  [/\beyJ[A-Za-z0-9_-]{10,4096}\.[A-Za-z0-9_-]{10,4096}\.[A-Za-z0-9_-]{5,4096}/g, REDACTED],
+  [URL_PATTERN, urlCredential],
   [/\bxox[abposr]-[A-Za-z0-9-]{10,200}/g, REDACTED],
   [/\bxapp-\d-[A-Za-z0-9-]{10,200}/g, REDACTED],
   [/\bAIza[A-Za-z0-9_-]{35}(?![A-Za-z0-9_-])/g, REDACTED],
@@ -84,8 +93,37 @@ function redactPrivateKeys(text: string): string {
   return out + text.slice(cursor)
 }
 
+const B64URL = /[A-Za-z0-9_-]/
+const WORD = /\w/
+
+/**
+ * JWTs (`eyJ…` header, payload and signature joined by dots), found by a scan that never looks at a character twice: when
+ * an attempt fails at the end of a run of base64url characters, nothing inside that run can start a match either. A
+ * pattern would backtrack from every `eyJ` and cost quadratic time on hostile input.
+ */
+function redactJwts(text: string): string {
+  if (!text.includes('eyJ')) return text
+  let out = ''
+  let cursor = 0
+  let i = text.indexOf('eyJ')
+  const runEnd = (from: number): number => { let j = from; while (j < text.length && B64URL.test(text[j])) j++; return j }
+  while (i !== -1) {
+    if (i > 0 && WORD.test(text[i - 1])) { i = text.indexOf('eyJ', i + 1); continue }
+    const end1 = runEnd(i + 3)
+    if (end1 - i < 13 || text[end1] !== '.') { i = text.indexOf('eyJ', Math.max(end1, i + 1)); continue }
+    const end2 = runEnd(end1 + 1)
+    if (end2 - end1 - 1 < 10 || text[end2] !== '.') { i = text.indexOf('eyJ', Math.max(end2, i + 1)); continue }
+    const end3 = runEnd(end2 + 1)
+    if (end3 - end2 - 1 < 5) { i = text.indexOf('eyJ', Math.max(end3, i + 1)); continue }
+    out += text.slice(cursor, i) + REDACTED
+    cursor = end3
+    i = text.indexOf('eyJ', end3)
+  }
+  return out + text.slice(cursor)
+}
+
 export function redactSecrets(text: string): string {
-  return PATTERNS.reduce((t, [re, to]) => t.replace(re, to as string), redactPrivateKeys(text))
+  return PATTERNS.reduce((t, [re, to]) => t.replace(re, to as string), redactJwts(redactPrivateKeys(text)))
 }
 
 /** Redacts, then cuts to maxChars (the last character becomes an ellipsis). */

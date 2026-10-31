@@ -1,7 +1,7 @@
 # Milestone 3B.1.2 — Final Security Hardening: Tasks
 
 **Spec:** [`plan.md`](plan.md) (Milestone 3B.1.2 brief). This file is my working task list for that spec.
-**Status:** Approved for execution, 2026-10-31. The decisions below are applied as written; no stage has started.
+**Status:** Done, 2026-10-31. All seven stages are implemented; stage PRs #33 to #38 and this one (#39 or the next free number). The final report is `docs/milestone-3b12-report.md`.
 **Earlier milestones:** [`milestone-3b11-tasks.md`](docs/milestones/milestone-3b11-tasks.md) ([report](docs/milestone-3b11-report.md)), [`milestone-3b1-tasks.md`](docs/milestones/milestone-3b1-tasks.md) ([report](docs/milestone-3b1-report.md)).
 
 **Note on the brief:** `plan.md` stops mid-word in Phase 6 ("Digest visibility at approval time. - Hard"). I read Phase 6 as the deferred findings in section 10 of `docs/milestone-3b11-report.md`:
@@ -436,7 +436,7 @@ Branch: `fix/3b12-6-reliability`. It depends on 2.1 and 2.2.
 
 Branch: `docs/3b12-7-report`, stacked on the last merged stage.
 
-- [ ] **7.1 Full verification and Opus security review.**
+- [x] **7.1 Full verification and Opus security review.**
   - Run and record:
     - `npm test` (count and files compared with 822/63);
     - `npx tsc -b`;
@@ -452,7 +452,7 @@ Branch: `docs/3b12-7-report`, stacked on the last merged stage.
   - Then an **Opus security review** of the whole milestone diff (`git diff 1938776..HEAD`), focused on disclosure, the gate and digest binding, the review payload (truncation, rendering, Trojan Source), proxy canonicalisation, the lock, and redaction ReDoS.
   - Each Critical or High finding is fixed in this branch with a RED test first. Medium and lower findings are fixed or ruled on in the report.
   - Verify: all of the above green after the fixes.
-- [ ] **7.2 README, report and status.**
+- [x] **7.2 README, report and status.**
   - Files: `README.md` and new `docs/milestone-3b12-report.md`.
   - README changes:
     - the health shape;

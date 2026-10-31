@@ -1,4 +1,4 @@
-import { readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { acquireDataDirLock, LOCK_FILE } from './dataDirLock'
@@ -32,10 +32,32 @@ describe('acquireDataDirLock', () => {
     lock.release()
   })
 
-  it('replaces an unreadable lock', () => {
+  it('treats a fresh unreadable or empty lock as held (it may still be being written), and an old one as stale', () => {
     const dir = fresh()
+    writeFileSync(join(dir, LOCK_FILE), '')
+    expect(() => acquireDataDirLock(dir)).toThrow('Another server is using DATA_DIR.')
     writeFileSync(join(dir, LOCK_FILE), 'garbage')
+    expect(() => acquireDataDirLock(dir)).toThrow('Another server is using DATA_DIR.')
+    const old = new Date(Date.now() - 60000)
+    utimesSync(join(dir, LOCK_FILE), old, old)
     acquireDataDirLock(dir).release()
+  })
+
+  it('appears complete: a reader never sees an empty lock from a server that just started', () => {
+    const dir = fresh()
+    const lock = acquireDataDirLock(dir)
+    expect(readFileSync(join(dir, LOCK_FILE), 'utf8')).toMatch(/^\d+\n[0-9a-f]{16}\n$/)
+    lock.release()
+  })
+
+  it('lets only one process take over a stale lock: someone else already doing it means busy', () => {
+    const dir = fresh()
+    writeFileSync(join(dir, LOCK_FILE), '99999999\nstale\n')
+    mkdirSync(join(dir, `${LOCK_FILE}.takeover`))
+    expect(() => acquireDataDirLock(dir)).toThrow('Another server is using DATA_DIR.')
+    rmSync(join(dir, `${LOCK_FILE}.takeover`), { recursive: true })
+    acquireDataDirLock(dir).release()
+    expect(() => statSync(join(dir, `${LOCK_FILE}.takeover`))).toThrow()
   })
 
   it('removes its lock on release, so a new holder can start', () => {

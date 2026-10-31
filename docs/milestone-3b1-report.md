@@ -1,6 +1,6 @@
 # Milestone 3B.1 — Real Agent Runtime Foundation: Final Report
 
-**Brief:** [`plan.md`](../plan.md) · **Tasks:** [`tasks.md`](../tasks.md) · **Date:** 2026-10-31
+**Brief:** [`milestone-3b1-plan.md`](milestones/milestone-3b1-plan.md) · **Tasks:** [`milestone-3b1-tasks.md`](milestones/milestone-3b1-tasks.md) · **Date:** 2026-10-31
 
 > **The Claude Agent SDK is not installed or integrated, and no real agent execution exists.** The backend runs the mock runtime only: it steps a task through timed states and writes canned results that say "No AI was run". `RUNTIME=claude` starts a provider that reports "Claude Agent SDK not installed" and refuses tasks. Workspace and tool checks are policy checks, not an OS sandbox.
 

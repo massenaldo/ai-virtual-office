@@ -2,7 +2,7 @@ import { linkSync, mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } f
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import type { GatedAction, StartContext, ToolGate, ToolGateResult } from './runtime/types'
-import { actionDigest, canonicalJson, createToolGate } from './toolGate'
+import { actionDigest, actionHash, canonicalJson, createToolGate, type ToolGateDeps } from './toolGate'
 import { DEFAULT_ALLOWED_TOOLS } from './toolPolicy'
 import { makeWorkspaceRoot } from './test/workspaces'
 import { resolveWorkspace } from './workspaces'
@@ -19,8 +19,8 @@ const workspace = () => {
   return r.ok ? ({ ok: true, workspace: r.workspace } as const) : ({ ok: false } as const)
 }
 
-function gate(approve: (request: { tool: string; input: unknown }, digest: string) => Promise<ToolGateResult>, extra: { isLive?: () => boolean; stale?: (tool: string, detail: string) => void; signal?: AbortSignal } = {}): ToolGate {
-  return createToolGate({ taskId: 'task-1', policy, workspace, isLive: extra.isLive ?? (() => true), approve, stale: extra.stale ?? (() => {}), signal: extra.signal ?? new AbortController().signal })
+function gate(approve: (request: { tool: string; input: unknown }, digest: string) => Promise<ToolGateResult>, extra: { isLive?: () => boolean; stale?: (tool: string, detail: string) => void; signal?: AbortSignal; permit?: ToolGateDeps['permit'] } = {}): ToolGate {
+  return createToolGate({ taskId: 'task-1', policy, workspace, isLive: extra.isLive ?? (() => true), approve, stale: extra.stale ?? (() => {}), signal: extra.signal ?? new AbortController().signal, permit: extra.permit ?? (() => ({ ok: true })) })
 }
 const write = { tool: 'Write', input: { file_path: 'sub/out.txt', content: 'x' } }
 
@@ -174,5 +174,58 @@ describe('the start context', () => {
   it('has a gate and no raw approval or policy', () => {
     expectTypeOf<StartContext>().not.toHaveProperty('requestToolApproval')
     expectTypeOf<StartContext['tools']>().toEqualTypeOf<ToolGate>()
+  })
+})
+
+describe('createToolGate: permit', () => {
+  it('runs permit after the approval and before perform, with the digest and the checked paths', async () => {
+    const order: string[] = []
+    const permit = vi.fn((_r: unknown, _d: string, _p: unknown) => { order.push('permit'); return { ok: true } as const })
+    const g = gate((_r, d) => { order.push(`approve:${d.slice(0, 6)}`); return Promise.resolve(ALLOWED) }, { permit })
+    await g.use(write, () => { order.push('perform'); return 'ok' })
+    expect(order).toEqual([expect.stringMatching(/^approve:/), 'permit', 'perform'])
+    expect(permit).toHaveBeenCalledTimes(1)
+    const [request, digest, paths] = permit.mock.calls[0]
+    expect(request).toEqual(write)
+    expect(digest).toMatch(/^[0-9a-f]{64}$/)
+    expect(paths).toEqual([{ arg: 'file_path', relative: 'sub/out.txt' }])
+  })
+
+  it('does not perform when permit refuses, and says the permission was withdrawn or used', async () => {
+    const perform = vi.fn()
+    const out = await gate(() => Promise.resolve(ALLOWED), { permit: () => ({ ok: false }) }).use(write, perform)
+    expect(out).toEqual({ behavior: 'deny', outcome: 'revoked', message: 'The permission for tool "Write" was withdrawn or already used; it was not run.' })
+    expect(perform).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['the task is no longer live', { isLive: () => false }, 'cancelled'],
+    ['the signal aborted', { signal: AbortSignal.abort() }, 'cancelled'],
+  ] as const)('does not call permit when %s', async (_name, extra, outcome) => {
+    const permit = vi.fn(() => ({ ok: true }) as const)
+    const out = await gate(() => Promise.resolve(ALLOWED), { ...extra, permit }).use(write, vi.fn())
+    expect(out).toMatchObject({ behavior: 'deny', outcome })
+    expect(permit).not.toHaveBeenCalled()
+  })
+
+  it('does not call permit when the workspace changed or the path check failed after approval', async () => {
+    const permit = vi.fn(() => ({ ok: true }) as const)
+    await gate(() => { renameSync(ws.path('sandbox'), join(ws.root, 'moved')); return Promise.resolve(ALLOWED) }, { permit }).use(write, vi.fn())
+    expect(permit).not.toHaveBeenCalled()
+  })
+
+  it('does not call permit when the answer was a denial', async () => {
+    const permit = vi.fn(() => ({ ok: true }) as const)
+    await gate(() => Promise.resolve({ behavior: 'deny', outcome: 'denied', message: 'no' }), { permit }).use(write, vi.fn())
+    expect(permit).not.toHaveBeenCalled()
+  })
+})
+
+describe('actionHash', () => {
+  it('is stable across key order, differs per input and holds no workspace path', () => {
+    expect(actionHash('Write', { a: 1, b: { d: 2, c: 3 } })).toBe(actionHash('Write', { b: { c: 3, d: 2 }, a: 1 }))
+    expect(actionHash('Write', { a: 1 })).not.toBe(actionHash('Write', { a: 2 }))
+    expect(actionHash('Write', { a: 1 })).not.toBe(actionHash('Edit', { a: 1 }))
+    expect(actionHash('Write', { a: 1 })).toMatch(/^[0-9a-f]{64}$/)
   })
 })

@@ -58,7 +58,7 @@ export class ServerMockProvider implements DemoProvider {
       if (innerId === null) return
       if (result.behavior === 'allow') this.inner.respondToApproval(taskId, innerId, 'approve')
       else if (result.outcome === 'denied') this.inner.respondToApproval(taskId, innerId, 'deny')
-      else if (result.outcome === 'denied_by_policy' || result.outcome === 'stale_approval') this.inner.forceError(taskId, result.message)
+      else if (result.outcome === 'denied_by_policy' || result.outcome === 'stale_approval' || result.outcome === 'revoked') this.inner.forceError(taskId, result.message)
       // expired or cancelled: the manager has already ended the task and cancelled this run.
     })
   }

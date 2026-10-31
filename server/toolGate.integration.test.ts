@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentTask } from '../src/workforce/types'
+import { openPermissionStore } from './permissions/store'
 import { silentLogger } from './log'
 import { openWorkforceStore, type WorkforceStore } from './store'
 import { TaskManager, type LifecycleEvent } from './taskManager'
@@ -37,7 +38,7 @@ beforeEach(() => {
   fake = new FakeProvider()
   events = []
   manager = new TaskManager({
-    store, provider: fake, policy: { allowedTools: new Set(DEFAULT_ALLOWED_TOOLS) },
+    store, provider: fake, permissions: openPermissionStore({ dataDir: dir, now: () => NOW, log: silentLogger, writeFile: () => {} }), policy: { allowedTools: new Set(DEFAULT_ALLOWED_TOOLS) },
     config: { ...CONFIG, workspaceRoot: ws.root, workspaces: [{ id: 'sandbox', relativePath: 'sandbox' }, { id: 'other', relativePath: 'other' }] },
     now: () => NOW, log: silentLogger, onLifecycle: (e) => events.push(e),
   })
@@ -181,18 +182,21 @@ describe('stale or unwanted approvals never reach perform: tool and input', () =
     await pending
   })
 
-  it('a second request while one is pending is refused and the first still performs only its own input', async () => {
+  it('a second request waits behind the first, and the first approval never covers it', async () => {
     const { id, ctx } = await run()
     const first = vi.fn(() => 'first')
     const second = vi.fn(() => 'second')
     const pendingFirst = ctx.tools.use(write(), first)
-    const refused = await ctx.tools.use({ tool: 'Write', input: { file_path: 'sub/other.txt', content: 'y' } }, second)
-    expect(refused).toMatchObject({ behavior: 'deny', outcome: 'denied_by_policy' })
-    expect(second).not.toHaveBeenCalled()
+    const pendingSecond = ctx.tools.use({ tool: 'Write', input: { file_path: 'sub/other.txt', content: 'y' } }, second)
     expect(approve(id).ok).toBe(true)
     await expect(pendingFirst).resolves.toMatchObject({ behavior: 'allow', value: 'first' })
     expect(first).toHaveBeenCalledTimes(1)
+    // The second action has its own approval; the first one's did not carry over.
     expect(second).not.toHaveBeenCalled()
+    expect(task(id).status).toBe('waiting_for_approval')
+    expect(task(id).pendingApproval?.summary).toContain('sub/other.txt')
+    expect(approve(id).ok).toBe(true)
+    await expect(pendingSecond).resolves.toMatchObject({ behavior: 'allow', value: 'second' })
   })
 })
 

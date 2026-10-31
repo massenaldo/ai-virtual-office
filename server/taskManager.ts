@@ -7,22 +7,26 @@ import type { AgentTask, ApprovalDecision, TaskRuntime, WorkforceState } from '.
 import type { ServerConfig } from './config'
 import { messageTruncatedMarker, outputLimitMarker, truncateUtf8 } from './limits'
 import type { Logger } from './log'
+import type { PermissionStore } from './permissions/store'
 import { redactSecrets } from './redact'
 import { sourceFor, type DemoProvider, type ServerRuntimeProvider, type ToolGateResult, type ToolRequest } from './runtime/types'
 import type { WorkforceStore } from './store'
-import { createToolGate } from './toolGate'
+import { actionHash, createToolGate } from './toolGate'
 import { decideToolUse, sanitizeSummary, toolDeniedMessage, type DenyReason, type ToolPolicy } from './toolPolicy'
 import { resolveWorkspace, WORKSPACE_ID_RE, type ResolvedWorkspace, type WorkspaceReason } from './workspaces'
+
+/** What a person can answer an approval with. `approve` and `deny` are the older spellings of `allow_once` and `reject`. */
+export type ApprovalChoice = ApprovalDecision | 'allow_once' | 'allow_task' | 'allow_agent' | 'reject'
 
 export type ManagerError = { ok: false; code: 'not_found' | 'invalid' | 'conflict' | 'unavailable' | 'bad_request'; error: string }
 export type ManagerResult<T = Record<never, never>> = ({ ok: true } & T) | ManagerError
 
-export type LifecycleAction = 'task.start' | 'task.cancel' | 'task.force_cancelled' | 'task.timeout' | 'approval.requested' | 'approval.decided' | 'approval.timeout' | 'tool.allowed' | 'tool.denied' | 'tool.asked' | 'tool.stale' | 'workspace.rejected' | 'runtime.note'
+export type LifecycleAction = 'task.start' | 'task.cancel' | 'task.force_cancelled' | 'task.timeout' | 'approval.requested' | 'approval.decided' | 'approval.timeout' | 'tool.allowed' | 'tool.denied' | 'tool.asked' | 'tool.stale' | 'workspace.rejected' | 'runtime.note' | 'permission.granted' | 'permission.denied' | 'permission.revoked' | 'permission.expired' | 'permission.used'
 
 export type LifecycleActor = 'api' | 'system' | 'runtime'
 
 /** What the manager reports about itself: ids and reason codes only, never request bodies or paths. */
-export type LifecycleEvent = { action: LifecycleAction; actor: LifecycleActor; taskId: string | null; agentId: string; requestId?: string; workspaceId?: string; tool?: string; decision?: string; reason?: string; detail?: string }
+export type LifecycleEvent = { action: LifecycleAction; actor: LifecycleActor; taskId: string | null; agentId: string; requestId?: string; workspaceId?: string; tool?: string; decision?: string; reason?: string; digest?: string; actionHash?: string; ruleId?: string; detail?: string }
 
 /** Passed by the HTTP layer: a request id marks the call as coming from the API rather than a timer. */
 export type CallOptions = { requestId?: string }
@@ -42,6 +46,8 @@ export type TaskManagerOptions = {
   store: WorkforceStore
   provider: ServerRuntimeProvider
   policy: ToolPolicy
+  /** The permission rules: they decide, together with the policy, what each tool request gets. */
+  permissions: PermissionStore
   config: Pick<ServerConfig, 'taskTimeoutMs' | 'cancelGraceMs' | 'approvalTimeoutMs' | 'maxMessageBytes' | 'maxTaskOutputBytes' | 'workspaceRoot' | 'workspaces'> & { dataDir?: string }
   now: () => string
   log: Logger
@@ -49,13 +55,16 @@ export type TaskManagerOptions = {
   onLifecycle?: (e: LifecycleEvent) => void
 }
 
+/** How many tool requests may wait behind a pending approval in one task; one more is refused. */
+export const MAX_QUEUED_APPROVALS = 8
+
 export const APPROVAL_TIMEOUT_MESSAGE = (ms: number) => `No approval decision within ${Math.round(ms / 1000)} s`
 export const unavailableMessage = (kind: TaskRuntime, reason: string) => `The ${kind} runtime is not available: ${reason}.`
 
 type Timer = ReturnType<typeof setTimeout>
 
 /** Everything the manager holds for one task while it is active; deleted when the task ends. */
-type Run = { abort: AbortController; taskTimer: Timer | null; approvalTimer: Timer | null; approvalId: string | null; graceTimer: Timer | null; outputBytes: number; outputClosed: boolean; launched: boolean; workspace: ResolvedWorkspace | null; toolWaiter: { approvalId: string; tool: string; resolve: (r: ToolGateResult) => void } | null }
+type Run = { abort: AbortController; taskTimer: Timer | null; approvalTimer: Timer | null; approvalId: string | null; graceTimer: Timer | null; outputBytes: number; outputClosed: boolean; launched: boolean; workspace: ResolvedWorkspace | null; toolWaiter: { approvalId: string; tool: string; digest: string; actionHash: string; resolve: (r: ToolGateResult) => void } | null; toolQueue: Array<{ request: ToolRequest; digest: string; resolve: (r: ToolGateResult) => void }> }
 
 const CANCELLED: ToolGateResult = { behavior: 'deny', outcome: 'cancelled', message: 'The task is no longer running.' }
 
@@ -70,6 +79,7 @@ export class TaskManager {
   private readonly provider: ServerRuntimeProvider
   private readonly config: TaskManagerOptions['config']
   private readonly policy: ToolPolicy
+  private readonly permissions: PermissionStore
   private readonly now: () => string
   private readonly log: Logger
   private readonly onLifecycle: TaskManagerOptions['onLifecycle']
@@ -82,6 +92,7 @@ export class TaskManager {
     this.provider = opts.provider
     this.config = opts.config
     this.policy = opts.policy
+    this.permissions = opts.permissions
     this.now = opts.now
     this.log = opts.log
     this.onLifecycle = opts.onLifecycle
@@ -99,11 +110,11 @@ export class TaskManager {
   }
 
   /** Builds the event without undefined keys, so a missing field is distinguishable from an empty one. */
-  private report(action: LifecycleAction, task: AgentTask, x: { actor?: LifecycleActor; requestId?: string; tool?: string; decision?: string; reason?: string; detail?: string } = {}): void {
+  private report(action: LifecycleAction, task: AgentTask, x: { actor?: LifecycleActor; requestId?: string; tool?: string; decision?: string; reason?: string; digest?: string; actionHash?: string; ruleId?: string; detail?: string } = {}): void {
     const event: LifecycleEvent = { action, actor: x.actor ?? 'system', taskId: task.id, agentId: task.agentId }
     if (x.requestId !== undefined) event.requestId = x.requestId
     if (task.workspaceId !== null) event.workspaceId = task.workspaceId
-    for (const key of ['tool', 'decision', 'reason', 'detail'] as const) if (x[key] !== undefined) event[key] = x[key]
+    for (const key of ['tool', 'decision', 'reason', 'digest', 'actionHash', 'ruleId', 'detail'] as const) if (x[key] !== undefined) event[key] = x[key]
     this.onLifecycle?.(event)
   }
 
@@ -138,7 +149,7 @@ export class TaskManager {
     this.store.commit(assigned.state)
     this.store.commit(markStarting(this.state, assigned.taskId, this.now()))
 
-    const run: Run = { abort: new AbortController(), taskTimer: null, approvalTimer: null, approvalId: null, graceTimer: null, outputBytes: 0, outputClosed: false, launched: false, workspace, toolWaiter: null }
+    const run: Run = { abort: new AbortController(), taskTimer: null, approvalTimer: null, approvalId: null, graceTimer: null, outputBytes: 0, outputClosed: false, launched: false, workspace, toolWaiter: null, toolQueue: [] }
     this.runs.set(assigned.taskId, run)
     run.taskTimer = setTimeout(() => this.onTaskTimeout(assigned.taskId), this.config.taskTimeoutMs)
     const task = this.task(assigned.taskId)!
@@ -171,6 +182,7 @@ export class TaskManager {
           isLive: () => { const t = this.task(taskId); return !!t && (t.status === 'running' || t.status === 'waiting_for_approval') },
           signal: run.abort.signal,
           approve: (request, digest) => this.approveTool(taskId, request, digest),
+          permit: (request, digest, paths) => this.permitTool(taskId, request, digest, paths),
           stale: (tool, detail) => { const t = this.task(taskId); if (t) this.report('tool.stale', t, { actor: 'runtime', tool, decision: 'deny', reason: 'stale_approval', detail }) },
         }),
         audit: (note) => { const t = this.task(taskId); if (t) this.report('runtime.note', t, { actor: 'runtime', detail: note }) },
@@ -227,7 +239,9 @@ export class TaskManager {
     if (!run) return
     for (const timer of [run.taskTimer, run.approvalTimer, run.graceTimer]) if (timer) clearTimeout(timer)
     // A runtime still waiting on a tool answer must be released when its task ends, however it ends.
-    this.settleTool(run, CANCELLED)
+    this.settleAll(run, CANCELLED)
+    // Task and once permissions end with their task.
+    this.permissions.endTask(taskId)
     this.runs.delete(taskId)
   }
 
@@ -251,7 +265,7 @@ export class TaskManager {
     this.store.commit(applyRuntimeEvent(this.state, { type: 'failed', taskId, error: APPROVAL_TIMEOUT_MESSAGE(this.config.approvalTimeoutMs) }, this.now(), this.source))
     this.provider.cancel(taskId)
     run.abort.abort()
-    this.settleTool(run, { behavior: 'deny', outcome: 'expired', message: APPROVAL_TIMEOUT_MESSAGE(this.config.approvalTimeoutMs) })
+    this.settleAll(run, { behavior: 'deny', outcome: 'expired', message: APPROVAL_TIMEOUT_MESSAGE(this.config.approvalTimeoutMs) })
     this.finalize(taskId)
     this.report('approval.timeout', task)
   }
@@ -265,7 +279,7 @@ export class TaskManager {
     const run = this.runs.get(taskId)
     this.store.commit(requestCancel(this.state, taskId, this.now(), this.source))
     if (run?.taskTimer) clearTimeout(run.taskTimer)
-    if (run) { run.taskTimer = null; this.settleTool(run, CANCELLED) }
+    if (run) { run.taskTimer = null; this.settleAll(run, CANCELLED) }
     this.report('task.cancel', task, { actor: actorFor(opts), requestId: opts.requestId })
 
     if (this.task(taskId)?.status === 'cancelled') {
@@ -296,15 +310,27 @@ export class TaskManager {
   }
 
   /** An approval with a digest is for one exact action: the decision must name the same digest, or it is refused. */
-  decideApproval(taskId: string, approvalId: string, decision: ApprovalDecision, opts: CallOptions = {}, digest?: string): ManagerResult<{ task: AgentTask }> {
+  decideApproval(taskId: string, approvalId: string, choice: ApprovalChoice, opts: CallOptions = {}, digest?: string): ManagerResult<{ task: AgentTask }> {
     const task = this.task(taskId)
     if (!task) return { ok: false, code: 'not_found', error: 'Task not found.' }
     if (task.status !== 'waiting_for_approval' || !task.pendingApproval) return { ok: false, code: 'conflict', error: 'Task is not waiting for approval.' }
     if (task.pendingApproval.id !== approvalId || (task.pendingApproval.digest !== null && task.pendingApproval.digest !== digest)) return { ok: false, code: 'conflict', error: 'That approval is no longer pending.' }
-    this.store.commit(recordDecision(this.state, taskId, approvalId, decision, this.now(), this.source))
+    // The workforce state only knows approve and deny; the scope of an allow lives in the permission rule.
+    const decision: ApprovalDecision = choice === 'deny' || choice === 'reject' ? 'deny' : 'approve'
+    const scope = choice === 'allow_task' ? 'task' : choice === 'allow_agent' ? 'agent' : 'once'
     const run = this.runs.get(taskId)
+    const waiter = run?.toolWaiter?.approvalId === approvalId ? run.toolWaiter : null
+    if (!waiter && decision === 'approve' && scope !== 'once') return { ok: false, code: 'invalid', error: 'That approval can only be allowed once.' }
+    // The permission is recorded before the decision and before the runtime is answered: if it cannot be, the approval stays pending.
+    let granted: { ruleId?: string } = {}
+    if (waiter && decision === 'approve') {
+      const g = this.permissions.grant({ scope, effect: 'allow', tool: waiter.tool, agentId: task.agentId, ...(scope === 'agent' ? {} : { taskId }), ...(scope === 'once' ? { digest: waiter.digest } : {}) })
+      if (!g.ok) return g.error === 'scope_not_allowed_for_tool' ? { ok: false, code: 'invalid', error: 'That tool can only be allowed once.' } : { ok: false, code: 'unavailable', error: 'The permission could not be recorded.' }
+      granted = { ruleId: g.rule.id }
+    }
+    this.store.commit(recordDecision(this.state, taskId, approvalId, decision, this.now(), this.source))
     if (run) this.clearApproval(run)
-    this.report('approval.decided', task, { actor: actorFor(opts), requestId: opts.requestId, decision })
+    this.report('approval.decided', task, { actor: actorFor(opts), requestId: opts.requestId, decision: choice, ...granted, ...(waiter ? { digest: waiter.digest.slice(0, 12), actionHash: waiter.actionHash } : {}) })
     if (run?.toolWaiter?.approvalId === approvalId) {
       // A tool request the manager is holding: answer the runtime's promise; the runtime decides what happens next.
       this.settleTool(run, decision === 'approve' ? { behavior: 'allow', outcome: 'approved' } : { behavior: 'deny', outcome: 'denied', message: 'Denied by a human reviewer.' })
@@ -312,6 +338,7 @@ export class TaskManager {
       // An approval the (mock) provider raised itself: its reaction arrives as events.
       if (this.provider.kind === 'mock') this.provider.respondToApproval(taskId, approvalId, decision)
     }
+    if (run) this.promote(taskId, run)
     return { ok: true, task: this.task(taskId) ?? task }
   }
 
@@ -320,6 +347,7 @@ export class TaskManager {
     const activeTask = activeTaskFor(this.state, agentId)
     const { state, cancelledTaskId } = dropAgent(this.state, agentId)
     this.store.commit(state)
+    this.permissions.revokeForAgent(agentId)
     if (cancelledTaskId) {
       if (activeTask) this.report('task.cancel', activeTask, { actor: actorFor(opts), requestId: opts.requestId, detail: 'agent removed' })
       const run = this.runs.get(cancelledTaskId)
@@ -328,6 +356,25 @@ export class TaskManager {
       this.finalize(cancelledTaskId)
     }
     return { ok: true, cancelledTaskId }
+  }
+
+  /** Ends every tool request of a run that is waiting: the pending one and the queued ones. For a task that is over. */
+  private settleAll(run: Run, result: ToolGateResult): void {
+    this.settleTool(run, result)
+    for (const waiting of run.toolQueue.splice(0)) waiting.resolve(result)
+  }
+
+  /**
+   * After a decision, the next waiting requests are authorized again from scratch: a new rule may allow them, a deny rule or
+   * a revoke may stop them, and one that still needs a person becomes the pending approval. Stops at the first prompt.
+   */
+  private promote(taskId: string, run: Run): void {
+    while (run.toolQueue.length > 0 && run.toolWaiter === null && this.runs.get(taskId) === run) {
+      const task = this.task(taskId)
+      if (!task || task.status !== 'running') return
+      const next = run.toolQueue.shift()!
+      void this.approveTool(taskId, next.request, next.digest).then(next.resolve)
+    }
   }
 
   /** Resolves the runtime's pending tool request once; later calls do nothing. */
@@ -339,8 +386,9 @@ export class TaskManager {
   }
 
   /**
-   * The gate a runtime goes through before using a tool. The policy decides; an `ask` becomes the existing
-   * waiting_for_approval state, approval timer and approval endpoint. Every state change happens before this returns.
+   * The gate a runtime goes through before using a tool. The policy validates the request and keeps `ALLOWED_TOOLS` as a
+   * ceiling; then the permission rules say allow, ask or deny. An `ask` becomes the existing waiting_for_approval state,
+   * approval timer and approval endpoint. Every state change happens before this returns.
    */
   private approveTool(taskId: string, request: ToolRequest, digest: string): Promise<ToolGateResult> {
     const run = this.runs.get(taskId)
@@ -349,23 +397,55 @@ export class TaskManager {
 
     const d = decideToolUse(this.policy, request.tool, request.input, run.workspace)
     const tool = request.tool
-    if (d.decision === 'allow') {
-      this.report('tool.allowed', task, { actor: 'runtime', tool, decision: 'allow', reason: d.reason, detail: d.summary })
-      return Promise.resolve({ behavior: 'allow', outcome: 'allowed' })
-    }
-    const refuse = (reason: DenyReason): Promise<ToolGateResult> => {
-      this.report('tool.denied', task, { actor: 'runtime', tool, decision: 'deny', reason })
+    const ids = { digest: digest.slice(0, 12), actionHash: actionHash(tool, request.input) }
+    const refuse = (reason: DenyReason, extra: { ruleId?: string } = {}): Promise<ToolGateResult> => {
+      this.report('tool.denied', task, { actor: 'runtime', tool, decision: 'deny', reason, ...extra })
       return Promise.resolve({ behavior: 'deny', outcome: 'denied_by_policy', message: toolDeniedMessage(tool, reason) })
     }
     if (d.decision === 'deny') return refuse(d.reason)
-    if (task.status === 'waiting_for_approval' || run.toolWaiter) return refuse('approval_pending')
 
-    this.report('tool.asked', task, { actor: 'runtime', tool, decision: 'ask', reason: 'needs_approval', detail: d.summary })
+    const p = this.permissions.evaluate({ agentId: task.agentId, taskId, tool, digest, paths: d.paths?.map((x) => x.relative) ?? [] })
+    const ruleId = p.ruleId === null ? {} : { ruleId: p.ruleId }
+    if (p.effect === 'deny') {
+      this.report('permission.denied', task, { actor: 'runtime', tool, decision: 'deny', reason: p.source, ...ruleId, ...ids })
+      return refuse('permission_denied', ruleId)
+    }
+    if (p.effect === 'allow') {
+      this.report('tool.allowed', task, { actor: 'runtime', tool, decision: 'allow', reason: d.decision === 'allow' ? d.reason : `permission:${p.source}`, detail: d.summary, ...ruleId, ...ids })
+      return Promise.resolve({ behavior: 'allow', outcome: 'allowed' })
+    }
+    if (task.status === 'waiting_for_approval' || run.toolWaiter) {
+      // One person decision at a time per task; the others wait their turn, up to a limit.
+      if (run.toolQueue.length >= MAX_QUEUED_APPROVALS) return refuse('approval_pending')
+      return new Promise<ToolGateResult>((resolve) => { run.toolQueue.push({ request, digest, resolve }) })
+    }
+
+    this.report('tool.asked', task, { actor: 'runtime', tool, decision: 'ask', reason: 'needs_approval', detail: d.summary, ...ids })
     const approvalId = createId('approval')
-    const promise = new Promise<ToolGateResult>((resolve) => { run.toolWaiter = { approvalId, tool, resolve } })
-    this.onEvent({ type: 'approval_requested', taskId, approvalId, tool, summary: d.summary, digest, ...(d.review && run.workspace ? { review: { ...d.review, workspaceId: run.workspace.id, digest } } : {}) })
-    this.report('approval.requested', task, { actor: 'runtime', tool, detail: `approvalId=${approvalId}` })
+    const promise = new Promise<ToolGateResult>((resolve) => { run.toolWaiter = { approvalId, tool, digest, actionHash: ids.actionHash, resolve } })
+    this.onEvent({ type: 'approval_requested', taskId, approvalId, tool, summary: d.summary, digest, ...(d.decision === 'ask' && d.review && run.workspace ? { review: { ...d.review, workspaceId: run.workspace.id, digest } } : {}) })
+    this.report('approval.requested', task, { actor: 'runtime', tool, detail: `approvalId=${approvalId}`, ...ids })
     return promise
+  }
+
+  /** The last check before `perform`: the rules are asked again, and a once-grant is spent. Anything but a clear allow refuses. */
+  private permitTool(taskId: string, request: ToolRequest, digest: string, paths: ReadonlyArray<{ readonly relative: string }>): { ok: boolean } {
+    const task = this.task(taskId)
+    if (!task) return { ok: false }
+    const tool = request.tool
+    const ids = { digest: digest.slice(0, 12), actionHash: actionHash(tool, request.input) }
+    const p = this.permissions.evaluate({ agentId: task.agentId, taskId, tool, digest, paths: paths.map((x) => x.relative) })
+    const ruleId = p.ruleId === null ? {} : { ruleId: p.ruleId }
+    if (p.effect !== 'allow') {
+      this.report('permission.denied', task, { actor: 'runtime', tool, decision: 'deny', reason: 'revoked_or_changed', ...ruleId, ...ids })
+      return { ok: false }
+    }
+    if (p.source === 'once' && !(p.ruleId !== null && this.permissions.consumeOnce(p.ruleId))) {
+      this.report('permission.denied', task, { actor: 'runtime', tool, decision: 'deny', reason: 'already_used', ...ruleId, ...ids })
+      return { ok: false }
+    }
+    this.report('permission.used', task, { actor: 'runtime', tool, decision: 'allow', reason: p.source, ...ruleId, ...ids })
+    return { ok: true }
   }
 
   private demo(taskId: string): ManagerResult<{ task: AgentTask; provider: DemoProvider }> {
@@ -445,7 +525,7 @@ export class TaskManager {
     this.unsubscribe()
     for (const run of this.runs.values()) {
       for (const timer of [run.taskTimer, run.approvalTimer, run.graceTimer]) if (timer) clearTimeout(timer)
-      this.settleTool(run, CANCELLED)
+      this.settleAll(run, CANCELLED)
       run.abort.abort()
     }
     this.runs.clear()

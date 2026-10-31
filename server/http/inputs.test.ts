@@ -11,4 +11,12 @@ describe('parseApproval', () => {
   it('rejects a malformed digest', () => {
     for (const digest of ['', 'xyz', 'AB'.repeat(32), 'ab'.repeat(31), 5, null]) expect(() => parseApproval({ approvalId: 'a', decision: 'approve', digest })).toThrow('"digest" must be 64 lowercase hex characters.')
   })
+
+  it.each(['allow_once', 'allow_task', 'allow_agent', 'reject', 'approve', 'deny'])('accepts the choice %s', (decision) => {
+    expect(parseApproval({ approvalId: 'a', decision })).toEqual({ approvalId: 'a', decision, digest: undefined })
+  })
+
+  it.each(['maybe', 'ALLOW_ONCE', '', 5, null])('rejects the choice %j with the full list', (decision) => {
+    expect(() => parseApproval({ approvalId: 'a', decision })).toThrow('"decision" must be "allow_once", "allow_task", "allow_agent", "reject", "approve" or "deny".')
+  })
 })

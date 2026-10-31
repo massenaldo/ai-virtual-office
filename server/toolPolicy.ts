@@ -43,7 +43,7 @@ const ALLOWED_FIELDS: Record<string, readonly string[]> = {
 
 export type ToolPolicy = { readonly allowedTools: ReadonlySet<string> }
 
-export type DenyReason = 'unknown_tool' | 'not_allowed' | 'invalid_input' | 'invalid_path' | 'missing_path' | 'outside_workspace' | 'unsafe_symlink' | 'no_workspace' | 'approval_pending' | 'not_reviewable' | 'unsafe_link'
+export type DenyReason = 'unknown_tool' | 'not_allowed' | 'invalid_input' | 'invalid_path' | 'missing_path' | 'outside_workspace' | 'unsafe_symlink' | 'no_workspace' | 'approval_pending' | 'not_reviewable' | 'unsafe_link' | 'permission_denied'
 
 /** A path argument that passed the workspace check: the argument name and the path relative to the workspace. */
 export type CheckedPath = { readonly arg: string; readonly relative: string }
@@ -65,6 +65,7 @@ const DENY_TEXT: Record<DenyReason, string> = {
   approval_pending: 'another tool approval is already pending for this task',
   not_reviewable: 'the request cannot be shown to a reviewer in full',
   unsafe_link: 'the file has more than one name (a hard link)',
+  permission_denied: 'denied by a permission rule',
 }
 
 export function toolPolicyFrom(config: Pick<ServerConfig, 'allowedTools'>): ToolPolicy {

@@ -122,7 +122,7 @@ describe('tasks', () => {
     const pending = (await task(id)).pendingApproval
     expect((await task(id)).status).toBe('waiting_for_approval')
     expect(pending.tool).toBe('Write')
-    expect(await s.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'maybe' })).toMatchObject({ status: 400, body: { error: '"decision" must be "approve" or "deny".' } })
+    expect(await s.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'maybe' })).toMatchObject({ status: 400, body: { error: '"decision" must be "allow_once", "allow_task", "allow_agent", "reject", "approve" or "deny".' } })
     expect(await s.api('POST', `/api/tasks/${id}/approval`, { approvalId: '', decision: 'deny' })).toMatchObject({ status: 400, body: { error: '"approvalId" must be a non-empty string.' } })
     expect(pending.summary).toBe('Simulated request to write a file')
     const denied = await s.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'deny' })

@@ -225,7 +225,7 @@ Branch: `fix/3b12-1-info-disclosure`.
 
 Branch: `test/3b12-2-tool-gate-integration`.
 
-- [ ] **2.1 The digest travels with the approval.** (Decision 3)
+- [x] **2.1 The digest travels with the approval.** (Decision 3)
   - Files:
     - `server/taskManager.ts`: `approveTool(taskId, request, digest)`; `toolWaiter: { approvalId, tool, digest, resolve }`; `decideApproval(taskId, approvalId, decision, opts, digest?)`.
     - `server/http/inputs.ts`: `parseApproval` accepts optional `digest`, 64 lowercase hex characters.

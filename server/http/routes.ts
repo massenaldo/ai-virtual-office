@@ -137,8 +137,8 @@ export function createRoutes(deps: RouteDeps): Route[] {
       path: '/api/tasks/:id/approval',
       body: 'json',
       handler: ({ params, body, requestId }) => {
-        const { approvalId, decision } = parseApproval(body as Record<string, unknown>)
-        return { status: 200, body: { task: must(manager.decideApproval(params.id, approvalId, decision, { requestId })).task } }
+        const { approvalId, decision, digest } = parseApproval(body as Record<string, unknown>)
+        return { status: 200, body: { task: must(manager.decideApproval(params.id, approvalId, decision, { requestId }, digest)).task } }
       },
     },
   ]

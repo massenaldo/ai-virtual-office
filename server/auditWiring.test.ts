@@ -46,7 +46,7 @@ describe('audit wiring', () => {
     await until(async () => (await state(s!)).tasks[0].status === 'running')
     await s.api('POST', `/api/demo/tasks/${id}/request-approval`)
     const pending = (await state(s)).tasks[0].pendingApproval
-    const decided = await s.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'approve' })
+    const decided = await s.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'approve', digest: pending.digest })
     const R2 = decided.headers.get('x-request-id')
     await until(async () => (await state(s!)).tasks[0].status === 'completed')
     const records = readAudit(s).filter((r) => r.taskId === id)

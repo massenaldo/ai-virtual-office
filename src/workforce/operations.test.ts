@@ -269,6 +269,16 @@ describe('applyRuntimeEvent', () => {
   })
 })
 
+describe('approval digest', () => {
+  it('carries the action digest from the event into the pending approval, or null', () => {
+    const { state, taskId } = withTask()
+    const running = applyRuntimeEvent(markStarting(state, taskId, NOW), { type: 'started', taskId, executionId: 'e' }, NOW, 'mock')
+    const digest = 'ab'.repeat(32)
+    expect(applyRuntimeEvent(running, { type: 'approval_requested', taskId, approvalId: 'a1', tool: 'Write', summary: 's', digest }, LATER, 'mock').tasks[0].pendingApproval).toMatchObject({ id: 'a1', digest })
+    expect(applyRuntimeEvent(running, { type: 'approval_requested', taskId, approvalId: 'a1', tool: 'Write', summary: 's' }, LATER, 'mock').tasks[0].pendingApproval).toMatchObject({ digest: null })
+  })
+})
+
 describe('decideApproval', () => {
   it('ignores a stale id and a second decision', () => {
     const { state, taskId } = running()
@@ -352,7 +362,7 @@ describe('recoverInterruptedTasks', () => {
     const statuses = ['starting', 'running', 'waiting_for_approval', 'cancelling', 'queued'] as const
     s = {
       ...s,
-      tasks: statuses.map((status, i) => task(ids[i], { id: `task-${i}`, status, pendingApproval: status === 'waiting_for_approval' ? { id: 'a1', tool: 'Write', summary: 'x', requestedAt: NOW } : null, startedAt: status === 'queued' ? null : NOW })),
+      tasks: statuses.map((status, i) => task(ids[i], { id: `task-${i}`, status, pendingApproval: status === 'waiting_for_approval' ? { id: 'a1', tool: 'Write', summary: 'x', requestedAt: NOW, digest: null } : null, startedAt: status === 'queued' ? null : NOW })),
       agents: s.agents.map((a, i) => ({ ...a, currentTaskId: `task-${i}`, status: 'working' })),
     }
     const r = recoverInterruptedTasks(s, LATER)

@@ -32,6 +32,7 @@ const ROUTES: Array<{ action: string; call: (c: RemoteCommands) => unknown; meth
   { action: 'startTask', call: (c) => c.startTask('a1', { title: 'T', description: 'D' }), method: 'POST', path: '/api/agents/a1/tasks', body: '{"title":"T","description":"D"}' },
   { action: 'cancelTask', call: (c) => c.cancelTask('t1'), method: 'POST', path: '/api/tasks/t1/cancel' },
   { action: 'decideApproval', call: (c) => c.decideApproval('t1', 'ap1', 'deny'), method: 'POST', path: '/api/tasks/t1/approval', body: '{"approvalId":"ap1","decision":"deny"}' },
+  { action: 'decideApproval (with digest)', call: (c) => c.decideApproval('t1', 'ap1', 'approve', 'ef'.repeat(32)), method: 'POST', path: '/api/tasks/t1/approval', body: `{"approvalId":"ap1","decision":"approve","digest":"${'ef'.repeat(32)}"}` },
   { action: 'requestApproval', call: (c) => c.requestApproval('t1'), method: 'POST', path: '/api/demo/tasks/t1/request-approval' },
   { action: 'forceError', call: (c) => c.forceError('t1'), method: 'POST', path: '/api/demo/tasks/t1/force-error' },
   { action: 'restoreDemoAgents', call: (c) => c.restoreDemoAgents(), method: 'POST', path: '/api/demo/agents/restore' },

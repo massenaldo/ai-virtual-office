@@ -36,7 +36,8 @@ export type WorkforceController = {
   assignDesk(agentId: string, deskId: string | null): Awaitable<ActionResult>
   startTask(agentId: string, input: TaskInput): Awaitable<ActionResult>
   cancelTask(taskId: string): Awaitable<ActionResult>
-  decideApproval(taskId: string, approvalId: string, decision: ApprovalDecision): Awaitable<ActionResult>
+  /** digest: the pending approval's action digest, sent back so the server can check it is the same action. */
+  decideApproval(taskId: string, approvalId: string, decision: ApprovalDecision, digest?: string | null): Awaitable<ActionResult>
   requestApproval(taskId: string): void
   forceError(taskId: string): void
   restoreDemoAgents(): void

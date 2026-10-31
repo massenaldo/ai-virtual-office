@@ -146,7 +146,7 @@ The constraints:
 
 Branch: `fix/3b11-a-workspace-redaction`.
 
-- [ ] **A1. Workspace enforcement.**
+- [x] **A1. Workspace enforcement.**
   - Files: `server/workspaces.ts`, `server/toolPolicy.ts`, `server/runtime/mockProvider.ts` (only the Q3 change), and their tests.
   - RED first:
     - in `workspaces.test.ts`: (a) a root replaced by a symlink after config, so `resolveWorkspace` fails `escapes_root`; (b) `file.txt/x` → `invalid_path`; (c) a symlink inside the workspace re-pointed outside *between two calls*, so the first check passes and the second fails; (d) a path renamed between calls.
@@ -154,7 +154,7 @@ Branch: `fix/3b11-a-workspace-redaction`.
     - in `server/http/routes.test.ts`: `/api/workspaces`, `/api/state` and a 422 workspace error contain neither the root nor the workspace path.
     - in `mockProvider.test.ts`: the demo approval works with no workspace (per Q3) and with a workspace.
   - Verify: `npx vitest run server/workspaces.test.ts server/toolPolicy.test.ts server/runtime/mockProvider.test.ts server/http/routes.test.ts`, then `npm test` and `npx tsc -b`.
-- [ ] **A2. Redaction patterns.**
+- [x] **A2. Redaction patterns.**
   - Files: `server/redact.ts`, `server/redact.test.ts`, plus one sink test each in `taskManager.test.ts` and `audit.test.ts`.
   - Patterns:
     - URL `scheme://user:pass@` → `scheme://[REDACTED]@`;

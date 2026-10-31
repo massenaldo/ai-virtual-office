@@ -587,6 +587,15 @@ describe('tool approvals', () => {
     expect(store.state.activities.at(-1)?.message).toBe('key [REDACTED]')
   })
 
+  it('scrubs new secret shapes from messages, progress and failures', async () => {
+    const { id } = await running()
+    const gh = `ghp_${'a1B2c3D4e5'.repeat(4)}`
+    fake.emit({ type: 'message', taskId: id, text: `cloning https://bob:pw@example.com with ${gh}` })
+    expect(store.state.activities.at(-1)?.message).toBe('cloning https://[REDACTED]@example.com with [REDACTED]')
+    fake.emit({ type: 'failed', taskId: id, error: 'mysql --password hunter2 failed' })
+    expect(task(id).errorMessage).toBe('mysql --password [REDACTED] failed')
+  })
+
   it('state never contains the workspace path', async () => {
     const { ctx } = await running()
     void ctx.requestToolApproval({ tool: 'Write', input: { file_path: join(ws.path('sandbox'), 'notes.md'), content: 'x' } })

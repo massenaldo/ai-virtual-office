@@ -1,7 +1,7 @@
 # Milestone 3B.1 — Real Agent Runtime Foundation: Tasks
 
 **Spec:** [`plan.md`](plan.md) (Milestone 3B.1 brief). This file is my working task list for that spec.
-**Status:** Approved, 2026-10-31. Q1–Q5 answered with the recommendations (see "Decisions" at the end). Stages A–C are done and merged; Stage E is done (in review). The final report is `docs/milestone-3b1-report.md`.
+**Status:** Approved, 2026-10-31. Q1–Q5 answered with the recommendations (see "Decisions" at the end). Stages A–D are done and merged; Stage E is done (in review). The final report is `docs/milestone-3b1-report.md`.
 **Earlier milestones:** [`milestone-3a-tasks.md`](docs/milestones/milestone-3a-tasks.md) ([report](docs/milestone-3a-report.md)), and [`milestone-2-tasks.md`](docs/milestones/milestone-2-tasks.md).
 
 ## What this milestone is

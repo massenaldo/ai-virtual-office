@@ -672,6 +672,8 @@ describe('tool approvals', () => {
     const gh = `ghp_${'a1B2c3D4e5'.repeat(4)}`
     fake.emit({ type: 'message', taskId: id, text: `cloning https://bob:pw@example.com with ${gh}` })
     expect(store.state.activities.at(-1)?.message).toBe('cloning https://[REDACTED]@example.com with [REDACTED]')
+    fake.emit({ type: 'message', taskId: id, text: `slack ${['xoxb', '123456789012', '1234567890123', 'AbCdEfGhIjKlMnOpQrStUvWx'].join('-')} and mysql -uroot -pS3cret db` })
+    expect(store.state.activities.at(-1)?.message).toBe('slack [REDACTED] and mysql -uroot -p[REDACTED] db')
     fake.emit({ type: 'failed', taskId: id, error: 'mysql --password hunter2 failed' })
     expect(task(id).errorMessage).toBe('mysql --password [REDACTED] failed')
   })

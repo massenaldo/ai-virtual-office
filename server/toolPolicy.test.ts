@@ -128,7 +128,7 @@ describe('decideToolUse', () => {
   })
 
   it('refuses to ask about a command that contains a secret of the new shapes', () => {
-    for (const command of [`git clone https://u:p@example.com/r.git`, `echo ghp_${'a1B2c3D4e5'.repeat(4)}`, 'mysql --password hunter2', 'export AWS=AKIAIOSFODNN7EXAMPLE'])
+    for (const command of [`curl -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6y' x`, 'mysql -uroot -pS3cret db', 'psql postgres://u:pa/ss@db/app', `git clone https://u:p@example.com/r.git`, `echo ghp_${'a1B2c3D4e5'.repeat(4)}`, 'mysql --password hunter2', 'export AWS=AKIAIOSFODNN7EXAMPLE'])
       expect(decide('Bash', { command })).toEqual(deny('not_reviewable'))
   })
 

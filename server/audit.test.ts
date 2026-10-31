@@ -58,6 +58,8 @@ describe('openAuditLog', () => {
     expect(a.detail).toBe('path <workspace-root>/a key [REDACTED]')
     audit.write({ action: 'runtime.note', actor: 'runtime', detail: 'AKIAIOSFODNN7EXAMPLE and https://u:p@h.test' })
     expect(JSON.parse(lines().at(-1)!).detail).toBe('[REDACTED] and https://[REDACTED]@h.test')
+    audit.write({ action: 'runtime.note', actor: 'runtime', detail: `redis://:p@ss@host and ${['AIza', 'SyA-1234567890abcdefghijklmnopqrstu'].join('')}` })
+    expect(JSON.parse(lines().at(-1)!).detail).toBe('redis://[REDACTED]@host and [REDACTED]')
     expect(b.taskId).toHaveLength(64)
     expect(b.taskId.endsWith('…')).toBe(true)
     expect(c.detail).toHaveLength(512)

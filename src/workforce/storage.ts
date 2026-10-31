@@ -1,7 +1,7 @@
 import { DEPARTMENTS } from '../layout/catalog'
 import { createDemoWorkforce } from './demo'
 import { emptyWorkforce, isActiveTask, recoverInterruptedTasks } from './operations'
-import { ACTIVITY_LIMIT, WORKFORCE_SCHEMA_VERSION, type ActivityType, type Agent, type AgentActivity, type AgentStatus, type AgentTask, type PendingApproval, type TaskEndReason, type TaskRuntime, type TaskStatus, type WorkforceState } from './types'
+import { ACTIVITY_LIMIT, REVIEW_MAX_BYTES, WORKFORCE_SCHEMA_VERSION, type ActivityType, type Agent, type AgentActivity, type AgentStatus, type AgentTask, type PendingApproval, type ToolReview, type TaskEndReason, type TaskRuntime, type TaskStatus, type WorkforceState } from './types'
 
 // Kept apart from the layout key so agent changes can never overwrite the saved office.
 export const WORKFORCE_STORAGE_KEY = 'ai-virtual-office:workforce:v2'
@@ -31,7 +31,7 @@ export function serializeWorkforce(s: WorkforceState): string {
   return JSON.stringify({
     schemaVersion: s.schemaVersion,
     agents: s.agents.map((a) => ({ id: a.id, name: a.name, role: a.role, department: a.department, deskId: a.deskId, status: a.status, currentTaskId: a.currentTaskId, runtimeMode: a.runtimeMode, demo: a.demo, createdAt: a.createdAt, lastActivityAt: a.lastActivityAt })),
-    tasks: s.tasks.map((t) => ({ id: t.id, agentId: t.agentId, title: t.title, description: t.description, status: t.status, createdAt: t.createdAt, startedAt: t.startedAt, completedAt: t.completedAt, resultSummary: t.resultSummary, errorMessage: t.errorMessage, executionId: t.executionId, timeoutMs: t.timeoutMs, runtime: t.runtime, workspaceId: t.workspaceId, sessionId: t.sessionId, endedReason: t.endedReason, pendingApproval: t.pendingApproval && { id: t.pendingApproval.id, tool: t.pendingApproval.tool, summary: t.pendingApproval.summary, requestedAt: t.pendingApproval.requestedAt, digest: t.pendingApproval.digest } })),
+    tasks: s.tasks.map((t) => ({ id: t.id, agentId: t.agentId, title: t.title, description: t.description, status: t.status, createdAt: t.createdAt, startedAt: t.startedAt, completedAt: t.completedAt, resultSummary: t.resultSummary, errorMessage: t.errorMessage, executionId: t.executionId, timeoutMs: t.timeoutMs, runtime: t.runtime, workspaceId: t.workspaceId, sessionId: t.sessionId, endedReason: t.endedReason, pendingApproval: t.pendingApproval && { id: t.pendingApproval.id, tool: t.pendingApproval.tool, summary: t.pendingApproval.summary, requestedAt: t.pendingApproval.requestedAt, digest: t.pendingApproval.digest, review: t.pendingApproval.review } })),
     activities: s.activities.slice(-ACTIVITY_LIMIT).map((a) => ({
       id: a.id, agentId: a.agentId, taskId: a.taskId, type: a.type, message: a.message, timestamp: a.timestamp, source: a.source,
       ...(a.type === 'desk-assigned' ? { deskId: a.deskId } : {}),
@@ -55,12 +55,25 @@ function parseAgent(v: unknown): Agent | null {
   return { id: v.id, name: v.name, role: v.role, department: v.department as Agent['department'], deskId: v.deskId, status: v.status, currentTaskId: v.currentTaskId, runtimeMode: v.runtimeMode as Agent['runtimeMode'], demo: v.demo, createdAt: v.createdAt, lastActivityAt: v.lastActivityAt }
 }
 
+/** A pending review must be well formed, within the size limit, and bound to the same digest as its approval. */
+function parseReview(v: unknown, approvalDigest: string | null): ToolReview | null {
+  if (!isObject(v) || approvalDigest === null || v.digest !== approvalDigest || !isText(v.workspaceId) || !isText(v.path)) return null
+  if (!Number.isInteger(v.bytes) || (v.bytes as number) < 0 || !Number.isInteger(v.lines) || (v.lines as number) < 0) return null
+  const base = { path: v.path, bytes: v.bytes as number, lines: v.lines as number, workspaceId: v.workspaceId, digest: approvalDigest }
+  const size = (...parts: string[]) => parts.reduce((n, p) => n + new TextEncoder().encode(p).length, new TextEncoder().encode(base.path).length)
+  if (v.kind === 'write' && typeof v.content === 'string') return size(v.content) <= REVIEW_MAX_BYTES ? { ...base, kind: 'write', content: v.content } : null
+  if (v.kind === 'edit' && typeof v.oldString === 'string' && typeof v.newString === 'string' && typeof v.replaceAll === 'boolean') return size(v.oldString, v.newString) <= REVIEW_MAX_BYTES ? { ...base, kind: 'edit', oldString: v.oldString, newString: v.newString, replaceAll: v.replaceAll } : null
+  return null
+}
+
 function parseApproval(v: unknown): PendingApproval | null {
   if (!isObject(v) || !isText(v.id) || !isText(v.tool) || typeof v.summary !== 'string' || !isTime(v.requestedAt)) return null
   // An approval saved before digests existed has none; anything else must be a SHA-256 hex string.
   const digest = v.digest === undefined ? null : v.digest
   if (digest !== null && !(typeof digest === 'string' && /^[0-9a-f]{64}$/.test(digest))) return null
-  return { id: v.id, tool: v.tool, summary: v.summary, requestedAt: v.requestedAt, digest }
+  const review = v.review === undefined || v.review === null ? null : parseReview(v.review, digest)
+  if (v.review !== undefined && v.review !== null && review === null) return null
+  return { id: v.id, tool: v.tool, summary: v.summary, requestedAt: v.requestedAt, digest, review }
 }
 
 function parseTask(v: unknown): AgentTask | null {
@@ -134,7 +147,7 @@ export function migrateWorkforceV1(raw: unknown): unknown {
       status: waiting ? 'waiting_for_approval' : t.status,
       timeoutMs: null, runtime: 'mock', sessionId: null,
       endedReason: typeof t.status === 'string' ? V1_END[t.status] ?? null : null,
-      pendingApproval: waiting ? { id: `legacy-${t.id}`, tool: 'unknown', summary: 'Waiting for input (from an earlier version)', requestedAt: t.startedAt ?? t.createdAt, digest: null } : null,
+      pendingApproval: waiting ? { id: `legacy-${t.id}`, tool: 'unknown', summary: 'Waiting for input (from an earlier version)', requestedAt: t.startedAt ?? t.createdAt, digest: null, review: null } : null,
     }
   })
   const activities = raw.activities.map((a) => (isObject(a) && a.type === 'task-waiting' ? { ...a, type: 'task-approval-requested', approvalId: `legacy-${a.taskId}` } : a))

@@ -493,6 +493,15 @@ describe('tool approvals', () => {
   describe('the digest travels with the approval', () => {
     const digestOf = (id: string) => actionDigest({ taskId: id, workspaceId: 'sandbox', workspacePath: ws.path('sandbox'), tool: 'Write', input: write.input })
 
+    it('puts the review, with workspace and digest, on the pending approval', async () => {
+      const { id, ctx } = await running()
+      void gate(ctx, write)
+      const p = task(id).pendingApproval!
+      expect(p.review).toEqual({ kind: 'write', path: 'notes.md', bytes: 5, lines: 1, content: 'hello', workspaceId: 'sandbox', digest: digestOf(id) })
+      expect(p.review?.digest).toBe(p.digest)
+      expect(JSON.stringify(store.state)).not.toContain(ws.root)
+    })
+
     it('puts the action digest on the pending approval', async () => {
       const { id, ctx } = await running()
       void gate(ctx, write)
@@ -529,7 +538,7 @@ describe('tool approvals', () => {
     const { m, id, ctx } = await running()
     let settled: unknown = 'pending'
     void gate(ctx, write).then((r) => { settled = r })
-    expect(task(id)).toMatchObject({ status: 'waiting_for_approval', pendingApproval: { tool: 'Write', summary: 'Write notes.md (5 B): "hello"' } })
+    expect(task(id)).toMatchObject({ status: 'waiting_for_approval', pendingApproval: { tool: 'Write', summary: 'Write notes.md (5 B, 1 line): review the full content' } })
     expect(agent().status).toBe('waiting')
     await tick()
     expect(settled).toBe('pending')

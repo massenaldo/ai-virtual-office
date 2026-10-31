@@ -52,7 +52,7 @@ describe('audit wiring', () => {
     const records = readAudit(s).filter((r) => r.taskId === id)
     expect(records.map((r) => r.action)).toEqual(['task.start', 'tool.asked', 'approval.requested', 'approval.decided'])
     expect(records[0]).toMatchObject({ actor: 'api', requestId: R, workspaceId: 'sandbox' })
-    expect(records[1]).toMatchObject({ actor: 'runtime', tool: 'Write', detail: 'Write simulated.txt (39 B): "Simulated content (nothing is written)."' })
+    expect(records[1]).toMatchObject({ actor: 'runtime', tool: 'Write', detail: 'Write simulated.txt (39 B, 1 line): review the full content' })
     expect(records[3]).toMatchObject({ decision: 'approve', requestId: R2 })
   })
 

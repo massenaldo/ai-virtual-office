@@ -371,7 +371,7 @@ Branch: `feat/3b12-4-redaction`.
 
 Branch: `feat/3b12-5-write-review`. It depends on 2.1. Opus reviews the PR before merge.
 
-- [ ] **5.1 Server: the bounded `review` payload.** (Decision 4)
+- [x] **5.1 Server: the bounded `review` payload.** (Decision 4)
   - Files:
     - `server/toolPolicy.ts`: `buildReview(tool, input, rel, workspaceId)`, `REVIEW_MAX_BYTES`, `reviewable(text)` (control, C1 and bidi check plus the redaction check). The Write/Edit summary becomes the short line. `decideToolUse` returns `review` on `ask` for Write and Edit.
     - `server/taskManager.ts`: `approveTool` puts `review` (with the digest) on `approval_requested`; `cap()` applies `hidePaths` to `path` only and never cuts content.
@@ -389,7 +389,7 @@ Branch: `feat/3b12-5-write-review`. It depends on 2.1. Opus reviews the PR befor
     - the review survives a `workforce.json` round trip, and an oversized or mismatched review on load is rejected;
     - Bash with a long command is still `not_reviewable`.
   - Verify: `npx vitest run server/toolPolicy.test.ts server/taskManager.test.ts server/toolGate.integration.test.ts src/workforce/storage.test.ts`, then `npm test` and `npx tsc -b`.
-- [ ] **5.2 UI: the review pane.** (Decision 5)
+- [x] **5.2 UI: the review pane.** (Decision 5)
   - Files: new `src/workforce/ui/ApprovalReview.tsx` (and its test), `src/workforce/ui/AgentDetail.tsx` (renders it; Approve is disabled until it has been opened; sends `digest`), `src/workforce/view.ts` (`formatReviewLines`, whitespace markers), its CSS, and `src/workforce/view.test.ts`.
   - RED first:
     - with a Write review, the pane shows the workspace id, path, size, digest prefix and every line, numbered (a 2,000-line file renders all 2,000 lines, with no ellipsis);

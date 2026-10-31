@@ -362,7 +362,7 @@ describe('recoverInterruptedTasks', () => {
     const statuses = ['starting', 'running', 'waiting_for_approval', 'cancelling', 'queued'] as const
     s = {
       ...s,
-      tasks: statuses.map((status, i) => task(ids[i], { id: `task-${i}`, status, pendingApproval: status === 'waiting_for_approval' ? { id: 'a1', tool: 'Write', summary: 'x', requestedAt: NOW, digest: null } : null, startedAt: status === 'queued' ? null : NOW })),
+      tasks: statuses.map((status, i) => task(ids[i], { id: `task-${i}`, status, pendingApproval: status === 'waiting_for_approval' ? { id: 'a1', tool: 'Write', summary: 'x', requestedAt: NOW, digest: null, review: null } : null, startedAt: status === 'queued' ? null : NOW })),
       agents: s.agents.map((a, i) => ({ ...a, currentTaskId: `task-${i}`, status: 'working' })),
     }
     const r = recoverInterruptedTasks(s, LATER)

@@ -1,7 +1,7 @@
 # Milestone 3B.1.1 — Security Hardening & E2E Verification: Tasks
 
 **Spec:** [`plan.md`](plan.md) (Milestone 3B.1.1 brief). This file is my working task list for that spec.
-**Status:** Approved, 2026-10-31. Q1–Q3 answered with the recommendations (see "Decisions"). Stage A is merged; Stage B is merged; Stage C is in review.
+**Status:** Approved, 2026-10-31. Q1–Q3 answered with the recommendations (see "Decisions"). Stage A is merged; Stage B is merged; Stage C is merged; Stage D is in review.
 **Earlier milestones:** [`milestone-3b1-tasks.md`](docs/milestones/milestone-3b1-tasks.md) ([report](docs/milestone-3b1-report.md)), [`milestone-3a-tasks.md`](docs/milestones/milestone-3a-tasks.md) ([report](docs/milestone-3a-report.md)).
 
 ## What this milestone is
@@ -236,7 +236,7 @@ Branch: `feat/3b11-c-api-token`. The design here assumes Q1 = A. Under B, C2 bec
 
 Branch: `docs/3b11-d-sandbox`.
 
-- [ ] **D1. `docs/sandbox-architecture.md`.**
+- [x] **D1. `docs/sandbox-architecture.md`.**
   - The first line states: **"Design only. Not implemented. No sandbox isolation is active."**
   - It covers plan.md Phase 2:
     - a non-root user;

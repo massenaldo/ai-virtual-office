@@ -61,7 +61,7 @@ export function createToolGate(deps: ToolGateDeps): ToolGate {
       }
       const tool = request.tool
       const before = deps.workspace()
-      // An unavailable workspace has no digest; the approver's own policy check refuses it first.
+      // An unavailable workspace has no digest of its own; the use-time check below refuses the action if it is still unavailable.
       const digest = digestFor(tool, input, before) ?? actionDigest({ taskId: deps.taskId, workspaceId: null, workspacePath: null, tool, input })
       const answer = await deps.approve({ tool, input }, digest)
       if (answer.behavior === 'deny') return answer
@@ -70,7 +70,7 @@ export function createToolGate(deps: ToolGateDeps): ToolGate {
       if (!deps.isLive()) return deny('cancelled', 'The task is no longer running.')
       const now = deps.workspace()
       const refuse = (why: string): GatedOutcome<never> => {
-        deps.stale(tool, `${why}; approval ${digest.slice(0, 12)}`)
+        deps.stale(tool, `${why}; digest ${digest.slice(0, 12)}`)
         return deny('stale_approval', `Tool "${tool}" was not run: the action changed after it was approved (${why}).`)
       }
       if (!now.ok) return refuse('workspace unavailable')

@@ -21,8 +21,9 @@ export type GatedOutcome<T> =
 
 /**
  * The only way a runtime may use a tool. `perform` runs only after the server's policy and, for write, execute and
- * network tools, a human approved exactly this action, re-checked immediately before it runs. The runtime never sees the
- * policy, the workspace path or an approval id, so it cannot use a tool any other way through this contract.
+ * network tools, a human approved exactly this action, re-checked immediately before it runs. Through this contract the
+ * runtime has no policy and no approval id, so it has no other way to use a tool. (It does get `workspace.path` in the start
+ * context, because a real runtime needs it as its working directory; that is a path to use, not a way around the gate.)
  */
 export interface ToolGate {
   use<T>(request: ToolRequest, perform: (action: GatedAction) => Promise<T> | T): Promise<GatedOutcome<T>>

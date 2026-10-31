@@ -1,8 +1,8 @@
-import { readFileSync, statSync } from 'node:fs'
+import { readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { AUDIT_FILE } from './audit'
-import { MIN_TOKEN_CHARS, TOKEN_FILE, tokenMatches } from './auth'
+import { MIN_TOKEN_CHARS, resolveApiToken, TOKEN_FILE, tokenMatches } from './auth'
 import { parseConfig } from './config'
 import { recordingLogger } from './log'
 import { rawRequest, startTestServer, tempDataDir, TEST_TOKEN, type TestServer } from './test/helpers'
@@ -100,6 +100,17 @@ describe('where the token comes from', () => {
     expect(first.value).toMatch(/^[A-Za-z0-9_-]+$/)
     expect([first.ok, second.ok]).toEqual([200, 200])
     expect(second.value).not.toBe(first.value)
+  })
+
+  it('does not follow or reuse a pre-existing temporary file when writing the token', () => {
+    const dir = tempDataDir()
+    const victim = join(dir, 'victim.txt')
+    writeFileSync(victim, 'keep me')
+    symlinkSync(victim, join(dir, `${TOKEN_FILE}.tmp`))
+    const token = resolveApiToken({ configured: null, dataDir: dir })
+    expect(readFileSync(victim, 'utf8')).toBe('keep me')
+    expect(readFileSync(join(dir, TOKEN_FILE), 'utf8').trim()).toBe(token.value)
+    expect(statSync(join(dir, TOKEN_FILE)).mode & 0o777).toBe(0o600)
   })
 
   it('uses a configured API_TOKEN and does not write it to disk', async () => {

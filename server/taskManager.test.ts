@@ -493,7 +493,7 @@ describe('tool approvals', () => {
     const { m, id, ctx } = await running()
     let settled: unknown = 'pending'
     void gate(ctx, write).then((r) => { settled = r })
-    expect(task(id)).toMatchObject({ status: 'waiting_for_approval', pendingApproval: { tool: 'Write', summary: 'Write notes.md (5 B)' } })
+    expect(task(id)).toMatchObject({ status: 'waiting_for_approval', pendingApproval: { tool: 'Write', summary: 'Write notes.md (5 B): "hello"' } })
     expect(agent().status).toBe('waiting')
     await tick()
     expect(settled).toBe('pending')
@@ -560,6 +560,25 @@ describe('tool approvals', () => {
     const cancelled = { behavior: 'deny', outcome: 'cancelled', message: 'The task is no longer running.' }
     fake.emit({ type: 'completed', taskId: id, summary: 'done' })
     await expect(gate(ctx, write)).resolves.toEqual(cancelled)
+  })
+
+  it('hides the workspace path in an approval summary', async () => {
+    const { id, ctx } = await running({}, ['Bash'])
+    void gate(ctx, { tool: 'Bash', input: { command: `cat ${ws.path('sandbox')}/notes.md` } })
+    expect(task(id).pendingApproval?.summary).toBe('Run command: cat <workspace>/notes.md')
+  })
+
+  it('ignores an approval a real runtime raises by itself, and the decision cannot reach it', async () => {
+    const claude = new FakeProvider({ kind: 'claude' })
+    const m = make(claude, wsConfig())
+    const r = m.startTask(FORGE, INPUT, { workspaceId: 'sandbox' })
+    const id = r.ok ? r.task.id : ''
+    await tick()
+    claude.emit({ type: 'started', taskId: id, executionId: 'e' })
+    claude.emit({ type: 'approval_requested', taskId: id, approvalId: 'approval-raw', tool: 'Bash', summary: 'rm -rf /' })
+    expect(task(id).status).toBe('running')
+    expect(task(id).pendingApproval).toBeNull()
+    expect(claude.responses).toEqual([])
   })
 
   it('hides workspace paths in runtime output', async () => {

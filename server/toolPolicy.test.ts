@@ -51,8 +51,8 @@ describe('decideToolUse', () => {
 
   it('always asks for write, execute and network tools even when allowlisted', () => {
     const ask = (summary: string): ToolDecision => ({ decision: 'ask', reason: 'needs_approval', summary })
-    expect(decide('Write', { file_path: 'notes.md', content: 'hello' })).toEqual(ask('Write notes.md (5 B)'))
-    expect(decide('Edit', { file_path: 'notes.md', old_string: 'h', new_string: 'H' })).toEqual(ask('Edit notes.md'))
+    expect(decide('Write', { file_path: 'notes.md', content: 'hello' })).toEqual(ask('Write notes.md (5 B): "hello"'))
+    expect(decide('Edit', { file_path: 'notes.md', old_string: 'h', new_string: 'H' })).toEqual(ask('Edit notes.md: replace "h" with "H"'))
     expect(decide('Bash', { command: 'npm test' })).toEqual(ask('Run command: npm test'))
     expect(decide('WebFetch', { url: 'https://example.com/a?x=1#h', prompt: 'p' })).toEqual(ask('Fetch https://example.com/a?x=1'))
     expect(decide('WebSearch', { query: 'vite ssr' })).toEqual(ask('Search the web for vite ssr'))
@@ -110,6 +110,21 @@ describe('decideToolUse', () => {
     expect(decide('Bash', { command: `echo ${'a'.repeat(250)} ; rm -rf ~` })).toEqual(deny('not_reviewable'))
     expect(decide('WebFetch', { url: 'https://example.com/a?token=abc12345' })).toEqual(deny('not_reviewable'))
     expect(decide('Bash', { command: 'echo 1\nls -l' })).toMatchObject({ decision: 'ask', summary: 'Run command: echo 1 ls -l' })
+  })
+
+  it('shows the whole content of a Write and the whole change of an Edit, or refuses to ask', () => {
+    const ask = (summary: string): ToolDecision => ({ decision: 'ask', reason: 'needs_approval', summary })
+    expect(decide('Write', { file_path: 'run.sh', content: 'echo hi\nrm -rf x' })).toEqual(ask('Write run.sh (16 B): "echo hi\\nrm -rf x"'))
+    expect(decide('Edit', { file_path: 'a.txt', old_string: 'x', new_string: 'y', replace_all: true })).toEqual(ask('Edit a.txt: replace "x" with "y" (all occurrences)'))
+    expect(decide('Write', { file_path: 'big.txt', content: 'x'.repeat(500) })).toEqual(deny('not_reviewable'))
+    expect(decide('Edit', { file_path: 'a.txt', old_string: 'x'.repeat(150), new_string: 'y'.repeat(150) })).toEqual(deny('not_reviewable'))
+    expect(decide('Write', { file_path: 'k.txt', content: 'api_key=abc123456' })).toEqual(deny('not_reviewable'))
+  })
+
+  it('refuses glob patterns that expand to a parent directory', () => {
+    for (const pattern of ['{..,x}/secret', '@(..)/x', '*..', 'a/{b,../c}']) expect(decide('Glob', { pattern })).toEqual(deny('outside_workspace'))
+    expect(decide('Grep', { pattern: 'x', glob: '{..,src}/*.ts' })).toEqual(deny('outside_workspace'))
+    expect(decide('Glob', { pattern: '**/*.{ts,tsx}' })).toMatchObject({ decision: 'allow' })
   })
 
   it('refuses to ask about a command that contains a secret of the new shapes', () => {

@@ -101,7 +101,8 @@ function fieldsValid(tool: string, i: Record<string, unknown>): boolean {
 
 /** A glob is matched inside the workspace: no absolute, home-relative or climbing pattern. */
 function globInside(pattern: string): boolean {
-  return !pattern.startsWith('/') && !pattern.startsWith('~') && !pattern.includes('\\') && !pattern.split('/').includes('..')
+  // Any `..` at all, not only as a whole segment: a glob engine expands `{..,x}` or `@(..)` into a parent directory.
+  return !pattern.startsWith('/') && !pattern.startsWith('~') && !pattern.includes('\\') && !pattern.includes('..')
 }
 
 function summaryFor(tool: string, i: Record<string, unknown>, rel: string | null): string {
@@ -109,8 +110,9 @@ function summaryFor(tool: string, i: Record<string, unknown>, rel: string | null
     case 'Read': return `Read ${rel}`
     case 'Glob': return `Find files matching ${i.pattern} in ${rel ?? '.'}`
     case 'Grep': return `Search for ${i.pattern} in ${rel ?? '.'}`
-    case 'Write': return `Write ${rel} (${formatBytes(Buffer.byteLength(i.content as string))})`
-    case 'Edit': return `Edit ${rel}`
+    // The whole content / change, JSON-escaped so newlines and quotes are visible. If it does not fit, nothing is asked.
+    case 'Write': return `Write ${rel} (${formatBytes(Buffer.byteLength(i.content as string))}): ${JSON.stringify(i.content)}`
+    case 'Edit': return `Edit ${rel}: replace ${JSON.stringify(i.old_string)} with ${JSON.stringify(i.new_string)}${i.replace_all === true ? ' (all occurrences)' : ''}`
     case 'Bash': return `Run command: ${i.command}`
     case 'WebFetch': { const u = new URL(i.url as string); return `Fetch ${u.origin}${u.pathname}${u.search}` }
     default: return `Search the web for ${i.query}`

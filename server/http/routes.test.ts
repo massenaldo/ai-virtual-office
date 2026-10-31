@@ -196,7 +196,7 @@ describe('workspaces', () => {
     await until(async () => (await w.api('GET', '/api/state')).body.state.tasks[0].status === 'running')
     expect((await w.api('POST', `/api/demo/tasks/${id}/request-approval`)).status).toBe(202)
     const pending = (await w.api('GET', '/api/state')).body.state.tasks[0].pendingApproval
-    expect(pending).toMatchObject({ tool: 'Write', summary: 'Write simulated.txt (39 B)' })
+    expect(pending).toMatchObject({ tool: 'Write', summary: 'Write simulated.txt (39 B): "Simulated content (nothing is written)."' })
     await w.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'deny' })
     await until(async () => (await w.api('GET', '/api/state')).body.state.tasks[0].status === 'failed')
     expect((await w.api('GET', '/api/state')).body.state.tasks[0].errorMessage).toBe('Approval denied (simulated)')

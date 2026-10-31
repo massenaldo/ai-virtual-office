@@ -36,6 +36,9 @@ describe('redactSecrets: more secret shapes', () => {
     ['mysql --password=hunter2 -u root', 'mysql --password=[REDACTED] -u root'],
     ["tool --api-key 'abc def' run", 'tool --api-key [REDACTED] run'],
     ['tool --passwd=x --secret y', 'tool --passwd=[REDACTED] --secret [REDACTED]'],
+    ['curl -u admin:pw https://x.test', 'curl -u [REDACTED] https://x.test'],
+    ['curl --user admin:pw https://x.test', 'curl --user [REDACTED] https://x.test'],
+    ['Authorization: Basic dXNlcjpwYXM', 'Authorization: Basic [REDACTED]'],
   ])('redacts: %s', (input, expected) => {
     expect(redactSecrets(input)).toBe(expected)
   })
@@ -47,6 +50,8 @@ describe('redactSecrets: more secret shapes', () => {
     'AKIA is a prefix, AKIA123 is too short, and XAKIAIOSFODNN7EXAMPLEX is inside a word',
     'Basic configuration of the server',
     'Basic usage: run it',
+    'curl -u admin https://x.test',
+    'use -u for unbuffered output',
     'mysql --password-file ./secrets.txt',
     'open password_reset.md and ghp_short',
     'ghp_ is the prefix GitHub uses',

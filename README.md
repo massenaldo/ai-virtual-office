@@ -17,6 +17,17 @@ npm run dev
 
 Open http://localhost:5173.
 
+### Run with the local backend (optional)
+
+| Command | What it starts |
+|---|---|
+| `npm run dev` | Frontend only, with the browser mock (default; `/vo` uses this) |
+| `npm run server` | The backend alone, on `127.0.0.1:8787` |
+| `npm run dev:full` | The backend and the frontend, with the UI pointed at the backend |
+| `npm run server:build` then `npm run server:start` | The production backend bundle (`dist-server/index.js`, only `node:` imports) |
+
+To use the backend with a separately started frontend, set `VITE_WORKFORCE_API_URL=http://127.0.0.1:8787` when starting `npm run dev`. An invalid value shows "Not configured" instead of falling back to the browser mock.
+
 ## Open with Claude Code `/vo`
 
 1. Open a terminal and enter this project folder.
@@ -59,6 +70,53 @@ You can also run `./scripts/vo.sh [sessionID]` directly without Claude Code.
   - In the office: a status marker over each assigned desk (3D and floor plan); the selected agent's desk is outlined and **Focus desk** moves the camera to it; with the panel open, click a desk to open its agent, or click a free desk to assign one
   - Layout editing and the agents panel are separate modes; opening the panel with unsaved layout changes asks you to save or discard first
 - Local-only development server bound to 127.0.0.1
+
+## Backend (milestone 3B.1)
+
+A small Node server (`server/`, no framework, no runtime dependencies) owns agents, tasks and activity, runs tasks through a runtime provider, and pushes updates to the browser. **It runs the mock runtime only. The Claude Agent SDK is not installed or integrated, and no real agent execution exists.** `RUNTIME=claude` starts a provider that reports "Claude Agent SDK not installed" and refuses tasks.
+
+**Architecture.** The browser's `WorkforceController` has two implementations behind `useWorkforce`: the local one (browser mock) and `RemoteWorkforceController` (REST for commands, server-sent events for updates, snapshot plus replay recovery, reconnect with backoff). The domain model in `src/workforce/` is shared by both sides.
+
+**Environment variables** (copy `.env.example` to `.env`; real environment variables win):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `HOST`, `PORT` | `127.0.0.1`, `8787` | Where it listens. Loopback only |
+| `ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Exact browser origins allowed; `none` allows no browser |
+| `DATA_DIR` | `./data` | Where `workforce.json` and `audit.log` live |
+| `WORKSPACE_ROOT`, `WORKSPACES` | unset | Absolute folder and named workspaces (`id:relative/path`) |
+| `RUNTIME` | `mock` | `mock` or `claude` (unavailable) |
+| `TASK_TIMEOUT_MS`, `CANCEL_GRACE_MS`, `APPROVAL_TIMEOUT_MS` | 600000, 5000, 300000 | Task, cancel and approval limits |
+| `ALLOWED_TOOLS` | `Read,Glob,Grep,Write,Edit` | Tool allowlist; write, execute and network tools always need approval |
+| `MAX_MESSAGE_BYTES`, `MAX_TASK_OUTPUT_BYTES`, `EVENT_BUFFER_SIZE`, `AUDIT_LOG_MAX_BYTES` | 32768, 262144, 500, 5242880 | Output and log limits |
+| `ANTHROPIC_API_KEY` | unset | Server only, unused until the Claude provider exists. Never a frontend variable |
+| `VITE_WORKFORCE_API_URL` | empty | Frontend only. Empty = browser mock |
+
+**API** (JSON; every POST/PUT/PATCH/DELETE needs `Content-Type: application/json`, even without a body):
+
+| Method and path | Purpose |
+|---|---|
+| `GET /api/health` | Runtime, availability, persistence and audit status |
+| `GET /api/state` | Full state and `lastEventId` |
+| `GET /api/workspaces` | Workspace ids (never paths) |
+| `GET /api/events` | Server-sent events; resume with `Last-Event-ID` or `?lastEventId=` |
+| `POST /api/agents`, `PATCH` / `DELETE /api/agents/:id` | Create, update, remove an agent |
+| `PUT /api/agents/:id/desk` | Assign or clear a desk |
+| `POST /api/agents/:id/tasks` | Start a task (`title`, `description`, optional `workspaceId`) |
+| `POST /api/tasks/:id/cancel`, `POST /api/tasks/:id/approval` | Cancel; approve or deny (`approvalId`, `decision`) |
+| `POST /api/demo/...` | Mock-only demo controls: request approval, force error, restore demo agents |
+
+**Events.** Ids are `<boot>:<seq>`. Types: `task.queued`, `task.started`, `agent.status_changed`, `agent.message`, `task.progress`, `task.waiting_for_approval`, `task.completed`, `task.failed`, `task.cancelled`, `state.changed`, `state.reset`. Each change event carries a patch of the records it touched. `state.reset` means the client's id is too old, from another server run, or ahead of the server: reload `GET /api/state`.
+
+**Security boundaries.** These are policy checks, not an OS sandbox.
+- Bound to loopback; `Host` and `Origin` allowlists (421 / 403); JSON-only mutations (415); CORS only for allowed origins; security headers.
+- No login or token yet; a startup token is planned for the VPS milestone.
+- Workspaces are named by id; the browser never sends a path. Paths are checked against the workspace real path (symlinks resolved, `..` refused).
+- Tool policy: unknown tools denied; read tools allowed inside a workspace; write, execute and network tools always need a human approval whose summary shows the whole action (otherwise denied); no bypass mode.
+- Secrets are redacted from logs, state, events and the audit log; workspace paths are hidden in runtime output; `npm run check:secrets` scans the built bundles.
+- `data/audit.log` (JSONL, mode 0600, rotated at 5 MB) records lifecycle, tool and rejected-request events, never bodies.
+
+**Persistence.** `data/workforce.json` (atomic writes, mode 0600). An unreadable file is backed up before a fresh start. A task running at shutdown is marked failed with "Interrupted by a server restart". The event buffer is in memory, so a restart makes every old event id a `state.reset`.
 
 ## Layout data
 
@@ -104,7 +162,8 @@ Add `?stats` to the URL (for example http://localhost:5173/?stats) to show a sma
 - Furniture is not instanced: each item draws one mesh per material, so very large layouts (hundreds of items) cost more draw calls. Room shells are merged into one mesh per material.
 - Lighting has no real-time ambient occlusion or post-processing; soft contact shadows stand in for it.
 - `npm run build` warns that the main JavaScript chunk is larger than 500 kB (three.js); the app is not code-split yet.
-- **Agents are a simulation.** No real Claude or Agent SDK execution exists yet; task results are canned text that says so.
+- **Agents are a simulation**, in the browser and on the backend. No real Claude or Agent SDK execution exists yet; task results are canned text that says so.
+- Backend mode has no login, one server process and one JSON file; it is meant for the local machine only.
 - Agent data is per browser and per origin, like the layout: `localhost:5173` and `127.0.0.1:5173` keep separate agents.
 - One task per agent at a time, with no queue. Finished tasks are never trimmed, only activity is.
 - In the floor plan, a room's label can sit over the centre-row desks and hide the selected agent's desk outline; the marker's ring still shows which desk it is.
@@ -114,4 +173,4 @@ Add `?stats` to the URL (for example http://localhost:5173/?stats) to show a sma
 
 ## Next milestone
 
-A real, server-side agent runtime behind the existing `RuntimeProvider` boundary, replacing the mock for agents that opt in.
+Install and integrate the Claude Agent SDK behind `ClaudeAgentRuntimeProvider` (see the rules in `server/runtime/claudeAgent.ts`), with an OS-level sandbox before any real write or command execution.

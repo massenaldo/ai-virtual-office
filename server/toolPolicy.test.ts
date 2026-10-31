@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { linkSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -45,7 +45,7 @@ describe('decideToolUse', () => {
   })
 
   it('allows read-only tools inside the workspace', () => {
-    expect(decide('Read', { file_path: join(W.path, 'notes.md') })).toEqual({ decision: 'allow', reason: 'read_only', summary: 'Read notes.md' })
+    expect(decide('Read', { file_path: join(W.path, 'notes.md') })).toEqual({ decision: 'allow', reason: 'read_only', summary: 'Read notes.md', paths: [{ arg: 'file_path', relative: 'notes.md' }] })
     expect(decide('Glob', { pattern: '**/*.md' })).toMatchObject({ decision: 'allow', summary: 'Find files matching **/*.md in .' })
     expect(decide('Grep', { pattern: 'TODO', path: '.' })).toMatchObject({ decision: 'allow', summary: 'Search for TODO in .' })
   })
@@ -174,6 +174,21 @@ describe('decideToolUse', () => {
       expect(decide('Bash', { command: 'x'.repeat(500) })).toEqual(deny('not_reviewable'))
       expect(decide('Read', { file_path: 'notes.md' })).not.toHaveProperty('review')
     })
+  })
+
+  it('refuses Read, Write and Edit of a hard-linked file', () => {
+    linkSync(join(outside, 'secret.txt'), join(W.path, 'inside.txt'))
+    expect(decide('Read', { file_path: 'inside.txt' })).toEqual(deny('unsafe_link'))
+    expect(decide('Write', { file_path: 'inside.txt', content: 'x' })).toEqual(deny('unsafe_link'))
+    expect(decide('Edit', { file_path: 'inside.txt', old_string: 'a', new_string: 'b' })).toEqual(deny('unsafe_link'))
+    expect(toolDeniedMessage('Read', 'unsafe_link')).toBe('Tool "Read" denied by policy: the file has more than one name (a hard link).')
+  })
+
+  it('lists the checked paths, relative, with the argument they came from', () => {
+    expect(decide('Read', { file_path: join(W.path, 'notes.md') })).toMatchObject({ decision: 'allow', paths: [{ arg: 'file_path', relative: 'notes.md' }] })
+    expect(decide('Grep', { pattern: 'x', path: 'sub' })).toMatchObject({ paths: [{ arg: 'path', relative: 'sub' }] })
+    expect(decide('Bash', { command: 'ls' })).not.toHaveProperty('paths')
+    expect(JSON.stringify(decide('Write', { file_path: 'sub/a.txt', content: 'x' }))).not.toContain(W.path)
   })
 
   it('refuses glob patterns that expand to a parent directory', () => {

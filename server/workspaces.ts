@@ -22,7 +22,7 @@ export type WorkspaceEntry = { id: string; relativePath: string }
 export type ResolvedWorkspace = { id: string; path: string }
 export type WorkspaceReason = 'not_configured' | 'invalid_id' | 'unknown' | 'missing' | 'escapes_root'
 export type WorkspaceConfig = { workspaceRoot: string | null; workspaces: WorkspaceEntry[] }
-export type PathReason = 'invalid_path' | 'outside_workspace' | 'unsafe_symlink'
+export type PathReason = 'invalid_path' | 'outside_workspace' | 'unsafe_symlink' | 'unsafe_link'
 
 export function isInside(parent: string, child: string): boolean {
   return child === parent || child.startsWith(parent.endsWith(sep) ? parent : parent + sep)
@@ -133,7 +133,11 @@ export function checkPathInWorkspace(workspacePath: string, candidate: unknown):
   let cur = abs
   for (;;) {
     try {
-      if (!isInside(workspacePath, realpathSync(cur))) return { ok: false, reason: 'outside_workspace' }
+      const real = realpathSync(cur)
+      if (!isInside(workspacePath, real)) return { ok: false, reason: 'outside_workspace' }
+      // An existing regular file with more than one name may be a hard link to a file outside the workspace, which no path
+      // check can see. It is refused (this also refuses a second name inside the workspace, which is the safe side).
+      if (cur === abs) { const st = statSync(real); if (st.isFile() && st.nlink > 1) return { ok: false, reason: 'unsafe_link' } }
       break
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code

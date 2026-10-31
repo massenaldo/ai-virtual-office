@@ -169,6 +169,7 @@ export class TaskManager {
             return r.ok ? { ok: true, workspace: r.workspace } : { ok: false }
           },
           isLive: () => { const t = this.task(taskId); return !!t && (t.status === 'running' || t.status === 'waiting_for_approval') },
+          signal: run.abort.signal,
           approve: (request, digest) => this.approveTool(taskId, request, digest),
           stale: (tool, detail) => { const t = this.task(taskId); if (t) this.report('tool.stale', t, { actor: 'runtime', tool, decision: 'deny', reason: 'stale_approval', detail }) },
         }),

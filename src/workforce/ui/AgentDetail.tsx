@@ -3,6 +3,7 @@ import { AlertTriangle, ArrowLeft, Check, LocateFixed, OctagonX, Pencil, Play, S
 import { DEPARTMENTS } from '../../layout/catalog'
 import type { OfficeLayout } from '../../layout/types'
 import type { Workforce } from '../useWorkforce'
+import type { Awaitable } from '../controller'
 import { DESCRIPTION_MAX, TITLE_MAX, isActiveTask, type TaskInput } from '../operations'
 import type { Agent } from '../types'
 import { AGENT_STATUS_LABEL, TASK_STATUS_LABEL, agentTimeline, deskOptions, deskStatus, formatTime } from '../view'
@@ -10,12 +11,12 @@ import { StatusDot } from './AgentList'
 
 export type AgentDetailProps = { workforce: Workforce; layout: OfficeLayout; agent: Agent; onBack(): void; onEdit(): void; onRemove(): void; onFocusDesk(): void }
 
-function TaskForm({ onStart }: { onStart(input: TaskInput): string | null }) {
+function TaskForm({ onStart }: { onStart(input: TaskInput): Awaitable<string | null> }) {
   const [input, setInput] = useState<TaskInput>({ title: '', description: '' })
   const [error, setError] = useState<string | null>(null)
-  const submit = (e: FormEvent) => {
+  const submit = async (e: FormEvent) => {
     e.preventDefault()
-    const result = onStart(input)
+    const result = await onStart(input)
     setError(result)
     if (result === null) setInput({ title: '', description: '' })
   }
@@ -35,12 +36,12 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
   const active = task && isActiveTask(task)
   const timeline = agentTimeline(state, agent.id)
   const [deskError, setDeskError] = useState<string | null>(null)
-  const pickDesk = (value: string) => {
-    const r = actions.assignDesk(agent.id, value || null)
+  const pickDesk = async (value: string) => {
+    const r = await actions.assignDesk(agent.id, value || null)
     setDeskError(r.ok ? null : r.error)
   }
-  const start = (input: TaskInput) => {
-    const r = actions.startTask(agent.id, input)
+  const start = async (input: TaskInput) => {
+    const r = await actions.startTask(agent.id, input)
     return r.ok ? null : r.error
   }
 

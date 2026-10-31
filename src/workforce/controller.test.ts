@@ -36,10 +36,10 @@ const agent = (id: string) => state().agents.find((a) => a.id === id)
 const saved = () => JSON.parse(storage.data.get(WORKFORCE_STORAGE_KEY)!)
 
 describe('createWorkforceController', () => {
-  it('seeds the demo without saving until the first change', () => {
+  it('seeds the demo without saving until the first change', async () => {
     expect(state().agents).toHaveLength(6)
     expect(storage.data.has(WORKFORCE_STORAGE_KEY)).toBe(false)
-    const r = c.createAgent({ name: 'Nova', role: 'Planner', department: 'design' })
+    const r = (await c.createAgent({ name: 'Nova', role: 'Planner', department: 'design' })) as { ok: boolean }
     expect(r.ok).toBe(true)
     expect(saved().agents).toHaveLength(7)
     expect(c.getSnapshot()).toMatchObject({ loadProblem: null, saveError: null })
@@ -77,10 +77,10 @@ describe('createWorkforceController', () => {
     expect(saved().tasks[0].status).toBe('completed')
   })
 
-  it('an event between actions is not lost', () => {
+  it('an event between actions is not lost', async () => {
     c.startTask('agent-demo-backend', { title: 'Build API', description: '' })
     vi.advanceTimersByTime(0)
-    const r = c.createAgent({ name: 'Nova', role: 'Planner', department: 'design' })
+    const r = (await c.createAgent({ name: 'Nova', role: 'Planner', department: 'design' })) as { ok: boolean }
     expect(r.ok).toBe(true)
     expect(task('agent-demo-backend')?.status).toBe('running')
     expect(state().agents).toHaveLength(7)
@@ -97,6 +97,26 @@ describe('createWorkforceController', () => {
     expect(agent('agent-demo-qa')?.status).toBe('error')
     expect(state().activities.at(-1)).toMatchObject({ type: 'task-failed', source: 'real' })
     expect(c.startTask('agent-demo-qa', { title: 'Again', description: '' })).toEqual({ ok: true })
+  })
+
+  it('reports the browser environment and a local connection', () => {
+    expect(c.getSnapshot()).toMatchObject({ environment: { kind: 'browser' }, connection: 'local', lastSyncedAt: null, commandError: null })
+  })
+
+  it('cancelTask and decideApproval return ok', () => {
+    c.startTask('agent-demo-qa', { title: 'Run tests', description: '' })
+    vi.advanceTimersByTime(500)
+    const id = task('agent-demo-qa')!.id
+    c.requestApproval(id)
+    const pending = task('agent-demo-qa')!.pendingApproval!
+    expect(c.decideApproval(id, pending.id, 'approve')).toEqual({ ok: true })
+    expect(c.cancelTask(id)).toEqual({ ok: true })
+  })
+
+  it('dismissCommandError is a no-op locally', () => {
+    const before = c.getSnapshot()
+    c.dismissCommandError()
+    expect(c.getSnapshot()).toBe(before)
   })
 
   it('startTask reports validation and active-task errors', () => {
@@ -213,12 +233,12 @@ describe('createWorkforceController', () => {
     expect(c.getSnapshot().saveError).toBeNull()
   })
 
-  it('works in memory without storage', () => {
+  it('works in memory without storage', async () => {
     c.dispose()
     c = createWorkforceController({ storage: null, now, runtime: new MockRuntimeProvider() })
     expect(c.getSnapshot().loadProblem).toBe('unavailable')
     expect(state().agents).toHaveLength(0)
-    expect(c.createAgent({ name: 'Nova', role: 'Planner', department: 'design' }).ok).toBe(true)
+    expect(((await c.createAgent({ name: 'Nova', role: 'Planner', department: 'design' })) as { ok: boolean }).ok).toBe(true)
     expect(state().agents).toHaveLength(1)
     c.dismissLoadProblem()
     expect(c.getSnapshot().loadProblem).toBeNull()

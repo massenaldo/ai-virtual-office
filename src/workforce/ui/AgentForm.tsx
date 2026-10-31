@@ -1,18 +1,19 @@
 import { useState, type FormEvent } from 'react'
 import { DEPARTMENTS } from '../../layout/catalog'
+import type { Awaitable } from '../controller'
 import { NAME_MAX, ROLE_MAX, type AgentInput } from '../operations'
 import type { Agent } from '../types'
 import { AGENT_DEPARTMENTS } from '../view'
 
-export type AgentFormProps = { agent?: Agent; onSubmit(input: AgentInput): string | null; onCancel(): void }
+export type AgentFormProps = { agent?: Agent; onSubmit(input: AgentInput): Awaitable<string | null>; onCancel(): void }
 
 /** Create or edit form. onSubmit returns an error message, or null when it was applied. */
 export default function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
   const [input, setInput] = useState<AgentInput>({ name: agent?.name ?? '', role: agent?.role ?? '', department: agent?.department ?? 'backend' })
   const [error, setError] = useState<string | null>(null)
-  const submit = (e: FormEvent) => {
+  const submit = async (e: FormEvent) => {
     e.preventDefault()
-    setError(onSubmit(input))
+    setError(await onSubmit(input))
   }
   return <form onSubmit={submit} noValidate>
     <label className="field"><span>Name</span><input className="field-input" value={input.name} maxLength={NAME_MAX} autoFocus onChange={(e) => setInput({ ...input, name: e.target.value })}/></label>

@@ -40,8 +40,8 @@ export default function WorkforcePanel({ workforce, layout, view, onViewChange: 
     {shown.kind === 'list' && <AgentList state={state} layout={layout} onOpen={(id) => setView({ kind: 'detail', agentId: id })} onCreate={() => setView({ kind: 'create' })} onRestoreDemo={actions.restoreDemoAgents}/>}
     {shown.kind === 'create' && <>
       <div className="field-group-label">New agent</div>
-      <AgentForm onCancel={list} onSubmit={(input) => {
-        const r = actions.createAgent(input)
+      <AgentForm onCancel={list} onSubmit={async (input) => {
+        const r = await actions.createAgent(input)
         if (!r.ok) return r.error
         setView({ kind: 'detail', agentId: r.id })
         return null
@@ -49,16 +49,16 @@ export default function WorkforcePanel({ workforce, layout, view, onViewChange: 
     </>}
     {shown.kind === 'edit' && agent && <>
       <div className="field-group-label">Edit {agent.name}</div>
-      <AgentForm agent={agent} onCancel={() => setView({ kind: 'detail', agentId: agent.id })} onSubmit={(input) => {
-        const r = actions.updateAgent(agent.id, input)
+      <AgentForm agent={agent} onCancel={() => setView({ kind: 'detail', agentId: agent.id })} onSubmit={async (input) => {
+        const r = await actions.updateAgent(agent.id, input)
         if (!r.ok) return r.error
         setView({ kind: 'detail', agentId: agent.id })
         return null
       }}/>
     </>}
     {shown.kind === 'detail' && agent && <AgentDetail key={agent.id} workforce={workforce} layout={layout} agent={agent} onBack={list} onEdit={() => setView({ kind: 'edit', agentId: agent.id })} onRemove={() => remove(agent.id)} onFocusDesk={() => agent.deskId && onFocusDesk(agent.deskId)}/>}
-    {shown.kind === 'assign' && assignDesk && <AssignDesk key={assignDesk.id} state={state} layout={layout} deskId={assignDesk.id} deskLabel={deskLabel(assignDesk.id)} onCancel={list} onAssign={(id) => {
-      const r = actions.assignDesk(id, assignDesk.id)
+    {shown.kind === 'assign' && assignDesk && <AssignDesk key={assignDesk.id} state={state} layout={layout} deskId={assignDesk.id} deskLabel={deskLabel(assignDesk.id)} onCancel={list} onAssign={async (id) => {
+      const r = await actions.assignDesk(id, assignDesk.id)
       if (!r.ok) return r.error
       setView({ kind: 'detail', agentId: id })
       return null

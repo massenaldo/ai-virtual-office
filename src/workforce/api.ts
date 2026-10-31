@@ -8,6 +8,13 @@ export type WorkforceEventType =
   | 'task.waiting_for_approval' | 'task.completed' | 'task.failed' | 'task.cancelled'
   | 'state.changed' | 'state.reset'
 
+/** Every event name the stream can send, in the order of the union above. */
+export const WORKFORCE_EVENT_TYPES = [
+  'task.queued', 'task.started', 'agent.status_changed', 'agent.message', 'task.progress',
+  'task.waiting_for_approval', 'task.completed', 'task.failed', 'task.cancelled',
+  'state.changed', 'state.reset',
+] as const satisfies readonly WorkforceEventType[]
+
 /** The authoritative records an event carries: upsert agents and tasks by id, append activities (then keep the newest ACTIVITY_LIMIT), drop removed agents with their tasks and activities. */
 export type WorkforcePatch = { agents: Agent[]; tasks: AgentTask[]; activities: AgentActivity[]; removedAgentIds: string[] }
 
@@ -59,3 +66,8 @@ export function applyWorkforceEvent(s: WorkforceState, e: WorkforceEvent): Workf
   const activities = patch.activities.length > 0 ? [...kept, ...patch.activities].slice(-ACTIVITY_LIMIT) : kept
   return { ...s, agents, tasks, activities }
 }
+
+/** The part of GET /api/health the browser reads. */
+export type HealthResponse = { ok: true; version: string; runtime: 'mock' | 'claude'; available: boolean; reason: string | null; credentialsConfigured: boolean; startedAt: string }
+/** POST/PATCH agents and PUT desk answer with the agent. */
+export type AgentResponse = { agent: Agent }

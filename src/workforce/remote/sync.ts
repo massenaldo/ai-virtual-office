@@ -8,7 +8,7 @@ export type EventSourceLike = {
   addEventListener(type: string, listener: (event: { data?: string }) => void): void
   close(): void
 }
-export type SyncSnapshot = Pick<WorkforceSnapshot, 'state' | 'loadProblem' | 'preserved' | 'saveError' | 'environment' | 'connection' | 'lastSyncedAt'>
+export type SyncSnapshot = Pick<WorkforceSnapshot, 'state' | 'loadProblem' | 'preserved' | 'saveError' | 'environment' | 'connection' | 'lastSyncedAt' | 'connectionError'>
 export type RemoteSync = {
   getSnapshot(): SyncSnapshot
   subscribe(listener: () => void): () => void
@@ -30,7 +30,7 @@ export function createRemoteSync(opts: { client: ApiClient; createEventSource: (
   const { client } = opts
   const now = opts.now ?? (() => new Date().toISOString())
   const listeners = new Set<() => void>()
-  let snap: SyncSnapshot = { state: emptyWorkforce(), loadProblem: null, preserved: null, saveError: null, environment: { kind: 'backend', runtime: null, available: null, reason: null }, connection: 'connecting', lastSyncedAt: null }
+  let snap: SyncSnapshot = { state: emptyWorkforce(), loadProblem: null, preserved: null, saveError: null, environment: { kind: 'backend', runtime: null, available: null, reason: null }, connection: 'connecting', lastSyncedAt: null, connectionError: null }
   let generation = 0
   let cursor: { boot: string; seq: number } | null = null
   let stream: EventSourceLike | null = null
@@ -55,10 +55,10 @@ export function createRemoteSync(opts: { client: ApiClient; createEventSource: (
     timer = null
   }
 
-  const goOffline = () => {
+  const goOffline = (reason: string) => {
     stop()
     if (disposed) return
-    publish({ connection: 'offline' })
+    publish({ connection: 'offline', connectionError: reason })
     timer = setTimeout(() => { timer = null; void connect() }, reconnectDelay(attempt))
     attempt += 1
   }
@@ -104,7 +104,8 @@ export function createRemoteSync(opts: { client: ApiClient; createEventSource: (
     const r = await pending
     if (g !== generation) return
     const parsed = r.ok ? parseEventId(r.body.lastEventId) : null
-    if (!r.ok || !parsed) { goOffline(); return }
+    if (!r.ok) { goOffline(r.error); return }
+    if (!parsed) { goOffline('The backend sent an invalid event id.'); return }
     cursor = parsed
     publish({ state: r.body.state, loadProblem: r.body.loadProblem, preserved: r.body.preserved, saveError: r.body.saveError, lastSyncedAt: now() })
 
@@ -114,9 +115,9 @@ export function createRemoteSync(opts: { client: ApiClient; createEventSource: (
     source.addEventListener('open', () => {
       if (g !== generation) return
       attempt = 0
-      publish({ connection: 'live' })
+      publish({ connection: 'live', connectionError: null })
     })
-    source.addEventListener('error', () => { if (g === generation) goOffline() })
+    source.addEventListener('error', () => { if (g === generation) goOffline('The event stream was interrupted.') })
   }
 
   void connect()

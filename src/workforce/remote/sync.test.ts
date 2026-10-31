@@ -150,6 +150,27 @@ describe('createRemoteSync: offline, restart and cleanup', () => {
     expect(sync.getSnapshot().state).toBe(before)
   })
 
+  it('keeps the server message when the snapshot is refused, and clears it once live', async () => {
+    start({ before: (b) => b.respond('GET', '/api/state', 403, { error: 'Origin not allowed.' }) })
+    await flush()
+    expect(sync.getSnapshot()).toMatchObject({ connection: 'offline', connectionError: 'Origin not allowed.' })
+    backend.respond('GET', '/api/state', 200, stateAt('b1:5'))
+    await vi.advanceTimersByTimeAsync(1000)
+    es(0).open()
+    expect(sync.getSnapshot()).toMatchObject({ connection: 'live', connectionError: null })
+  })
+
+  it('reports an unreachable backend and an interrupted stream', async () => {
+    start({ down: true })
+    await flush()
+    expect(sync.getSnapshot().connectionError).toBe("Can't reach the backend at http://127.0.0.1:8787.")
+    backend.down = false
+    await vi.advanceTimersByTimeAsync(1000)
+    es(0).open()
+    es(0).fail()
+    expect(sync.getSnapshot().connectionError).toBe('The event stream was interrupted.')
+  })
+
   it('retries with backoff while the backend is down', async () => {
     start({ down: true })
     await flush()

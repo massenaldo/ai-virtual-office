@@ -45,6 +45,7 @@ export default function WorkforcePanel({ workforce, layout, view, onViewChange: 
 
   return <aside className="editor-panel workforce" aria-label="AI agents">
     {header}
+    {workforce.connectionError && workforce.connection === 'offline' && <p className="form-error" role="alert">{workforce.connectionError}</p>}
     {waiting && <p className="panel-hint">{workforce.connection === 'misconfigured' ? 'The backend address is not configured.' : 'Waiting for the local backend…'}</p>}
     {!waiting && shown.kind === 'list' && <AgentList state={state} layout={layout} onOpen={(id) => setView({ kind: 'detail', agentId: id })} onCreate={() => setView({ kind: 'create' })} onRestoreDemo={actions.restoreDemoAgents}/>}
     {shown.kind === 'create' && <>

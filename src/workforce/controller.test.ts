@@ -100,7 +100,7 @@ describe('createWorkforceController', () => {
   })
 
   it('reports the browser environment and a local connection', () => {
-    expect(c.getSnapshot()).toMatchObject({ environment: { kind: 'browser' }, connection: 'local', lastSyncedAt: null, commandError: null })
+    expect(c.getSnapshot()).toMatchObject({ environment: { kind: 'browser' }, connection: 'local', lastSyncedAt: null, commandError: null, connectionError: null })
   })
 
   it('cancelTask and decideApproval return ok', () => {

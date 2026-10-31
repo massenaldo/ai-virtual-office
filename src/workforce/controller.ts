@@ -22,6 +22,8 @@ export type WorkforceSnapshot = {
   lastSyncedAt: string | null
   /** The last command failure that had no form to show it in; null once dismissed or after the next success. */
   commandError: string | null
+  /** Why the backend connection is down (the server's own message when it gave one); null while connected or in browser mode. */
+  connectionError: string | null
 }
 export type ActionResult = { ok: true } | { ok: false; error: string }
 
@@ -54,7 +56,7 @@ export function createWorkforceController(opts: { storage: KV | null; now?: () =
   const loaded = loadWorkforce(opts.storage, now())
   const listeners = new Set<() => void>()
   let current = loaded.state
-  let snapshot: WorkforceSnapshot = { state: current, loadProblem: loaded.problem, preserved: loaded.preserved, saveError: null, environment: { kind: 'browser' }, connection: 'local', lastSyncedAt: null, commandError: null }
+  let snapshot: WorkforceSnapshot = { state: current, loadProblem: loaded.problem, preserved: loaded.preserved, saveError: null, environment: { kind: 'browser' }, connection: 'local', lastSyncedAt: null, commandError: null, connectionError: null }
   let disposed = false
 
   const publish = (patch: Partial<WorkforceSnapshot>) => {

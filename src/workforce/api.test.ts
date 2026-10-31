@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyWorkforceEvent, parseEventId, WORKFORCE_EVENT_TYPES, type ChangeEvent, type WorkforcePatch } from './api'
+import { applyWorkforceEvent, parseEventId, WORKFORCE_EVENT_TYPES, type ChangeEvent, type PermissionChangedEvent, type WorkforcePatch } from './api'
 import { createDemoWorkforce } from './demo'
 import { addActivity, assignTask } from './operations'
 import { ACTIVITY_LIMIT, type WorkforceState } from './types'
@@ -64,5 +64,14 @@ describe('WORKFORCE_EVENT_TYPES', () => {
     expect(new Set(WORKFORCE_EVENT_TYPES).size).toBe(11)
     expect(WORKFORCE_EVENT_TYPES).toContain('state.reset')
     expect(WORKFORCE_EVENT_TYPES).toContain('task.waiting_for_approval')
+  })
+})
+
+describe('applyWorkforceEvent: permission.changed', () => {
+  it('leaves the workforce state untouched and WORKFORCE_EVENT_TYPES does not list it', () => {
+    const state = createDemoWorkforce('2026-11-01T00:00:00.000Z')
+    const event: PermissionChangedEvent = { id: 'b:1', type: 'permission.changed', at: 'x', kind: 'granted', rule: { id: 'p', scope: 'global', effect: 'deny', tool: 'Read', agentId: null, taskId: null, pathPattern: null, createdAt: 'x', createdBy: 'user', expiresAt: null, revokedAt: null, usedAt: null, endedAt: null, reason: null, state: 'active' } }
+    expect(applyWorkforceEvent(state, event)).toBe(state)
+    expect((WORKFORCE_EVENT_TYPES as readonly string[]).includes('permission.changed')).toBe(false)
   })
 })

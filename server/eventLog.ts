@@ -1,6 +1,9 @@
-import { parseEventId, type ChangeEvent } from '../src/workforce/api'
+import { parseEventId, type ChangeEvent, type PermissionChangeKind, type PermissionChangedEvent, type PermissionRuleView } from '../src/workforce/api'
 import type { EventDraft } from './deriveEvents'
 import { consoleLogger, type Logger } from './log'
+
+/** Everything the log keeps and replays: workforce changes and permission changes share one id sequence. */
+export type LoggedEvent = ChangeEvent | PermissionChangedEvent
 
 export type EventLogOptions = { capacity: number; now: () => string; bootId?: string; log?: Logger }
 
@@ -10,8 +13,8 @@ export class EventLog {
   private readonly capacity: number
   private readonly now: () => string
   private readonly log: Logger
-  private readonly buffer: ChangeEvent[] = []
-  private readonly listeners = new Set<(event: ChangeEvent) => void>()
+  private readonly buffer: LoggedEvent[] = []
+  private readonly listeners = new Set<(event: LoggedEvent) => void>()
   private seq = 0
 
   constructor({ capacity, now, bootId = Date.now().toString(36), log = consoleLogger }: EventLogOptions) {
@@ -28,6 +31,18 @@ export class EventLog {
   /** Stamps id and time, keeps the newest `capacity` events, then tells every subscriber, in order. */
   append(drafts: EventDraft[]): ChangeEvent[] {
     const events = drafts.map((draft): ChangeEvent => ({ ...draft, id: `${this.bootId}:${++this.seq}`, at: this.now() }))
+    this.publish(events)
+    return events
+  }
+
+  /** A permission rule changed. It takes the next id like any other event, so a client replays both kinds in order. */
+  appendPermission(kind: PermissionChangeKind, rule: PermissionRuleView): PermissionChangedEvent {
+    const event: PermissionChangedEvent = { id: `${this.bootId}:${++this.seq}`, type: 'permission.changed', at: this.now(), kind, rule }
+    this.publish([event])
+    return event
+  }
+
+  private publish(events: LoggedEvent[]): void {
     for (const event of events) {
       this.buffer.push(event)
       if (this.buffer.length > this.capacity) this.buffer.shift()
@@ -41,11 +56,10 @@ export class EventLog {
         }
       }
     }
-    return events
   }
 
   /** The events a client missed, or a reset when its id can't be trusted (unparsable, another boot, ahead of us, or older than the buffer). */
-  since(lastEventId: string | null): { kind: 'replay'; events: ChangeEvent[] } | { kind: 'reset' } {
+  since(lastEventId: string | null): { kind: 'replay'; events: LoggedEvent[] } | { kind: 'reset' } {
     if (lastEventId === null) return { kind: 'replay', events: [] }
     const id = parseEventId(lastEventId)
     if (!id || id.boot !== this.bootId || id.seq > this.seq) return { kind: 'reset' }
@@ -54,7 +68,7 @@ export class EventLog {
     return { kind: 'replay', events: this.buffer.filter((e) => parseEventId(e.id)!.seq > id.seq) }
   }
 
-  subscribe(listener: (event: ChangeEvent) => void): () => void {
+  subscribe(listener: (event: LoggedEvent) => void): () => void {
     this.listeners.add(listener)
     return () => { this.listeners.delete(listener) }
   }

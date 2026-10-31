@@ -17,10 +17,26 @@ const refuse = (res: GateResponse, status: number, error: string) => {
   res.end(JSON.stringify({ error }))
 }
 
+const decoded = (text: string): string => { try { return decodeURIComponent(text) } catch { return text } }
+
+/**
+ * `api`: exactly `/api/<something>` in its plain form. `other`: nothing to do with the API. `variant`: anything that would
+ * read as the API after case folding, decoding, slash collapsing or dot-segment removal but is not the plain form
+ * (`/apiX`, `/API/x`, `/%61pi/x`, `/api%2Fx`, `//api/x`, `/api/../x`): refused, never forwarded and never given a token.
+ */
+export function classifyPath(url: string): 'api' | 'other' | 'variant' {
+  const raw = url.split('?')[0]
+  const normal = decoded(raw).replace(/\\/g, '/').replace(/^\/+/, '/').toLowerCase()
+  if (!normal.startsWith('/api')) return 'other'
+  const plain = raw.startsWith('/api/') && !/%(2e|2f|5c)/i.test(raw) && !raw.includes('\\') && !raw.includes('//') && !raw.slice(5).split('/').some((s) => s === '.' || s === '..')
+  return plain ? 'api' : 'variant'
+}
+
 export function createApiGate(opts: { readToken(): string | null }): Gate {
   return (req, res, next) => {
-    const path = (req.url ?? '').split('?')[0]
-    if (!path.startsWith('/api/')) return next()
+    const kind = classifyPath(req.url ?? '')
+    if (kind === 'other') return next()
+    if (kind === 'variant') return refuse(res, 404, 'Not found.')
     if (req.headers['sec-fetch-site'] !== 'same-origin') return refuse(res, 403, 'The dev proxy only serves same-origin requests from this app.')
     const token = opts.readToken()
     if (token === null) return refuse(res, 503, 'The backend token is not available. Is the backend running?')
@@ -58,5 +74,6 @@ export function apiProxyFor(env: Env): { plugin: Plugin; proxy: Record<string, {
     },
   }
   // changeOrigin: the backend only accepts its own Host (127.0.0.1:<port>), so the proxy rewrites Host. Origin is kept.
-  return { plugin, proxy: { '/api': { target: `http://${env.HOST?.trim() || '127.0.0.1'}:${env.PORT?.trim() || '8787'}`, changeOrigin: true } } }
+  // The key is a regular expression (Vite reads a leading ^ that way): only the plain /api/ prefix is forwarded.
+  return { plugin, proxy: { '^/api/': { target: `http://${env.HOST?.trim() || '127.0.0.1'}:${env.PORT?.trim() || '8787'}`, changeOrigin: true } } }
 }

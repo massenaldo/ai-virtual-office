@@ -18,10 +18,11 @@ export type AuditAction =
   | 'config.startup' | 'task.start' | 'task.cancel' | 'task.force_cancelled' | 'task.timeout'
   | 'approval.requested' | 'approval.decided' | 'approval.timeout'
   | 'tool.allowed' | 'tool.denied' | 'tool.asked' | 'tool.stale' | 'workspace.rejected' | 'request.rejected' | 'runtime.note'
+  | 'permission.granted' | 'permission.denied' | 'permission.revoked' | 'permission.expired' | 'permission.used'
 
 export type AuditActor = 'api' | 'system' | 'runtime'
 
-export type AuditInput = { action: AuditAction; actor: AuditActor; requestId?: string; taskId?: string; agentId?: string; workspaceId?: string; tool?: string; decision?: string; reason?: string; detail?: string }
+export type AuditInput = { action: AuditAction; actor: AuditActor; requestId?: string; taskId?: string; agentId?: string; workspaceId?: string; tool?: string; decision?: string; reason?: string; /** Action digest (as the approval is bound to it), the SHA-256 of the canonical action, and the permission rule involved. */ digest?: string; actionHash?: string; ruleId?: string; detail?: string }
 
 export type AuditRecord = { at: string; seq: number } & AuditInput
 
@@ -79,6 +80,7 @@ export function openAuditLog({ dataDir, maxBytes, now, log, hide = [] }: AuditOp
       at: now(), seq: ++seq, action: e.action, actor: e.actor,
       requestId: field(e.requestId), taskId: field(e.taskId), agentId: field(e.agentId), workspaceId: field(e.workspaceId),
       tool: field(e.tool), decision: field(e.decision), reason: field(e.reason),
+      digest: field(e.digest), actionHash: field(e.actionHash), ruleId: field(e.ruleId),
       detail: e.detail === undefined ? undefined : scrub(hidePaths(e.detail), AUDIT_DETAIL_MAX),
     }
     const line = `${JSON.stringify(record)}\n`

@@ -51,7 +51,7 @@ describe('state and agents', () => {
     expect(await s.api('POST', '/api/agents', { ...good, cwd: '/' })).toMatchObject({ status: 400, body: { error: 'Unknown field "cwd".' } })
     expect(await s.api('POST', '/api/agents', { ...good, name: 5 })).toMatchObject({ status: 400, body: { error: '"name" must be a string.' } })
     expect(await s.api('POST', '/api/agents', { ...good, department: 'meeting' })).toMatchObject({ status: 422, body: { error: 'Choose a department.' } })
-    const plain = await fetch(`${s.url}/api/agents`, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: '{}' })
+    const plain = await fetch(`${s.url}/api/agents`, { method: 'POST', headers: { 'content-type': 'text/plain', authorization: `Bearer ${s.app.apiToken.value}` }, body: '{}' })
     expect(plain.status).toBe(415)
   })
 

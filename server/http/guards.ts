@@ -1,8 +1,10 @@
 import type { IncomingMessage } from 'node:http'
+import { tokenMatches } from '../auth'
 import type { Guard, RejectInfo, Reply } from './router'
 
 // The browser-facing guards. Order matters: Host first (it stops DNS rebinding, where a hostile page reaches the API under
-// its own name), then Origin (it stops other web pages), then preflight, then the JSON-only rule (it turns a cross-origin
+// its own name), then Origin (it stops other web pages), then preflight, then the bearer token (it stops every other local
+// program), then the JSON-only rule (it turns a cross-origin
 // "simple request" into one that needs a preflight, which the Origin guard denies).
 
 export const ALLOWED_HOST_NAMES = ['127.0.0.1', 'localhost', '[::1]'] as const
@@ -10,14 +12,14 @@ export const PREFLIGHT_MAX_AGE_S = 600
 export const CORS_METHODS = 'GET, POST, PUT, PATCH, DELETE'
 export const CORS_HEADERS = 'Content-Type, Last-Event-ID'
 
-export type GuardOptions = { allowedOrigins: readonly string[]; onReject?: (r: RejectInfo) => void }
+export type GuardOptions = { allowedOrigins: readonly string[]; apiToken: string; onReject?: (r: RejectInfo) => void }
 
 const STATE_CHANGING = ['POST', 'PUT', 'PATCH', 'DELETE']
 
-export function createSecurityGuards({ allowedOrigins, onReject }: GuardOptions): Guard[] {
-  const refuse = (req: IncomingMessage, url: URL, requestId: string, status: number, code: RejectInfo['code'], error: string): Reply => {
+export function createSecurityGuards({ allowedOrigins, apiToken, onReject }: GuardOptions): Guard[] {
+  const refuse = (req: IncomingMessage, url: URL, requestId: string, status: number, code: RejectInfo['code'], error: string, headers?: Record<string, string>): Reply => {
     onReject?.({ status, code, method: req.method ?? '', path: url.pathname.slice(0, 128), requestId })
-    return { status, body: { error } }
+    return { status, body: { error }, ...(headers ? { headers } : {}) }
   }
 
   // localPort is the port the connection actually arrived on, so this is right even with PORT=0.
@@ -39,6 +41,13 @@ export function createSecurityGuards({ allowedOrigins, onReject }: GuardOptions)
     return { status: 204, body: null, headers: { 'access-control-allow-origin': value, 'access-control-allow-methods': CORS_METHODS, 'access-control-allow-headers': CORS_HEADERS, 'access-control-max-age': String(PREFLIGHT_MAX_AGE_S) } }
   }
 
+  // Every route needs the bearer token, including the event stream and requests with no Origin header (curl, another local
+  // program). Only the health check (it carries no state) and preflight are open. The token is read from the header only.
+  const auth: Guard = (req, url, { requestId }) => {
+    if (req.method === 'GET' && url.pathname === '/api/health') return null
+    return tokenMatches(apiToken, req.headers.authorization) ? null : refuse(req, url, requestId, 401, 'auth', 'Unauthorized.', { 'www-authenticate': 'Bearer' })
+  }
+
   // Covers body-less routes too (cancel, the demo POSTs, DELETE): their bodies are never read, but the header is still required.
   const jsonOnly: Guard = (req, url, { requestId }) => {
     if (!STATE_CHANGING.includes(req.method ?? '')) return null
@@ -46,7 +55,7 @@ export function createSecurityGuards({ allowedOrigins, onReject }: GuardOptions)
     return type === 'application/json' ? null : refuse(req, url, requestId, 415, 'content_type', 'Content-Type must be application/json.')
   }
 
-  return [host, origin, preflight, jsonOnly]
+  return [host, origin, preflight, auth, jsonOnly]
 }
 
 /** Headers for every reply. CORS headers appear only for an allowed Origin, never as `*`, and never with credentials. */

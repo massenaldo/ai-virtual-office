@@ -1,3 +1,4 @@
+import { MIN_TOKEN_CHARS } from './auth'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { parseEnv } from 'node:util'
@@ -7,17 +8,20 @@ import { parseWorkspaces, type WorkspaceEntry } from './workspaces'
 
 export type RuntimeKind = 'mock' | 'claude'
 
-export type ServerConfig = { host: string; port: number; dataDir: string; runtime: RuntimeKind; taskTimeoutMs: number; cancelGraceMs: number; approvalTimeoutMs: number; maxMessageBytes: number; maxTaskOutputBytes: number; eventBufferSize: number; auditLogMaxBytes: number; workspaceRoot: string | null; workspaces: WorkspaceEntry[]; allowedTools: string[]; allowedOrigins: string[]; credentialsConfigured: boolean }
+export type ServerConfig = { host: string; port: number; dataDir: string; runtime: RuntimeKind; taskTimeoutMs: number; cancelGraceMs: number; approvalTimeoutMs: number; maxMessageBytes: number; maxTaskOutputBytes: number; eventBufferSize: number; auditLogMaxBytes: number; workspaceRoot: string | null; workspaces: WorkspaceEntry[]; allowedTools: string[]; allowedOrigins: string[]; credentialsConfigured: boolean; /** Server-only secret; null means one is generated at start. Never log or serialise the config with it. */ apiToken: string | null }
 
 export type Env = Record<string, string | undefined>
 
 type Parsed = { ok: true; config: ServerConfig } | { ok: false; errors: string[] }
 
 /** Every environment variable parseConfig reads, in .env.example order. */
-export const CONFIG_VARIABLES: readonly string[] = ['HOST', 'PORT', 'ALLOWED_ORIGINS', 'DATA_DIR', 'WORKSPACE_ROOT', 'WORKSPACES', 'RUNTIME', 'TASK_TIMEOUT_MS', 'CANCEL_GRACE_MS', 'APPROVAL_TIMEOUT_MS', 'ALLOWED_TOOLS', 'MAX_MESSAGE_BYTES', 'MAX_TASK_OUTPUT_BYTES', 'EVENT_BUFFER_SIZE', 'AUDIT_LOG_MAX_BYTES', 'ANTHROPIC_API_KEY']
+export const CONFIG_VARIABLES: readonly string[] = ['HOST', 'PORT', 'ALLOWED_ORIGINS', 'DATA_DIR', 'WORKSPACE_ROOT', 'WORKSPACES', 'RUNTIME', 'TASK_TIMEOUT_MS', 'CANCEL_GRACE_MS', 'APPROVAL_TIMEOUT_MS', 'ALLOWED_TOOLS', 'MAX_MESSAGE_BYTES', 'MAX_TASK_OUTPUT_BYTES', 'EVENT_BUFFER_SIZE', 'AUDIT_LOG_MAX_BYTES', 'API_TOKEN', 'ANTHROPIC_API_KEY']
 
 /** Environment names that suggest skipping permission checks. This server has no such switch, so their presence is an error rather than being ignored. */
 export const REFUSED_ENV_PATTERN = /DANGEROUSLY|BYPASS_?PERMISSIONS|SKIP_?PERMISSIONS|PERMISSION_MODE/i
+
+/** Names that would put a secret into the frontend bundle (VITE_WORKFORCE_API_URL is a plain address and fine). */
+const FRONTEND_SECRET_PATTERN = /^VITE_.*(TOKEN|KEY|SECRET|PASSWORD)/i
 
 const LOOPBACK = ['127.0.0.1', '::1', 'localhost']
 const MAX_TIMER_MS = 2147483647
@@ -36,6 +40,8 @@ export function parseConfig(env: Env, cwd: string = process.cwd()): Parsed {
   const errors: string[] = []
   for (const name of Object.keys(env)) {
     if (REFUSED_ENV_PATTERN.test(name)) errors.push(`${name} is not supported: this server has no way to skip permission checks. Remove it.`)
+    // A VITE_ variable is compiled into the browser bundle, so a secret must never use that prefix.
+    else if (FRONTEND_SECRET_PATTERN.test(name)) errors.push(`${name} is a frontend variable name; the API token must stay on the server. Remove it.`)
   }
 
   const host = read(env, 'HOST') ?? '127.0.0.1'
@@ -112,13 +118,20 @@ export function parseConfig(env: Env, cwd: string = process.cwd()): Parsed {
     else allowedTools = items.length === 1 && items[0] === 'none' ? [] : [...new Set(items)]
   }
 
+  let apiToken: string | null = null
+  const rawToken = read(env, 'API_TOKEN')
+  if (rawToken !== undefined) {
+    if (rawToken.length < MIN_TOKEN_CHARS || /\s/.test(rawToken)) errors.push(`API_TOKEN must be at least ${MIN_TOKEN_CHARS} characters with no spaces.`)
+    else apiToken = rawToken
+  }
+
   const ws = parseWorkspaces(read(env, 'WORKSPACE_ROOT'), read(env, 'WORKSPACES'), dataDir)
   errors.push(...ws.errors)
 
   if (errors.length > 0) return { ok: false, errors }
   return {
     ok: true,
-    config: { host, port, dataDir, runtime: rawRuntime as RuntimeKind, taskTimeoutMs, cancelGraceMs, approvalTimeoutMs, maxMessageBytes, maxTaskOutputBytes, eventBufferSize, auditLogMaxBytes, workspaceRoot: ws.workspaceRoot, workspaces: ws.workspaces, allowedTools, allowedOrigins, credentialsConfigured: (read(env, 'ANTHROPIC_API_KEY') ?? '').trim() !== '' },
+    config: { host, port, dataDir, runtime: rawRuntime as RuntimeKind, taskTimeoutMs, cancelGraceMs, approvalTimeoutMs, maxMessageBytes, maxTaskOutputBytes, eventBufferSize, auditLogMaxBytes, workspaceRoot: ws.workspaceRoot, workspaces: ws.workspaces, allowedTools, allowedOrigins, credentialsConfigured: (read(env, 'ANTHROPIC_API_KEY') ?? '').trim() !== '', apiToken },
   }
 }
 

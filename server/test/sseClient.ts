@@ -1,3 +1,4 @@
+import { TEST_TOKEN } from './helpers'
 import type { WorkforceEvent } from '../../src/workforce/api'
 
 export type SseStream = {
@@ -13,9 +14,9 @@ export type SseStream = {
 }
 
 /** A fetch-based SSE reader for tests: parses id/event/data frames and ':' comments. */
-export async function openEventStream(baseUrl: string, opts: { lastEventId?: string; query?: string; headers?: Record<string, string> } = {}): Promise<SseStream & { response: Response }> {
+export async function openEventStream(baseUrl: string, opts: { lastEventId?: string; query?: string; headers?: Record<string, string>; token?: string } = {}): Promise<SseStream & { response: Response }> {
   const abort = new AbortController()
-  const headers: Record<string, string> = { ...(opts.lastEventId === undefined ? {} : { 'Last-Event-ID': opts.lastEventId }), ...(opts.headers ?? {}) }
+  const headers: Record<string, string> = { authorization: `Bearer ${opts.token ?? TEST_TOKEN}`, ...(opts.lastEventId === undefined ? {} : { 'Last-Event-ID': opts.lastEventId }), ...(opts.headers ?? {}) }
   const response = await fetch(`${baseUrl}/api/events${opts.query ?? ''}`, { headers, signal: abort.signal })
   const events: WorkforceEvent[] = []
   const comments: string[] = []

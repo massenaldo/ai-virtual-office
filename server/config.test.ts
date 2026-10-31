@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { CONFIG_VARIABLES, formatConfigErrors, mergeEnv, parseConfig } from './config'
 import { makeWorkspaceRoot } from './test/workspaces'
 
-const DEFAULTS = { host: '127.0.0.1', port: 8787, dataDir: '/repo/data', runtime: 'mock', taskTimeoutMs: 600000, cancelGraceMs: 5000, approvalTimeoutMs: 300000, maxMessageBytes: 32768, maxTaskOutputBytes: 262144, eventBufferSize: 500, auditLogMaxBytes: 5242880, workspaceRoot: null, workspaces: [], allowedTools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'], allowedOrigins: ['http://localhost:5173', 'http://127.0.0.1:5173'], credentialsConfigured: false }
+const DEFAULTS = { host: '127.0.0.1', port: 8787, dataDir: '/repo/data', runtime: 'mock', taskTimeoutMs: 600000, cancelGraceMs: 5000, approvalTimeoutMs: 300000, maxMessageBytes: 32768, maxTaskOutputBytes: 262144, eventBufferSize: 500, auditLogMaxBytes: 5242880, workspaceRoot: null, workspaces: [], allowedTools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'], allowedOrigins: ['http://localhost:5173', 'http://127.0.0.1:5173'], credentialsConfigured: false, apiToken: null }
 const NAMES = CONFIG_VARIABLES
 
 describe('parseConfig', () => {
@@ -18,8 +18,8 @@ describe('parseConfig', () => {
   })
 
   it('reads every variable', () => {
-    const r = parseConfig({ HOST: 'localhost', PORT: '9000', DATA_DIR: 'tmp/x', RUNTIME: 'claude', TASK_TIMEOUT_MS: '1000', CANCEL_GRACE_MS: '200', APPROVAL_TIMEOUT_MS: '3000', MAX_MESSAGE_BYTES: '100', MAX_TASK_OUTPUT_BYTES: '1000', EVENT_BUFFER_SIZE: '20', AUDIT_LOG_MAX_BYTES: '65536', ANTHROPIC_API_KEY: 'k' }, '/repo')
-    expect(r).toEqual({ ok: true, config: { host: 'localhost', port: 9000, dataDir: '/repo/tmp/x', runtime: 'claude', taskTimeoutMs: 1000, cancelGraceMs: 200, approvalTimeoutMs: 3000, maxMessageBytes: 100, maxTaskOutputBytes: 1000, eventBufferSize: 20, auditLogMaxBytes: 65536, workspaceRoot: null, workspaces: [], allowedTools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'], allowedOrigins: ['http://localhost:5173', 'http://127.0.0.1:5173'], credentialsConfigured: true } })
+    const r = parseConfig({ HOST: 'localhost', PORT: '9000', DATA_DIR: 'tmp/x', RUNTIME: 'claude', TASK_TIMEOUT_MS: '1000', CANCEL_GRACE_MS: '200', APPROVAL_TIMEOUT_MS: '3000', MAX_MESSAGE_BYTES: '100', MAX_TASK_OUTPUT_BYTES: '1000', EVENT_BUFFER_SIZE: '20', AUDIT_LOG_MAX_BYTES: '65536', ANTHROPIC_API_KEY: 'k', API_TOKEN: 't'.repeat(40) }, '/repo')
+    expect(r).toEqual({ ok: true, config: { host: 'localhost', port: 9000, dataDir: '/repo/tmp/x', runtime: 'claude', taskTimeoutMs: 1000, cancelGraceMs: 200, approvalTimeoutMs: 3000, maxMessageBytes: 100, maxTaskOutputBytes: 1000, eventBufferSize: 20, auditLogMaxBytes: 65536, workspaceRoot: null, workspaces: [], allowedTools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'], allowedOrigins: ['http://localhost:5173', 'http://127.0.0.1:5173'], credentialsConfigured: true, apiToken: `${'t'.repeat(40)}` } })
   })
 
   it('collects every error with readable copy', () => {

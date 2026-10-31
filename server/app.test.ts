@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { startServer } from './app'
 import { silentLogger } from './log'
 import { WORKFORCE_FILE } from './store'
-import { startTestServer, tempDataDir, testConfig, type TestServer } from './test/helpers'
+import { startTestServer, tempDataDir, testConfig, TEST_TOKEN, type TestServer } from './test/helpers'
 
 let running: { close(): Promise<void> } | null = null
 afterEach(async () => { await running?.close(); running = null })
@@ -52,7 +52,7 @@ describe('app', () => {
 
 describe('restarts', () => {
   const call = async (url: string, method: string, path: string, body?: unknown) => {
-    const res = await fetch(`${url}${path}`, { method, headers: method === 'GET' ? {} : { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })
+    const res = await fetch(`${url}${path}`, { method, headers: { authorization: `Bearer ${TEST_TOKEN}`, ...(method === 'GET' ? {} : { 'content-type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body) })
     return { status: res.status, body: (await res.json()) as any }
   }
 

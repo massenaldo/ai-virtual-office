@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type { MOCK_TIMINGS } from '../src/workforce/runtime/mockRuntime'
+import { resolveApiToken, type ApiToken } from './auth'
 import { openAuditLog, type AuditInput, type AuditLog } from './audit'
 import type { ServerConfig } from './config'
 import { deriveEvents } from './deriveEvents'
@@ -31,17 +32,17 @@ export type AppDeps = {
   responseHeaders?: (req: IncomingMessage) => Record<string, string>
 }
 
-export type App = { config: ServerConfig; store: WorkforceStore; audit: AuditLog; events: EventLog; provider: ServerRuntimeProvider; manager: TaskManager; startedAt: string; streams: Set<ServerResponse>; handler: (req: IncomingMessage, res: ServerResponse) => void; closeStreams(): void }
+export type App = { config: ServerConfig; apiToken: ApiToken; store: WorkforceStore; audit: AuditLog; events: EventLog; provider: ServerRuntimeProvider; manager: TaskManager; startedAt: string; streams: Set<ServerResponse>; handler: (req: IncomingMessage, res: ServerResponse) => void; closeStreams(): void }
 
 export type RunningServer = { url: string; port: number; app: App; close(): Promise<void> }
 
 /** What the log says about a start: settings by name and ids only, never the workspace root, DATA_DIR or the key. */
-export function startupRecord(config: ServerConfig, port: number): AuditInput {
+export function startupRecord(config: ServerConfig, port: number, tokenSource: ApiToken['source']): AuditInput {
   const list = (items: readonly string[]) => (items.length > 0 ? items.join(',') : 'none')
   return {
     action: 'config.startup',
     actor: 'system',
-    detail: `runtime=${config.runtime} host=${config.host} port=${port} credentialsConfigured=${config.credentialsConfigured} workspaces=${list(config.workspaces.map((w) => w.id))} allowedTools=${list(config.allowedTools)} allowedOrigins=${list(config.allowedOrigins)}`,
+    detail: `runtime=${config.runtime} host=${config.host} port=${port} credentialsConfigured=${config.credentialsConfigured} workspaces=${list(config.workspaces.map((w) => w.id))} allowedTools=${list(config.allowedTools)} allowedOrigins=${list(config.allowedOrigins)} auth=${tokenSource}`,
   }
 }
 
@@ -61,17 +62,18 @@ export function createApp(config: ServerConfig, deps: AppDeps = {}): App {
   const store = openWorkforceStore({ dataDir: config.dataDir, now, log, onCommit: (before, after) => { events.append(deriveEvents(before, after)) } })
   // The store opens first: it creates DATA_DIR, where the audit log lives.
   const audit = deps.audit ?? openAuditLog({ dataDir: config.dataDir, maxBytes: config.auditLogMaxBytes, now, log, hide: config.workspaceRoot ? [config.workspaceRoot] : [] })
+  const apiToken = resolveApiToken({ configured: config.apiToken, dataDir: config.dataDir })
   const provider = deps.provider ?? (config.runtime === 'mock' ? new ServerMockProvider({ timings: deps.mockTimings }) : new ClaudeAgentRuntimeProvider({ credentialsConfigured: config.credentialsConfigured }))
   const manager = new TaskManager({ store, provider, config, policy: toolPolicyFrom(config), now, log, onLifecycle: (e) => audit.write(toAuditInput(e)) })
   const streams = new Set<ServerResponse>()
   const startedAt = now()
   const routes = createRoutes({ config, store, events, provider, manager, now, startedAt, heartbeatMs: deps.heartbeatMs ?? HEARTBEAT_MS, streams, log, maxStreams: deps.maxStreams, audit })
   const onReject = (r: { requestId: string; code: string; method: string; path: string }) => audit.write({ action: 'request.rejected', actor: 'api', requestId: r.requestId, reason: r.code, detail: `${r.method} ${r.path}` })
-  const guards = [...createSecurityGuards({ allowedOrigins: config.allowedOrigins, onReject }), ...(deps.guards ?? [])]
+  const guards = [...createSecurityGuards({ allowedOrigins: config.allowedOrigins, apiToken: apiToken.value, onReject }), ...(deps.guards ?? [])]
   const responseHeaders = (req: IncomingMessage) => ({ ...securityHeaders(req, config.allowedOrigins), ...(deps.responseHeaders?.(req) ?? {}) })
   const handler = createRouter({ routes, guards, responseHeaders, log, onRejected: onReject })
   return {
-    config, store, audit, events, provider, manager, startedAt, streams, handler,
+    config, apiToken, store, audit, events, provider, manager, startedAt, streams, handler,
     closeStreams: () => { for (const res of streams) res.end(); streams.clear() },
   }
 }
@@ -98,7 +100,7 @@ export async function startServer(config: ServerConfig, deps: AppDeps = {}): Pro
   }
   handler = app.handler
   const port = (server.address() as AddressInfo).port
-  app.audit.write(startupRecord(config, port))
+  app.audit.write(startupRecord(config, port, app.apiToken.source))
   const host = config.host.includes(':') ? `[${config.host}]` : config.host
   return {
     url: `http://${host}:${port}`,

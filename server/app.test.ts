@@ -1,10 +1,10 @@
-import { readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { startServer } from './app'
 import { silentLogger } from './log'
 import { WORKFORCE_FILE } from './store'
-import { startTestServer, testConfig, type TestServer } from './test/helpers'
+import { startTestServer, tempDataDir, testConfig, type TestServer } from './test/helpers'
 
 let running: { close(): Promise<void> } | null = null
 afterEach(async () => { await running?.close(); running = null })
@@ -15,7 +15,7 @@ describe('app', () => {
     running = s
     const res = await s.api('GET', '/api/health')
     expect(res.status).toBe(200)
-    expect(res.body).toMatchObject({ ok: true, runtime: 'mock', available: true, reason: null, credentialsConfigured: false, version: '0.1.0' })
+    expect(res.body).toMatchObject({ ok: true, runtime: 'mock', available: true, reason: null, credentialsConfigured: false, version: '0.1.0', audit: { ok: true, error: null } })
   })
 
   it('reports the claude runtime as unavailable without the SDK', async () => {
@@ -24,6 +24,15 @@ describe('app', () => {
     const res = await s.api('GET', '/api/health')
     expect(res.body).toMatchObject({ runtime: 'claude', available: false, reason: 'Claude Agent SDK not installed', credentialsConfigured: true })
     expect(JSON.stringify(res.body)).not.toContain('sk-test-123')
+  })
+
+  it('health reports an unavailable audit log and the server keeps serving', async () => {
+    const dataDir = tempDataDir()
+    mkdirSync(join(dataDir, 'audit.log'))
+    const s = await startTestServer({ DATA_DIR: dataDir })
+    running = s
+    expect((await s.api('GET', '/api/health')).body.audit).toEqual({ ok: false, error: 'EISDIR' })
+    expect((await s.api('GET', '/api/state')).status).toBe(200)
   })
 
   it('binds 127.0.0.1 by default', async () => {
@@ -43,7 +52,7 @@ describe('app', () => {
 
 describe('restarts', () => {
   const call = async (url: string, method: string, path: string, body?: unknown) => {
-    const res = await fetch(`${url}${path}`, { method, headers: body === undefined ? {} : { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })
+    const res = await fetch(`${url}${path}`, { method, headers: method === 'GET' ? {} : { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })
     return { status: res.status, body: (await res.json()) as any }
   }
 

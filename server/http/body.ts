@@ -6,7 +6,7 @@ export const MAX_BODY_BYTES = 65536
 /** The JSON object in a request body. An empty body is {}; wrong type, size, syntax or shape each get their own status. */
 export function readJsonBody(req: IncomingMessage, maxBytes: number = MAX_BODY_BYTES): Promise<Record<string, unknown>> {
   const type = (req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase()
-  if (type !== 'application/json') return Promise.reject(new HttpError(415, 'Content-Type must be application/json.'))
+  if (type !== 'application/json') return Promise.reject(new HttpError(415, 'Content-Type must be application/json.', 'content_type'))
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
     let size = 0
@@ -15,7 +15,7 @@ export function readJsonBody(req: IncomingMessage, maxBytes: number = MAX_BODY_B
     req.on('data', (chunk: Buffer) => {
       size += chunk.length
       if (size > maxBytes) {
-        finish(() => reject(new HttpError(413, `Request body is too large (limit ${Math.round(maxBytes / 1024)} KB).`)))
+        finish(() => reject(new HttpError(413, `Request body is too large (limit ${Math.round(maxBytes / 1024)} KB).`, 'body_too_large')))
         return
       }
       chunks.push(chunk)

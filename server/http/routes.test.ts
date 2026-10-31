@@ -1,5 +1,7 @@
+import { readdirSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { startTestServer, type TestServer } from '../test/helpers'
+import { makeWorkspaceRoot } from '../test/workspaces'
 
 let s: TestServer
 const SLOW = { thinkingMs: 60000, workingMs: 60000 }
@@ -92,7 +94,7 @@ describe('tasks', () => {
     await startForge()
     expect(await s.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'Again' })).toMatchObject({ status: 409, body: { error: 'Forge already has an active task.' } })
     expect(await s.api('POST', '/api/agents/agent-demo-frontend/tasks', { title: '' })).toMatchObject({ status: 422, body: { error: 'Title is required.' } })
-    expect(await s.api('POST', '/api/agents/agent-demo-frontend/tasks', { title: 'x', workspaceId: 'sandbox' })).toMatchObject({ status: 400, body: { error: '"workspaceId" is not supported yet.' } })
+    expect(await s.api('POST', '/api/agents/agent-demo-frontend/tasks', { title: 'x', workspaceId: 'sandbox' })).toMatchObject({ status: 422, body: { error: 'Workspaces are not configured on this server.' } })
     expect(await s.api('POST', '/api/agents/agent-demo-frontend/tasks', { title: 'x', command: 'rm -rf /' })).toMatchObject({ status: 400, body: { error: 'Unknown field "command".' } })
     expect(await s.api('POST', '/api/agents/agent-demo-frontend/tasks', { title: 5 })).toMatchObject({ status: 400, body: { error: '"title" must be a string.' } })
     expect(await s.api('POST', '/api/agents/agent-x/tasks', { title: 'x' })).toMatchObject({ status: 404, body: { error: 'Agent not found.' } })
@@ -122,8 +124,12 @@ describe('tasks', () => {
     expect(pending.tool).toBe('Write')
     expect(await s.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'maybe' })).toMatchObject({ status: 400, body: { error: '"decision" must be "approve" or "deny".' } })
     expect(await s.api('POST', `/api/tasks/${id}/approval`, { approvalId: '', decision: 'deny' })).toMatchObject({ status: 400, body: { error: '"approvalId" must be a non-empty string.' } })
+    expect(pending.summary).toBe('Write simulated.txt (39 B)')
     const denied = await s.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'deny' })
-    expect(denied).toMatchObject({ status: 200, body: { task: { status: 'failed', errorMessage: 'Approval denied (simulated)' } } })
+    // A human deny answers the request; the mock then ends its own run as failed.
+    expect(denied).toMatchObject({ status: 200, body: { task: { status: 'running' } } })
+    await until(async () => (await task(id)).status === 'failed')
+    expect(await task(id)).toMatchObject({ errorMessage: 'Approval denied (simulated)' })
     expect(await s.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'deny' })).toMatchObject({ status: 409, body: { error: 'Task is not waiting for approval.' } })
   })
 
@@ -162,3 +168,79 @@ describe('the claude runtime', () => {
     }
   })
 })
+
+describe('workspaces', () => {
+  let ws: ReturnType<typeof makeWorkspaceRoot>
+  let w: TestServer
+  beforeEach(async () => {
+    ws = makeWorkspaceRoot(['sandbox'])
+    w = await startTestServer(ws.env, { mockTimings: SLOW })
+  })
+  afterEach(async () => { await w.close(); ws.cleanup() })
+  const taskCount = async () => (await w.api('GET', '/api/state')).body.state.tasks.length as number
+
+  it('lists workspace ids only', async () => {
+    const r = await w.api('GET', '/api/workspaces')
+    expect(r.body).toEqual({ workspaces: [{ id: 'sandbox' }] })
+    expect(JSON.stringify(r.body)).not.toContain(ws.root)
+  })
+
+  it('starts a task in a workspace', async () => {
+    const r = await w.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'Build API', workspaceId: 'sandbox' })
+    expect(r.status).toBe(202)
+    expect(r.body.task.workspaceId).toBe('sandbox')
+    const none = await w.api('POST', '/api/agents/agent-demo-frontend/tasks', { title: 'x', workspaceId: null })
+    expect(none.status).toBe(202)
+    expect(none.body.task.workspaceId).toBeNull()
+  })
+
+  it('rejects bad workspaces with exact copy and creates no task', async () => {
+    const before = await taskCount()
+    expect(await w.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'x', workspaceId: 'nope' })).toMatchObject({ status: 422, body: { error: 'Unknown workspace "nope".' } })
+    expect(await w.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'x', workspaceId: '../etc' })).toMatchObject({ status: 400, body: { error: '"workspaceId" must be a workspace id: 1–32 lowercase letters, digits or hyphens.' } })
+    expect(await w.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'x', workspaceId: 5 })).toMatchObject({ status: 400, body: { error: '"workspaceId" must be a string or null.' } })
+    expect(await taskCount()).toBe(before)
+  })
+
+  it('never exposes the workspace path', async () => {
+    await w.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'Build API', workspaceId: 'sandbox' })
+    await w.api('POST', '/api/agents/agent-demo-frontend/tasks', { title: 'x', workspaceId: 'nope' })
+    for (const path of ['/api/state', '/api/health', '/api/workspaces']) expect(JSON.stringify((await w.api('GET', path)).body)).not.toContain(ws.root)
+  })
+})
+
+describe('the demo tool request', () => {
+  it('follows ALLOWED_TOOLS', async () => {
+    const t = await startTestServer({ ALLOWED_TOOLS: 'Read' }, { mockTimings: SLOW })
+    try {
+      const r = await t.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'Build API' })
+      const id = r.body.task.id as string
+      await until(async () => (await t.api('GET', '/api/state')).body.state.tasks[0].status === 'running')
+      expect((await t.api('POST', `/api/demo/tasks/${id}/request-approval`)).status).toBe(202)
+      await until(async () => (await t.api('GET', '/api/state')).body.state.tasks[0].status === 'failed')
+      expect((await t.api('GET', '/api/state')).body.state.tasks[0].errorMessage).toBe('Tool "Write" denied by policy: not in ALLOWED_TOOLS.')
+    } finally {
+      await t.close()
+    }
+  })
+
+  it('approving the demo write changes nothing on disk', async () => {
+    const w = makeWorkspaceRoot(['sandbox'])
+    const t = await startTestServer(w.env, { mockTimings: { thinkingMs: 30, workingMs: 30 } })
+    try {
+      const r = await t.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'Build API', workspaceId: 'sandbox' })
+      const id = r.body.task.id as string
+      const get = async () => (await t.api('GET', '/api/state')).body.state.tasks[0]
+      await until(async () => (await get()).status === 'running')
+      await t.api('POST', `/api/demo/tasks/${id}/request-approval`)
+      const pending = (await get()).pendingApproval
+      expect((await t.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'approve' })).status).toBe(200)
+      await until(async () => (await get()).status === 'completed')
+      expect(readdirSync(w.path('sandbox'))).toEqual([])
+    } finally {
+      await t.close()
+      w.cleanup()
+    }
+  })
+})
+

@@ -1,16 +1,16 @@
 import type { AgentInput, TaskInput } from '../../src/workforce/operations'
 import type { ApprovalDecision } from '../../src/workforce/types'
-import { HttpError } from './router'
+import { HttpError, type RejectCode } from './router'
 
 // Strict parsing of what the browser sends. Unknown keys are rejected, so a path, working directory or command can
 // never ride along; business rules (name length, desk taken, one task per agent) stay with the operations and answer 422/409.
 
 type Body = Record<string, unknown>
 
-const bad = (message: string) => new HttpError(400, message)
+const bad = (message: string, code?: RejectCode) => new HttpError(400, message, code)
 
 function allow(b: Body, keys: string[]): void {
-  for (const key of Object.keys(b)) if (!keys.includes(key)) throw bad(`Unknown field "${key}".`)
+  for (const key of Object.keys(b)) if (!keys.includes(key)) throw bad(`Unknown field "${key}".`, 'unknown_field')
 }
 
 function text(b: Body, key: string): string {
@@ -42,13 +42,14 @@ export function parseDesk(b: Body): { deskId: string | null } {
   return { deskId: v }
 }
 
-export function parseCreateTask(b: Body): TaskInput {
-  for (const key of Object.keys(b)) {
-    if (key === 'workspaceId') throw bad('"workspaceId" is not supported yet.')
-    if (key !== 'title' && key !== 'description') throw bad(`Unknown field "${key}".`)
-  }
+export type CreateTaskRequest = TaskInput & { workspaceId: string | null }
+
+export function parseCreateTask(b: Body): CreateTaskRequest {
+  allow(b, ['title', 'description', 'workspaceId'])
   const description = 'description' in b ? text(b, 'description') : ''
-  return { title: text(b, 'title'), description }
+  const workspaceId = b.workspaceId === undefined ? null : b.workspaceId
+  if (workspaceId !== null && typeof workspaceId !== 'string') throw bad('"workspaceId" must be a string or null.')
+  return { title: text(b, 'title'), description, workspaceId }
 }
 
 export function parseApproval(b: Body): { approvalId: string; decision: ApprovalDecision } {

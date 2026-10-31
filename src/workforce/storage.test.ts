@@ -243,3 +243,28 @@ describe('v1 migration', () => {
     expect(loadWorkforce(s, NOW).state.tasks).toEqual([])
   })
 })
+
+describe('task workspaceId', () => {
+  const withTaskField = (mutate: (task: Record<string, unknown>) => void) => {
+    const raw = JSON.parse(serializeWorkforce(withRunningTask().state))
+    mutate(raw.tasks[0])
+    return raw
+  }
+
+  it('loads a v2 task without workspaceId as null', () => {
+    const raw = withTaskField((t) => { delete t.workspaceId })
+    expect(parseWorkforce(raw)?.tasks[0].workspaceId).toBeNull()
+  })
+
+  it('round-trips workspaceId', () => {
+    const raw = withTaskField((t) => { t.workspaceId = 'sandbox' })
+    const parsed = parseWorkforce(raw)!
+    expect(parsed.tasks[0].workspaceId).toBe('sandbox')
+    expect(JSON.parse(serializeWorkforce(parsed)).tasks[0].workspaceId).toBe('sandbox')
+  })
+
+  it('rejects a non-string workspaceId', () => {
+    expect(parseWorkforce(withTaskField((t) => { t.workspaceId = 5 }))).toBeNull()
+  })
+})
+

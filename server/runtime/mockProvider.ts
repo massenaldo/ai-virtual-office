@@ -3,7 +3,11 @@ import type { RuntimeEvent } from '../../src/workforce/runtime/types'
 import type { AgentTask, ApprovalDecision } from '../../src/workforce/types'
 import type { DemoProvider, ExecutionResult, ExecutionStatus, StartContext, StartOutcome } from './types'
 
-type Record = { executionId: string; pendingApprovalId: string | null; outcome: 'running' | 'completed' | 'failed' | 'cancelled'; summary: string; error: string }
+/** innerApprovalId is the simulated run's own approval while the demo tool request waits on the manager. */
+type Record = { executionId: string; pendingApprovalId: string | null; innerApprovalId: string | null; ctx: StartContext; outcome: 'running' | 'completed' | 'failed' | 'cancelled'; summary: string; error: string }
+
+/** The simulated request the demo button makes. It goes through the real policy and approval flow, and nothing is ever written. */
+export const MOCK_DEMO_WRITE = { file_path: 'simulated.txt', content: 'Simulated content (nothing is written).' }
 
 const KEEP_ENDED = 200
 
@@ -27,7 +31,7 @@ export class ServerMockProvider implements DemoProvider {
   start(task: AgentTask, ctx: StartContext): Promise<StartOutcome> {
     const started = this.inner.start(task, ctx.agent)
     if (!started.ok) return Promise.resolve(started)
-    this.records.set(task.id, { executionId: started.executionId, pendingApprovalId: null, outcome: 'running', summary: '', error: '' })
+    this.records.set(task.id, { executionId: started.executionId, pendingApprovalId: null, innerApprovalId: null, ctx, outcome: 'running', summary: '', error: '' })
     return Promise.resolve({ ok: true, executionId: started.executionId, sessionId: null })
   }
 
@@ -39,8 +43,22 @@ export class ServerMockProvider implements DemoProvider {
     this.inner.respondToApproval(taskId, approvalId, decision)
   }
 
+  /** Pauses the simulated run, then asks the manager through the start context; the answer decides how the run goes on. */
   requestApproval(taskId: string): void {
+    const r = this.records.get(taskId)
+    if (!r || r.outcome !== 'running' || r.innerApprovalId !== null) return
     this.inner.requestApproval(taskId)
+    if (r.innerApprovalId === null) return // the simulated run had not started yet
+    void r.ctx.requestToolApproval({ tool: 'Write', input: MOCK_DEMO_WRITE }).then((result) => {
+      const innerId = r.innerApprovalId
+      r.innerApprovalId = null
+      r.pendingApprovalId = null
+      if (innerId === null) return
+      if (result.behavior === 'allow') this.inner.respondToApproval(taskId, innerId, 'approve')
+      else if (result.outcome === 'denied') this.inner.respondToApproval(taskId, innerId, 'deny')
+      else if (result.outcome === 'denied_by_policy') this.inner.forceError(taskId, result.message)
+      // expired or cancelled: the manager has already ended the task and cancelled this run.
+    })
   }
 
   forceError(taskId: string, message?: string): void {
@@ -75,8 +93,12 @@ export class ServerMockProvider implements DemoProvider {
   private onInner(event: RuntimeEvent): void {
     const r = this.records.get(event.taskId)
     if (r) {
-      if (event.type === 'approval_requested') r.pendingApprovalId = event.approvalId
-      else if (event.type === 'progress') r.pendingApprovalId = null
+      if (event.type === 'approval_requested') {
+        // The manager raises the real approval; the simulated run's own request stays internal.
+        r.pendingApprovalId = event.approvalId
+        r.innerApprovalId = event.approvalId
+        return
+      } else if (event.type === 'progress') r.pendingApprovalId = null
       else if (event.type === 'completed') this.end(event.taskId, r, 'completed', { summary: event.summary })
       else if (event.type === 'failed') this.end(event.taskId, r, 'failed', { error: event.error })
       else if (event.type === 'cancelled') this.end(event.taskId, r, 'cancelled', {})

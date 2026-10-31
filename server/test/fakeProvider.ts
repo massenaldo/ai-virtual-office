@@ -1,10 +1,10 @@
 import type { RuntimeEvent } from '../../src/workforce/runtime/types'
-import type { AgentTask, ApprovalDecision } from '../../src/workforce/types'
+import type { AgentTask, ApprovalDecision, TaskRuntime } from '../../src/workforce/types'
 import type { ExecutionResult, ExecutionStatus, ServerRuntimeProvider, StartContext, StartOutcome } from '../runtime/types'
 
 /** A scriptable provider for task manager tests: records calls, emits events on demand, and can hold start() open. */
 export class FakeProvider implements ServerRuntimeProvider {
-  readonly kind = 'mock' as const
+  readonly kind: TaskRuntime
   readonly availability = { available: true } as const
   starts: Array<{ task: AgentTask; ctx: StartContext }> = []
   cancels: string[] = []
@@ -17,6 +17,10 @@ export class FakeProvider implements ServerRuntimeProvider {
   private readonly listeners = new Set<(event: RuntimeEvent) => void>()
   private readonly pending: Array<{ resolve: (o: StartOutcome) => void; reject: (e: unknown) => void }> = []
   private readonly running = new Set<string>()
+
+  constructor(opts: { kind?: TaskRuntime } = {}) {
+    this.kind = opts.kind ?? 'mock'
+  }
 
   start(task: AgentTask, ctx: StartContext): Promise<StartOutcome> {
     this.starts.push({ task, ctx })

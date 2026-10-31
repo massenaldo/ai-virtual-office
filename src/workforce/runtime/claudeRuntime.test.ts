@@ -9,7 +9,7 @@ const FORBIDDEN = [/\bfetch\(/, /child_process/, /XMLHttpRequest/, /new WebSocke
 
 const NOW = '2026-10-30T09:00:00.000Z'
 const agent: Agent = { id: 'agent-1', name: 'Forge', role: 'API engineer', department: 'backend', deskId: null, status: 'idle', currentTaskId: 'task-1', runtimeMode: 'real', demo: false, createdAt: NOW, lastActivityAt: null }
-const task: AgentTask = { id: 'task-1', agentId: 'agent-1', title: 'Build API', description: '', status: 'queued', createdAt: NOW, startedAt: null, completedAt: null, resultSummary: null, errorMessage: null, executionId: null, timeoutMs: null, runtime: 'claude', sessionId: null, endedReason: null, pendingApproval: null }
+const task: AgentTask = { id: 'task-1', agentId: 'agent-1', title: 'Build API', description: '', status: 'queued', createdAt: NOW, startedAt: null, completedAt: null, resultSummary: null, errorMessage: null, executionId: null, timeoutMs: null, runtime: 'claude', workspaceId: null, sessionId: null, endedReason: null, pendingApproval: null }
 
 describe('ClaudeRuntimeProvider', () => {
   it('reports unavailable and never starts', () => {

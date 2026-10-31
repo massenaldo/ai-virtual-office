@@ -102,22 +102,22 @@ export function parseWorkspaces(rootRaw: string | undefined, listRaw: string | u
   return { workspaceRoot: rootReal, workspaces, errors }
 }
 
-/** Looks the id up in the server's own list and re-checks the real paths now; never cached. */
+/** Looks the id up in the server's own list and re-checks the real paths now against the root stored at startup; never cached. */
 export function resolveWorkspace(config: WorkspaceConfig, workspaceId: unknown): { ok: true; workspace: ResolvedWorkspace } | { ok: false; reason: WorkspaceReason } {
   if (config.workspaceRoot === null) return { ok: false, reason: 'not_configured' }
   if (typeof workspaceId !== 'string' || !WORKSPACE_ID_RE.test(workspaceId)) return { ok: false, reason: 'invalid_id' }
   const entry = config.workspaces.find((w) => w.id === workspaceId)
   if (!entry) return { ok: false, reason: 'unknown' }
-  let rootNow: string
+  // config.workspaceRoot is the real path taken at startup. If it no longer resolves to itself, the root was swapped.
   let real: string
   try {
-    rootNow = realpathSync(config.workspaceRoot)
-    real = realpathSync(join(rootNow, entry.relativePath))
+    if (realpathSync(config.workspaceRoot) !== config.workspaceRoot) return { ok: false, reason: 'escapes_root' }
+    real = realpathSync(join(config.workspaceRoot, entry.relativePath))
     if (!statSync(real).isDirectory()) return { ok: false, reason: 'missing' }
   } catch {
     return { ok: false, reason: 'missing' }
   }
-  if (!isInside(rootNow, real)) return { ok: false, reason: 'escapes_root' }
+  if (!isInside(config.workspaceRoot, real)) return { ok: false, reason: 'escapes_root' }
   return { ok: true, workspace: { id: entry.id, path: real } }
 }
 
@@ -137,7 +137,9 @@ export function checkPathInWorkspace(workspacePath: string, candidate: unknown):
       break
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code
-      if (code === 'ENOENT' || code === 'ENOTDIR') {
+      // A component that is a regular file (`notes.md/x`) is not a place a path can go through.
+      if (code === 'ENOTDIR') return { ok: false, reason: 'invalid_path' }
+      if (code === 'ENOENT') {
         // If something exists at `cur` it is a dangling symlink: never a safe target.
         try {
           lstatSync(cur)

@@ -73,10 +73,28 @@ describe('ServerMockProvider', () => {
     const startWithGate = async () => {
       const task = newTask()
       asked = vi.fn(() => new Promise<ToolGateResult>((resolve) => { resolveGate = resolve }))
-      await provider.start(task, testStartContext(forge, { requestToolApproval: asked as unknown as StartContext['requestToolApproval'] }))
+      await provider.start(task, testStartContext(forge, { workspace: { id: 'sandbox', path: '/tmp/sandbox' }, requestToolApproval: asked as unknown as StartContext['requestToolApproval'] }))
       await vi.advanceTimersByTimeAsync(0)
       return task
     }
+
+    it('without a workspace the simulated run keeps its own approval and the gate is not asked', async () => {
+      const task = newTask()
+      const gate = vi.fn()
+      await provider.start(task, testStartContext(forge, { requestToolApproval: gate as unknown as StartContext['requestToolApproval'] }))
+      await vi.advanceTimersByTimeAsync(0)
+      const before = events.length
+      provider.requestApproval(task.id)
+      expect(gate).not.toHaveBeenCalled()
+      const raised = events.slice(before).find((e) => e.type === 'approval_requested')
+      expect(raised).toMatchObject({ type: 'approval_requested', taskId: task.id, tool: 'Write' })
+      const id = raised?.type === 'approval_requested' ? raised.approvalId : ''
+      const status = provider.status(task.id)
+      expect(status.state === 'running' && status.pendingApprovalId).toBe(id)
+      provider.respondToApproval(task.id, id, 'approve')
+      await vi.advanceTimersByTimeAsync(300)
+      expect(provider.result(task.id)).toMatchObject({ outcome: 'completed' })
+    })
 
     it('requestApproval asks through the context and deny ends failed', async () => {
       const task = await startWithGate()
@@ -121,7 +139,7 @@ describe('ServerMockProvider', () => {
     it('ignores a second request and a request before the run started', async () => {
       const task = newTask()
       asked = vi.fn(() => new Promise<ToolGateResult>(() => {}))
-      await provider.start(task, testStartContext(forge, { requestToolApproval: asked as unknown as StartContext['requestToolApproval'] }))
+      await provider.start(task, testStartContext(forge, { workspace: { id: 'sandbox', path: '/tmp/sandbox' }, requestToolApproval: asked as unknown as StartContext['requestToolApproval'] }))
       provider.requestApproval(task.id)
       expect(asked).not.toHaveBeenCalled()
       await vi.advanceTimersByTimeAsync(0)

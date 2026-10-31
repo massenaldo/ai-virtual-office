@@ -86,10 +86,10 @@ describe('decideToolUse', () => {
     expect(decide('Read', { file_path: 'a' }, null)).toEqual(deny('no_workspace'))
     expect(decide('Glob', { pattern: '*' }, null)).toEqual(deny('no_workspace'))
     expect(decide('Bash', { command: 'ls' }, null)).toEqual(deny('no_workspace'))
-    expect(decide('Write', MOCK_DEMO_WRITE, null)).toMatchObject({ decision: 'ask', summary: 'Write simulated.txt (39 B)' })
-    expect(decide('Write', { file_path: '/tmp/x', content: '' }, null)).toEqual(deny('outside_workspace'))
-    expect(decide('Write', { file_path: 'a/../../x', content: '' }, null)).toEqual(deny('outside_workspace'))
-    expect(decide('Write', { file_path: 'a\\b', content: '' }, null)).toEqual(deny('invalid_path'))
+    // Write and Edit always need a workspace; a lexical check is never enough to ask a human about a file.
+    expect(decide('Write', MOCK_DEMO_WRITE, null)).toEqual(deny('no_workspace'))
+    expect(decide('Write', { file_path: '/tmp/x', content: '' }, null)).toEqual(deny('no_workspace'))
+    expect(decide('Edit', { file_path: 'a', old_string: 'x', new_string: 'y' }, null)).toEqual(deny('no_workspace'))
     expect(decide('WebSearch', { query: 'q' }, null)).toMatchObject({ decision: 'ask' })
   })
 

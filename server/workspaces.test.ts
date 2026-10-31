@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -55,6 +55,19 @@ describe('resolveWorkspace', () => {
     expect(resolveWorkspace(c, 'sandbox')).toEqual({ ok: false, reason: 'escapes_root' })
   })
 
+  it('rejects a root that was replaced by a symlink after config', () => {
+    const c = config()
+    renameSync(ws.root, `${ws.root}-moved`)
+    symlinkSync(outside, ws.root)
+    mkdirSync(join(outside, 'sandbox'))
+    try {
+      expect(resolveWorkspace(c, 'sandbox')).toEqual({ ok: false, reason: 'escapes_root' })
+    } finally {
+      rmSync(ws.root, { force: true })
+      renameSync(`${ws.root}-moved`, ws.root)
+    }
+  })
+
   it('follows a symlink that stays inside the root', () => {
     mkdirSync(join(ws.root, 'real'))
     symlinkSync(join(ws.root, 'real'), join(ws.root, 'alias'))
@@ -73,6 +86,23 @@ describe('checkPathInWorkspace', () => {
     symlinkSync(outside, join(W, 'link'))
     symlinkSync(join(outside, 'secret.txt'), join(W, 'filelink'))
     symlinkSync(join(ws.root, 'nope'), join(W, 'dangling'))
+  })
+
+  it('rejects a path that goes through a regular file', () => {
+    expect(checkPathInWorkspace(W, 'notes.md/x')).toEqual({ ok: false, reason: 'invalid_path' })
+    expect(checkPathInWorkspace(W, 'notes.md/a/b.txt')).toEqual({ ok: false, reason: 'invalid_path' })
+  })
+
+  it('judges every call on the filesystem as it is now', () => {
+    expect(checkPathInWorkspace(W, 'sub/out.txt')).toEqual({ ok: true, relative: 'sub/out.txt' })
+    rmSync(join(W, 'sub'), { recursive: true })
+    symlinkSync(outside, join(W, 'sub'))
+    expect(checkPathInWorkspace(W, 'sub/out.txt')).toEqual({ ok: false, reason: 'outside_workspace' })
+    rmSync(join(W, 'sub'))
+    mkdirSync(join(W, 'sub'))
+    expect(checkPathInWorkspace(W, 'sub/out.txt')).toEqual({ ok: true, relative: 'sub/out.txt' })
+    renameSync(join(W, 'sub'), join(W, 'moved'))
+    expect(checkPathInWorkspace(W, 'moved/out.txt')).toEqual({ ok: true, relative: 'moved/out.txt' })
   })
 
   it('accepts paths inside', () => {

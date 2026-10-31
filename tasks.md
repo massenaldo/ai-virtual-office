@@ -1,7 +1,7 @@
 # Milestone 3B.1.1 — Security Hardening & E2E Verification: Tasks
 
 **Spec:** [`plan.md`](plan.md) (Milestone 3B.1.1 brief). This file is my working task list for that spec.
-**Status:** Draft, 2026-10-31. Awaiting your answers to Q1–Q3 (see "Questions for you"). Nothing is implemented yet.
+**Status:** Approved, 2026-10-31. Q1–Q3 answered with the recommendations (see "Decisions"). Stage A is in progress.
 **Earlier milestones:** [`milestone-3b1-tasks.md`](docs/milestones/milestone-3b1-tasks.md) ([report](docs/milestone-3b1-report.md)), [`milestone-3a-tasks.md`](docs/milestones/milestone-3a-tasks.md) ([report](docs/milestone-3a-report.md)).
 
 ## What this milestone is
@@ -312,4 +312,8 @@ Branch: `test/3b11-e-e2e`.
 
 ## Decisions
 
-Not answered yet.
+Answered 2026-10-31 ("go with recommendations"):
+
+- **Q1:** Option A, the same-origin Vite proxy that injects the header.
+- **Q2:** call the real `startServer()` in the test process on an ephemeral port; smoke-test the built bundle by hand in E2.
+- **Q3:** with a workspace the demo goes through the gate as a simulated Write; without one it falls back to the simulated run's own approval.

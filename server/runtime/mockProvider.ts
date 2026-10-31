@@ -48,6 +48,7 @@ export class ServerMockProvider implements DemoProvider {
     const r = this.records.get(taskId)
     if (!r || r.outcome !== 'running' || r.innerApprovalId !== null) return
     this.inner.requestApproval(taskId)
+    if (r.ctx.workspace === null) return // no workspace: the simulated run's own approval was forwarded by onInner
     if (r.innerApprovalId === null) return // the simulated run had not started yet
     void r.ctx.requestToolApproval({ tool: 'Write', input: MOCK_DEMO_WRITE }).then((result) => {
       const innerId = r.innerApprovalId
@@ -94,8 +95,13 @@ export class ServerMockProvider implements DemoProvider {
     const r = this.records.get(event.taskId)
     if (r) {
       if (event.type === 'approval_requested') {
-        // The manager raises the real approval; the simulated run's own request stays internal.
         r.pendingApprovalId = event.approvalId
+        // Without a workspace there is no tool request to make (Write needs one), so the simulated run's own approval is
+        // the one the person sees. With a workspace the manager raises the real approval and this one stays internal.
+        if (r.ctx.workspace === null) {
+          for (const listener of this.listeners) listener(event)
+          return
+        }
         r.innerApprovalId = event.approvalId
         return
       } else if (event.type === 'progress') r.pendingApprovalId = null

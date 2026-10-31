@@ -22,9 +22,13 @@ const files: BuiltFile[] = DIRS.flatMap((dir) =>
 
 let envText: string | null = null
 try { envText = readFileSync('.env', 'utf8') } catch { envText = null }
-const key = mergeEnv(envText, process.env).ANTHROPIC_API_KEY
+const merged = mergeEnv(envText, process.env)
+const key = merged.ANTHROPIC_API_KEY
+// The configured token, or the generated one if the server has run here.
+let token = merged.API_TOKEN
+if (!token) { try { token = readFileSync(join(merged.DATA_DIR || 'data', 'api-token'), 'utf8').trim() } catch { token = undefined } }
 
-const problems = findSecretLeaks(files, key)
+const problems = findSecretLeaks(files, key, token)
 if (problems.length > 0) {
   for (const p of problems) console.error(p)
   process.exit(1)

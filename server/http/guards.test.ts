@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { silentLogger } from '../log'
 import { openEventStream } from '../test/sseClient'
-import { rawRequest, startTestServer, type TestServer } from '../test/helpers'
+import { rawRequest, startTestServer, TEST_TOKEN, type TestServer } from '../test/helpers'
 import { createSecurityGuards } from './guards'
 import { createRouter } from './router'
 
@@ -145,7 +145,7 @@ describe('onReject', () => {
 
   it('reports guard rejections with a reason code and no body text', async () => {
     const spy = vi.fn()
-    server = createServer(createRouter({ routes: [{ method: 'GET', path: '/api/state', handler: () => ({ status: 200, body: {} }) }], guards: createSecurityGuards({ allowedOrigins: ['http://localhost:5173'], onReject: spy }), log: silentLogger }))
+    server = createServer(createRouter({ routes: [{ method: 'GET', path: '/api/state', handler: () => ({ status: 200, body: {} }) }], guards: createSecurityGuards({ allowedOrigins: ['http://localhost:5173'], apiToken: TEST_TOKEN, onReject: spy }), log: silentLogger }))
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
     await rawRequest(base, { path: '/api/state', headers: { host: 'evil.example' } })

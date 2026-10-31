@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createDemoWorkforce } from '../demo'
 import type { StateResponse } from '../api'
-import { createApiClient, type ApiClient } from './client'
+import { createApiClient, NOT_AUTHORIZED, type ApiClient } from './client'
 import { createFakeBackend } from './fakes'
 
 const BASE = 'http://127.0.0.1:8787'
@@ -47,6 +47,21 @@ describe('createApiClient', () => {
   it("reports a network failure as Can't reach the backend", async () => {
     backend.down = true
     expect(await client.get('/api/state')).toEqual({ ok: false, status: null, error: "Can't reach the backend at http://127.0.0.1:8787." })
+  })
+
+  it('turns a 401 into the not-authorized message', async () => {
+    backend.respond('GET', '/api/state', 401, { error: 'Unauthorized.' })
+    expect(await client.get('/api/state')).toEqual({ ok: false, status: 401, error: NOT_AUTHORIZED })
+    backend.respond('POST', '/api/agents', 401, { error: 'Unauthorized.' })
+    expect(await client.send('POST', '/api/agents', {})).toEqual({ ok: false, status: 401, error: NOT_AUTHORIZED })
+  })
+
+  it('works against the same origin and says so when it cannot reach it', async () => {
+    const same = createFakeBackend({ baseUrl: '', state: fakeState })
+    const c = createApiClient({ baseUrl: '', fetch: same.fetch })
+    expect(await c.get('/api/state')).toMatchObject({ ok: true })
+    same.down = true
+    expect(await c.get('/api/state')).toEqual({ ok: false, status: null, error: "Can't reach the backend." })
   })
 
   it('turns an abort into a failed result instead of throwing', async () => {

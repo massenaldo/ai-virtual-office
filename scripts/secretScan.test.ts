@@ -26,6 +26,12 @@ describe('findSecretLeaks', () => {
     expect(findSecretLeaks([{ path: 'dist-server/index.js.map', text: 'ANTHROPIC_API_KEY' }], undefined)).toEqual([])
   })
 
+  it('finds the API token value in any file, including the server bundle', () => {
+    const token = 'tok-0123456789-abcdefghijklmnopqrstuvwxyz'
+    expect(findSecretLeaks([{ path: 'dist/assets/index.js', text: `x ${token} y` }, { path: 'dist-server/index.js', text: token }, { path: 'dist/clean.js', text: 'nothing' }], undefined, token)).toEqual(['dist/assets/index.js: contains the API token value', 'dist-server/index.js: contains the API token value'])
+    expect(findSecretLeaks([{ path: 'dist/a.js', text: 'short' }], undefined, 'short')).toEqual([])
+  })
+
   it('ignores a key shorter than 8 characters', () => {
     expect(findSecretLeaks([{ path: 'dist/a.js', text: 'short abc123' }], 'abc123')).toEqual([])
   })

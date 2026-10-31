@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChangeEvent, StateResponse } from '../api'
 import { createDemoWorkforce } from '../demo'
 import type { Agent, AgentTask } from '../types'
-import { createApiClient } from './client'
+import { createApiClient, NOT_AUTHORIZED } from './client'
 import { createFakeBackend, FakeEventSource } from './fakes'
 import { createRemoteSync, reconnectDelay, type RemoteSync } from './sync'
 
@@ -169,6 +169,23 @@ describe('createRemoteSync: offline, restart and cleanup', () => {
     es(0).open()
     es(0).fail()
     expect(sync.getSnapshot().connectionError).toBe('The event stream was interrupted.')
+  })
+
+  it('shows Not authorized on a 401 and keeps retrying', async () => {
+    start({ before: (b) => b.respond('GET', '/api/state', 401, { error: 'Unauthorized.' }) })
+    await flush()
+    expect(sync.getSnapshot()).toMatchObject({ connection: 'offline', connectionError: NOT_AUTHORIZED })
+    backend.respond('GET', '/api/state', 200, stateAt('b1:5'))
+    await vi.advanceTimersByTimeAsync(1000)
+    es(0).open()
+    expect(sync.getSnapshot()).toMatchObject({ connection: 'live', connectionError: null })
+  })
+
+  it('opens the event stream on the same origin when the base URL is empty', async () => {
+    backend = createFakeBackend({ baseUrl: '', state: stateAt('b1:5') })
+    sync = createRemoteSync({ client: createApiClient({ baseUrl: '', fetch: backend.fetch }), createEventSource: (url) => new FakeEventSource(url), now: () => NOW })
+    await flush()
+    expect(es(0).url).toBe('/api/events?lastEventId=b1%3A5')
   })
 
   it('retries with backoff while the backend is down', async () => {

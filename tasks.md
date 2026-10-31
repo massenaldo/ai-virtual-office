@@ -1,7 +1,7 @@
 # Milestone 3B.1.1 — Security Hardening & E2E Verification: Tasks
 
 **Spec:** [`plan.md`](plan.md) (Milestone 3B.1.1 brief). This file is my working task list for that spec.
-**Status:** Approved, 2026-10-31. Q1–Q3 answered with the recommendations (see "Decisions"). Stage A is merged; Stage B is in review.
+**Status:** Approved, 2026-10-31. Q1–Q3 answered with the recommendations (see "Decisions"). Stage A is merged; Stage B is merged; Stage C is in review.
 **Earlier milestones:** [`milestone-3b1-tasks.md`](docs/milestones/milestone-3b1-tasks.md) ([report](docs/milestone-3b1-report.md)), [`milestone-3a-tasks.md`](docs/milestones/milestone-3a-tasks.md) ([report](docs/milestone-3a-report.md)).
 
 ## What this milestone is
@@ -208,7 +208,7 @@ Branch: `feat/3b11-b-tool-gate`. It depends on A (workspace required, canonical 
 
 Branch: `feat/3b11-c-api-token`. The design here assumes Q1 = A. Under B, C2 becomes a session endpoint plus a Connect form.
 
-- [ ] **C1. Backend token and auth guard.**
+- [x] **C1. Backend token and auth guard.**
   - Files: new `server/auth.ts` and `server/auth.test.ts`. Changes to `server/config.ts` (`API_TOKEN`, refused under a `VITE_` name, minimum length), `server/http/guards.ts` (auth guard, 401 plus `WWW-Authenticate: Bearer`, audited as `request.rejected reason=auth`), `server/app.ts` (resolve the token, write the token file, startup record), `server/redact.ts` (`findSecretInConfig` for the token), `scripts/checkSecrets.ts`, and `server/test/helpers.ts` / `sseClient.ts` (send the token by default, so existing tests stay meaningful).
   - RED first:
     - every route except `GET /api/health` and `OPTIONS` returns 401 with no token, with a wrong token, and **with no `Origin` header**;
@@ -219,7 +219,7 @@ Branch: `feat/3b11-c-api-token`. The design here assumes Q1 = A. Under B, C2 bec
     - with a capturing logger and audit log, the token appears in no log line, audit record, response body or header;
     - the existing guard order tests still pass (bad Host still gives 421 before 401).
   - Verify: `npx vitest run server/auth.test.ts server/http server/config.test.ts`, then `npm test` and `npx tsc -b`.
-- [ ] **C2. Browser path: same-origin proxy (Q1 = A).**
+- [x] **C2. Browser path: same-origin proxy (Q1 = A).**
   - Files: new `scripts/apiProxy.ts` and `scripts/apiProxy.test.ts` (builds Vite `server.proxy` options). Changes to `vite.config.ts` (proxy only when `VITE_WORKFORCE_API_URL=/`; reads `DATA_DIR/api-token` per request), `scripts/devFull.ts` (in-memory token, sets `VITE_WORKFORCE_API_URL=/`), `src/workforce/source.ts` (accept `/` as same origin, `baseUrl: ''`), `src/workforce/remote/sync.ts` / `remoteController.ts` (401 → a clear "Not authorized" connection error), and `src/vite-env.d.ts` if needed.
   - RED first:
     - `apiProxy` adds `Authorization`, removes incoming `Authorization` and `Cookie`, refuses anything other than `Sec-Fetch-Site: same-origin` with 403, and forwards only `/api/*`;
@@ -228,7 +228,7 @@ Branch: `feat/3b11-c-api-token`. The design here assumes Q1 = A. Under B, C2 bec
     - a 401 from the snapshot shows the "Not authorized" state and does not fall back to the browser mock.
   - Verify: `npx vitest run scripts/apiProxy.test.ts src/workforce`, then `npm test`, `npm run build`, `npm run server:build` and `npm run check:secrets`. Also `grep -r "api-token\|Bearer " dist/` must find no token value.
   - Manual check: `npm run dev:full`, then the browser shows `Live`; `curl 127.0.0.1:8787/api/state` gives 401.
-- [ ] **C3. Docs for the token.**
+- [x] **C3. Docs for the token.**
   - Files: `README.md` ("Backend" section: auth model, workflows table, generation, storage, rotation, what the proxy trusts) and `.env.example` (`API_TOKEN`, with a note that it must never be a `VITE_` variable).
   - Verify: `npm test` (the config test that checks `CONFIG_VARIABLES` against `.env.example` covers the new name).
 

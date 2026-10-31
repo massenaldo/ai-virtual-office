@@ -4,7 +4,7 @@ import type { Logger } from '../log'
 import { readJsonBody } from './body'
 
 /** Why a request was refused before it reached a handler, for the audit log. A reason code only, never request content. */
-export type RejectCode = 'host' | 'origin' | 'content_type' | 'body_too_large' | 'unknown_field' | 'stream_limit'
+export type RejectCode = 'host' | 'origin' | 'auth' | 'content_type' | 'body_too_large' | 'unknown_field' | 'stream_limit'
 
 export class HttpError extends Error {
   constructor(readonly status: number, message: string, readonly code?: RejectCode) {

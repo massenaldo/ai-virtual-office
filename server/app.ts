@@ -17,6 +17,7 @@ import { ClaudeAgentRuntimeProvider } from './runtime/claudeAgent'
 import { ServerMockProvider } from './runtime/mockProvider'
 import type { ServerRuntimeProvider } from './runtime/types'
 import { openWorkforceStore, type WorkforceStore } from './store'
+import { openPermissionStore, type PermissionStore } from './permissions/store'
 import { TaskManager, type LifecycleEvent } from './taskManager'
 import { toolPolicyFrom } from './toolPolicy'
 
@@ -29,13 +30,14 @@ export type AppDeps = {
   heartbeatMs?: number
   maxStreams?: number
   audit?: AuditLog
+  permissions?: PermissionStore
   /** Test seam: replaces the store's atomic file write. */
   storeWriteFile?: (path: string, text: string) => void
   guards?: Guard[]
   responseHeaders?: (req: IncomingMessage) => Record<string, string>
 }
 
-export type App = { config: ServerConfig; apiToken: ApiToken; store: WorkforceStore; audit: AuditLog; events: EventLog; provider: ServerRuntimeProvider; manager: TaskManager; startedAt: string; streams: Set<ServerResponse>; handler: (req: IncomingMessage, res: ServerResponse) => void; closeStreams(): void; releaseLock(): void }
+export type App = { config: ServerConfig; apiToken: ApiToken; store: WorkforceStore; permissions: PermissionStore; audit: AuditLog; events: EventLog; provider: ServerRuntimeProvider; manager: TaskManager; startedAt: string; streams: Set<ServerResponse>; handler: (req: IncomingMessage, res: ServerResponse) => void; closeStreams(): void; releaseLock(): void }
 
 export type RunningServer = { url: string; port: number; app: App; close(): Promise<void> }
 
@@ -70,7 +72,8 @@ export function createApp(config: ServerConfig, deps: AppDeps = {}): App {
     const audit = deps.audit ?? openAuditLog({ dataDir: config.dataDir, maxBytes: config.auditLogMaxBytes, now, log, hide: config.workspaceRoot ? [config.workspaceRoot] : [] })
     const apiToken = resolveApiToken({ configured: config.apiToken?.reveal() ?? null, dataDir: config.dataDir })
     const provider = deps.provider ?? (config.runtime === 'mock' ? new ServerMockProvider({ timings: deps.mockTimings }) : new ClaudeAgentRuntimeProvider({ credentialsConfigured: config.credentialsConfigured }))
-    const manager = new TaskManager({ store, provider, config, policy: toolPolicyFrom(config), now, log, onLifecycle: (e) => audit.write(toAuditInput(e)) })
+    const permissions = deps.permissions ?? openPermissionStore({ dataDir: config.dataDir, now, log })
+    const manager = new TaskManager({ store, provider, permissions, config, policy: toolPolicyFrom(config), now, log, onLifecycle: (e) => audit.write(toAuditInput(e)) })
     const streams = new Set<ServerResponse>()
     const startedAt = now()
     const routes = createRoutes({ config, store, events, provider, manager, now, startedAt, heartbeatMs: deps.heartbeatMs ?? HEARTBEAT_MS, streams, log, maxStreams: deps.maxStreams, audit })
@@ -79,7 +82,7 @@ export function createApp(config: ServerConfig, deps: AppDeps = {}): App {
     const responseHeaders = (req: IncomingMessage) => ({ ...securityHeaders(req, config.allowedOrigins), ...(deps.responseHeaders?.(req) ?? {}) })
     const handler = createRouter({ routes, guards, responseHeaders, log, onRejected: onReject })
     return {
-        config, apiToken, store, audit, events, provider, manager, startedAt, streams, handler, releaseLock: lock.release,
+        config, apiToken, store, permissions, audit, events, provider, manager, startedAt, streams, handler, releaseLock: lock.release,
       closeStreams: () => { for (const res of streams) res.end(); streams.clear() },
     }
   } catch (error) {

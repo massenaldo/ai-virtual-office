@@ -3,6 +3,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentTask } from '../src/workforce/types'
+import { openPermissionStore } from './permissions/store'
 import { silentLogger } from './log'
 import { ClaudeAgentRuntimeProvider } from './runtime/claudeAgent'
 import { ServerMockProvider } from './runtime/mockProvider'
@@ -35,8 +36,10 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true })
 })
 
+let perms: ReturnType<typeof openPermissionStore>
 function make(provider: ServerRuntimeProvider, config: Partial<typeof BASE_CONFIG> = {}, onLifecycle?: TaskManagerOptions['onLifecycle'], allowed: readonly string[] = DEFAULT_ALLOWED_TOOLS): TaskManager {
-  manager = new TaskManager({ store, provider, config: { ...BASE_CONFIG, ...config }, policy: { allowedTools: new Set(allowed) }, now: () => NOW, log: silentLogger, onLifecycle })
+  perms = openPermissionStore({ dataDir: dir, now: () => NOW, log: silentLogger, writeFile: () => {} })
+  manager = new TaskManager({ store, provider, permissions: perms, config: { ...BASE_CONFIG, ...config }, policy: { allowedTools: new Set(allowed) }, now: () => NOW, log: silentLogger, onLifecycle })
   return manager
 }
 const mock = () => new ServerMockProvider({ timings: { thinkingMs: 100, workingMs: 200 } })
@@ -629,6 +632,9 @@ describe('tool approvals', () => {
 
   it('hides the workspace path in an approval summary', async () => {
     const { id, ctx } = await running({}, ['Bash'])
+    // Bash is denied by default; a person has to lift that and ask for a prompt.
+    perms.revoke('default-bash')
+    perms.grant({ scope: 'global', effect: 'ask', tool: 'Bash' })
     void gate(ctx, { tool: 'Bash', input: { command: `cat ${ws.path('sandbox')}/notes.md` } })
     expect(task(id).pendingApproval?.summary).toBe('Run command: cat <workspace>/notes.md')
   })

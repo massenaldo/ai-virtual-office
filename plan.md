@@ -1,217 +1,162 @@
-# Milestone 3B.1 — Real Agent Runtime Foundation
+# AI Virtual Office — Milestone 3B.1.1: Security Hardening & E2E Verification
 
-Project: AI Virtual Office  
-Repository: https://github.com/massenaldo/ai-virtual-office
+We have completed the read-only audit of Milestone 3B.1.
 
-Milestones 1, 2, and 3A have been completed:
-- Editable 3D office layout.
-- Realistic office environment.
-- Agent Workforce UI.
-- Mock runtime and simulated task lifecycle.
+Audit verdict: READY WITH ISSUES.
 
-Now prepare the application for real Claude Agent execution.
+The backend foundation is sound, but several security and test gaps must be addressed before integrating a real Claude Agent runtime.
 
-## Objective
+## Primary objective
 
-Build the backend foundation for a secure, locally hosted AI agent workforce that can later run on a VPS without changing the frontend architecture.
+Harden the existing backend without breaking:
+- The 3D office
+- Layout editor
+- Agent registry and desk assignments
+- Workforce UI
+- MockRuntimeProvider
+- REST API and SSE
+- Existing task lifecycle
+- `/vo` startup workflow
 
-The selected future runtime is Claude Agent SDK for TypeScript.
+## Phase 1 — Close existing security gaps
 
-This phase establishes the backend, runtime abstraction, task lifecycle, event delivery, and security boundaries.
+### 1. Workspace enforcement
+- Require a valid workspace for every Write and Edit operation.
+- Compare paths against the stored canonical workspace root.
+- Resolve and validate paths immediately before file access, not only when an approval decision is made.
+- Reject path traversal, symlink escapes, invalid workspace IDs, and paths outside the workspace.
+- Do not expose workspace root paths through API responses or frontend state.
+- Add regression tests for symlink changes and path changes between approval and execution.
 
-Do not claim real Claude execution is working until the actual SDK integration has been implemented and tested.
+### 2. Secret redaction
+Extend the existing redaction layer to cover:
+- URL-embedded credentials.
+- GitHub tokens, including `ghp_` formats.
+- AWS access key identifiers, including `AKIA` formats.
+- HTTP Basic authentication credentials.
+- `--password` and similar command-line password arguments.
+- Existing API keys and common bearer tokens.
 
-## 1. Audit the existing implementation
+Requirements:
+- Redact before data reaches API responses, activity feeds, task results, and audit logs.
+- Preserve useful diagnostic information without exposing secret values.
+- Add positive and negative tests to avoid excessive redaction.
 
-Before making changes:
-- Inspect the actual repository and current branch.
-- Review the completed 3A implementation.
-- Inspect agent, task, activity, runtime-provider, and persistence models.
-- Identify existing frontend state management and mock runtime interfaces.
-- Inspect package.json and existing scripts.
-- Run the production build and relevant tests.
-- Record existing issues.
+### 3. Tool gate by construction
 
-Create a concise implementation plan based on actual code.
+This is the most important architectural requirement before real runtime integration.
 
-Do not rewrite the existing frontend or 3D scene.
+Do not allow a future Claude provider to execute tools independently of the security policy.
 
-## 2. Backend architecture
+Design a gated tool execution interface:
+- The runtime receives only the approved/gated tool interface.
+- All tool calls must pass through workspace validation and tool policy.
+- Write, Edit, Execute, and Network actions require approval according to policy.
+- The complete proposed action must be visible before approval.
+- Approval must be bound to the exact action, workspace, and task.
+- Reject modified or stale actions after approval.
+- No bypass mode or unrestricted tool execution.
+- Keep MockRuntimeProvider working through the same gate.
 
-Evaluate the smallest appropriate backend architecture compatible with the existing project.
+Inspect the current architecture before choosing the implementation. Do not create a parallel security system that duplicates existing policy logic.
 
-Preferred direction:
-- Separate Node.js + TypeScript backend service.
-- REST API for commands and queries.
-- Server-Sent Events (SSE) for real-time task and agent updates.
-- Runtime provider abstraction.
-- Local development configuration.
-- Environment-based configuration for future VPS deployment.
+Document how the future Claude Agent SDK will be connected to this gate, including the SDK permission hooks or tool integration mechanisms required.
 
-Do not introduce unnecessary infrastructure.
+### 4. Local API authentication
 
-Do not add a database, Redis, Docker, or distributed queue unless the existing architecture genuinely requires it. Start with a durable, appropriately scoped local persistence strategy and document its limitations.
+Implement a startup-generated or configured local API token.
 
-## 3. Runtime provider abstraction
+Requirements:
+- Token must remain backend-only.
+- Never expose it through frontend bundles, logs, state snapshots, or error responses.
+- Protect mutating API endpoints and SSE access.
+- Support secure frontend-to-backend authentication.
+- Avoid putting credentials in URLs.
+- Preserve the local development workflow and `/vo` command.
+- Document token generation, storage, and rotation.
 
-Define a clean provider contract that supports:
-- Start task.
-- Receive execution events.
-- Request cancellation.
-- Retrieve execution status.
-- Retrieve final result.
-- Handle runtime failures.
-- Associate runtime sessions with workforce tasks.
+Do not silently weaken authentication for requests without an Origin header.
 
-Keep the existing MockRuntimeProvider functional.
+## Phase 2 — Sandbox architecture decision
 
-Prepare ClaudeAgentRuntimeProvider as an implementation boundary.
+Prepare the real runtime for a Docker-based workspace sandbox.
 
-Avoid coupling React components directly to Claude SDK or process execution.
+Do not integrate Claude Agent SDK yet.
 
-## 4. Task lifecycle
+Design and document the intended sandbox:
+- Non-root container.
+- Only the selected workspace is mounted.
+- No host filesystem access beyond explicitly mounted workspace data.
+- Read-only root filesystem where practical.
+- No Docker socket.
+- Network disabled by default.
+- CPU, memory, process count, output size, and execution time limits.
+- Safe container termination and cleanup.
+- Explicit environment-variable allowlist.
+- No persistent storage of credentials inside the image or container filesystem.
 
-Define consistent lifecycle states.
+The future Claude runtime must execute inside the isolated environment, not directly with unrestricted host permissions.
 
-Include:
-- queued
-- starting
-- running
-- waiting_for_approval
-- completed
-- failed
-- cancelling
-- cancelled
+For this milestone, document the design and identify any technical blockers. Do not claim that sandbox isolation is active until it is implemented and tested.
 
-Map these lifecycle states to the existing agent statuses without breaking the current UI.
+## Phase 3 — Real server end-to-end test
 
-Prevent duplicate execution and inconsistent task assignment.
+Add at least one genuine end-to-end test that:
+1. Starts the actual backend server.
+2. Connects through the real HTTP API.
+3. Authenticates successfully.
+4. Submits a mock task.
+5. Connects to the real SSE endpoint.
+6. Receives task and agent status events.
+7. Cancels a task.
+8. Verifies the final state.
 
-Implement:
-- Task IDs.
-- Execution IDs.
-- Creation timestamps.
-- Start and completion timestamps.
-- Runtime metadata.
-- Error reporting.
-- Cancellation handling.
-- Task timeout configuration.
+Also test:
+- Unauthorized requests are rejected.
+- Invalid workspace paths are rejected.
+- SSE reconnection works.
+- Existing mock runtime behavior remains intact.
 
-## 5. Security foundation
+Do not replace all existing tests with mocks. The purpose is to validate the actual server and browser-facing protocol.
 
-Treat agent execution as a privileged operation.
+## Phase 4 — Compatibility
 
-Implement or establish:
-- Workspace allowlisting.
-- Path validation and protection against path traversal.
-- Explicit tool allowlists.
-- No unrestricted host filesystem access.
-- No unrestricted shell access.
-- No secrets exposed to frontend.
-- Backend-only credential handling.
-- Task execution timeouts.
-- Output size limits.
-- Safe process termination.
-- Structured audit logs.
+Run:
+- Existing test suite.
+- New security tests.
+- New E2E test.
+- TypeScript checks.
+- Frontend build.
+- Server build.
+- Secret checks.
+- npm audit.
 
-Dangerous operations must require explicit human approval.
+Verify that the existing `/vo` workflow still works.
 
-Do not use dangerously-skip-permissions or equivalent unrestricted permission bypasses.
+If browser automation is available, test the actual application in a browser. Otherwise clearly report the limitation.
 
-Never accept arbitrary working directory paths or executable commands directly from browser requests.
+## Strict scope restrictions
 
-## 6. Real-time events
+- Do NOT install `@anthropic-ai/claude-agent-sdk`.
+- Do NOT implement real Claude execution.
+- Do NOT enable unrestricted Bash, Write, Edit, or Network access.
+- Do NOT deploy to a VPS.
+- Do NOT rewrite the 3D scene or layout editor.
+- Do NOT remove MockRuntimeProvider.
+- Do NOT claim Docker sandbox isolation is implemented if only its architecture has been documented.
 
-Establish typed events such as:
-- task.queued
-- task.started
-- agent.status_changed
-- agent.message
-- task.progress
-- task.waiting_for_approval
-- task.completed
-- task.failed
-- task.cancelled
+## Required final report
 
-Deliver events to the frontend through SSE.
+Provide:
+1. Overall verdict: READY / READY WITH ISSUES / NOT READY.
+2. Exact files changed.
+3. Workspace validation improvements.
+4. Redaction patterns and test coverage.
+5. Tool gate architecture and how it will constrain the Claude SDK.
+6. Authentication design and frontend integration.
+7. Sandbox architecture and remaining implementation work.
+8. E2E test results.
+9. Build, TypeScript, test, and security check results.
+10. Remaining blockers before Milestone 3B.2.
 
-Support reconnection and event IDs where appropriate.
-
-Ensure the frontend can recover current state after disconnecting instead of relying only on transient events.
-
-## 7. Frontend integration
-
-Connect the existing workforce UI to the backend through a service layer.
-
-Preserve:
-- Agent registry.
-- Desk assignments.
-- 3D agent indicators.
-- Agent detail panel.
-- Task management UI.
-- Activity feed.
-- Existing layout editor.
-
-Keep the mock runtime available for development and fallback.
-
-Introduce an explicit runtime environment indicator such as Mock or Local Backend.
-
-Do not label a mock task as a real Claude execution.
-
-## 8. Local-first and VPS-ready
-
-Support environment-based configuration for:
-- Backend host and port.
-- Frontend API URL.
-- Workspace root.
-- Runtime selection.
-- Execution timeout.
-- Allowed tools.
-- Credential configuration.
-
-Local mode should work on the developer's machine.
-
-Future VPS mode should use the same application-level API and runtime interface.
-
-Do not implement VPS deployment yet.
-
-## 9. Verification
-
-Test:
-1. Backend starts independently.
-2. Frontend connects to backend.
-3. Existing mock runtime still works.
-4. Agent and task state remains consistent.
-5. SSE delivers events and handles reconnection.
-6. Invalid workspace paths are rejected.
-7. Unauthorized commands are rejected.
-8. Cancellation and timeout behavior work.
-9. Existing 3D office and layout editor remain functional.
-10. Production build and relevant tests pass.
-
-Run the actual available checks. Do not claim success without execution.
-
-## 10. Scope boundary
-
-This phase must not:
-- Pretend Claude is running.
-- Launch unrestricted shell commands.
-- Expose credentials in browser code.
-- Deploy to VPS.
-- Introduce multi-user authentication.
-- Rewrite the completed 3D scene.
-- Remove the existing mock runtime.
-
-## Final report
-
-Report:
-- Actual architecture implemented.
-- Files created and modified.
-- API endpoints.
-- Event contracts.
-- Security boundaries.
-- Persistence approach.
-- Build and test results.
-- Remaining work before real Claude execution.
-
-Explicitly state whether the Claude Agent SDK is installed or integrated. Do not claim real agent execution if it is not.
+Do not start Milestone 3B.2 automatically.

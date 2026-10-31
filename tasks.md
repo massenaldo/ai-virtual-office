@@ -1,224 +1,315 @@
-# Milestone 3B.1 — Real Agent Runtime Foundation: Tasks
+# Milestone 3B.1.1 — Security Hardening & E2E Verification: Tasks
 
-**Spec:** [`plan.md`](plan.md) (Milestone 3B.1 brief). This file is my working task list for that spec.
-**Status:** Approved, 2026-10-31. Q1–Q5 answered with the recommendations (see "Decisions" at the end). Stages A–D are done and merged; Stage E is done (in review). The final report is `docs/milestone-3b1-report.md`.
-**Earlier milestones:** [`milestone-3a-tasks.md`](docs/milestones/milestone-3a-tasks.md) ([report](docs/milestone-3a-report.md)), and [`milestone-2-tasks.md`](docs/milestones/milestone-2-tasks.md).
+**Spec:** [`plan.md`](plan.md) (Milestone 3B.1.1 brief). This file is my working task list for that spec.
+**Status:** Draft, 2026-10-31. Awaiting your answers to Q1–Q3 (see "Questions for you"). Nothing is implemented yet.
+**Earlier milestones:** [`milestone-3b1-tasks.md`](docs/milestones/milestone-3b1-tasks.md) ([report](docs/milestone-3b1-report.md)), [`milestone-3a-tasks.md`](docs/milestones/milestone-3a-tasks.md) ([report](docs/milestone-3a-report.md)).
 
 ## What this milestone is
 
-The app gets a small **local backend**. It owns agents, tasks and activity, runs tasks through a runtime provider, and pushes live updates to the browser.
+The 3B.1 audit said **READY WITH ISSUES**. This milestone closes those issues before any real Claude runtime is connected.
 
-- In this milestone the backend still runs the **mock** runtime. No Claude is called, and the UI and reports say so.
-- What it does build:
-  - the server and its API;
-  - the event stream;
-  - a fuller task lifecycle, including approvals and timeouts;
-  - the security boundaries a real runtime will need.
-- `ClaudeAgentRuntimeProvider` (Claude Agent SDK for TypeScript) is prepared as an empty, server-side boundary only.
-- The browser-only mock mode from 3A keeps working unchanged, and stays the default.
+- It hardens what exists:
+  - workspace checks;
+  - secret redaction;
+  - the tool gate, so a future provider can't run a tool except through it;
+  - a local API token.
+- It writes the Docker sandbox design down. It doesn't build the sandbox.
+- It adds a real end-to-end test against the running server.
+- It does **not** install the Claude Agent SDK or run anything real. The mock runtime stays, and stays the default.
 
 ## Current state (from inspecting the code, 2026-10-31)
 
-- **Branch and checks:** `main` at #19.
-  - `npm test`: 30 files, 311 tests pass.
-  - `npm run build`: passes. Main chunk 1,312 kB, with the existing >500 kB warning.
-  - `npm audit`: 0 vulnerabilities.
-  - Node 24.14, npm 11.9.
-- **No backend exists.** The app is a Vite SPA.
-  - `vite.config.ts` has one dev-only plugin, `voAutoExit`, used by `/vo`.
-  - Scripts: `dev`, `build`, `preview`, `test`.
-  - `tsc -b` covers `tsconfig.app.json` (`src/`) and `tsconfig.node.json` (`vite.config.ts`, `scripts/*.ts`).
-- **No Claude/Anthropic package is installed.**
-- **Workforce code (`src/workforce/`, from 3A) is pure TypeScript, so it can be reused on a server:**
-  - `types.ts`: `Agent`, `AgentTask`, `AgentActivity` (union by `type`).
-    - Task statuses: `queued | running | waiting | completed | failed | cancelled`.
-    - Agent statuses: `idle | thinking | working | waiting | error | completed`.
-  - `operations.ts`: pure operations, plus `applyRuntimeEvent`, the single place runtime events change state.
-  - `storage.ts`: strict parse with reference checks; `localStorage` key `ai-virtual-office:workforce:v1`, schema v1.
-  - `runtime/types.ts`: `RuntimeProvider` with start, cancel, subscribe, availability and `executionId`, but no status or result query and no approvals. `MockRuntimeProvider` uses timers and works in Node too. `ClaudeRuntimeProvider` is a placeholder.
-  - `controller.ts`: the `WorkforceController` interface the UI uses: `getSnapshot`, `subscribe` and actions. **A remote implementation can replace the local one without touching components.**
-  - Components use only `useWorkforce()` and `view.ts`. Nothing in React touches a runtime directly.
-- **The layout stays in the browser** (`ai-virtual-office:layout:v1`). Agents refer to desks by furniture ID.
+- **Branch and checks:** `main` at #25 (3B.1 Stage E).
+  - `npm test`: 58 files, 720 tests pass.
+  - `tsc -b` is clean. `npm run build`, `server:build` and `check:secrets` pass. `npm audit` reports 0 vulnerabilities.
+  - The SDK is not installed. `SDK_INSTALLED = false` in `server/runtime/claudeAgent.ts`.
+- **Workspaces** (`server/workspaces.ts`):
+  - `parseWorkspaces` stores `workspaceRoot` as a real path when the config loads.
+  - `resolveWorkspace`, however, compares against `realpathSync(config.workspaceRoot)` **at call time**, not against the stored root. If the root is later swapped for a symlink, the check follows it.
+  - `checkPathInWorkspace` treats `ENOTDIR` like `ENOENT` and walks up, so `file.txt/x` is accepted.
+  - The header comment states that time of check to time of use is not guaranteed, and that "a runtime must re-check at use time". Nothing does that re-check yet.
+- **Tool policy** (`server/toolPolicy.ts`):
+  - `TOOL_CATALOGUE` marks `Write` and `Edit` as `needsWorkspace: false`. With no workspace, `decideToolUse` falls back to `lexicalPath`, a text-only check.
+  - Write, execute and network tools can only ever be `ask`. A summary that redaction or the length cap would change is refused as `not_reviewable`.
+- **Approval flow** (`server/taskManager.ts`):
+  - `TaskManager.requestToolApproval(taskId, request)` calls `decideToolUse`. On `ask`, it stores a `toolWaiter { approvalId, tool, resolve }` and emits `approval_requested`.
+  - `decideApproval` settles that waiter with `{ behavior: 'allow', outcome: 'approved' }`.
+  - **The approval isn't bound to the action.** The result carries no input, digest or workspace. The provider gets back only "allowed", then does the work itself with whatever input it holds. Nothing re-checks the path at execution time. The provider also receives the workspace's real path (`StartContext.workspace.path`).
+- **Runtime contract** (`server/runtime/types.ts`):
+  - `StartContext` = `{ agent, signal, workspace, tools: ToolPolicy, requestToolApproval, audit }`.
+  - `ServerMockProvider.requestApproval` (`server/runtime/mockProvider.ts`) calls `ctx.requestToolApproval({ tool: 'Write', input: MOCK_DEMO_WRITE })` and writes nothing.
+  - The header of `claudeAgent.ts` describes the intended `canUseTool`, `permissionMode` and settings rules.
+- **Redaction** (`server/redact.ts`): four patterns, which are `sk-ant-`, `sk-`, `Bearer` and `key|secret|token|password = value`.
+  - Not covered: URL credentials (`https://u:p@host`), `ghp_` / `github_pat_`, `AKIA…`, `Basic …`, and `--password value`.
+  - Redaction is applied in `TaskManager.cap` (messages, progress, errors, results), `sanitizeSummary`, the audit log, `redactingLogger` and `scrub`.
+- **HTTP** (`server/http/guards.ts`, `router.ts`, `sse.ts`, `app.ts`):
+  - Guards run in this order: Host (421), Origin (403), preflight, JSON-only (415).
+  - **A request with no `Origin` passes the Origin guard** (curl, other local software). There is no authentication of any kind.
+  - CORS never sends credentials.
+  - `GET /api/events` takes `?lastEventId=` because `EventSource` can't send headers on its first connect.
+- **Frontend** (`src/workforce/source.ts`, `remote/client.ts`, `remote/sync.ts`):
+  - `resolveWorkforceSource` accepts only an `http(s)` origin. `client.ts` calls `fetch(baseUrl + path)` cross-origin.
+  - `sync.ts` opens `new EventSource(\`${baseUrl}/api/events?lastEventId=…\`)`. **EventSource can't send an `Authorization` header.**
+- **Dev workflow:**
+  - `npm run dev` runs Vite only (browser mock). `/vo` (`scripts/vo.sh`) runs `VO_AUTO_EXIT=1 npm run dev` and checks health with `curl localhost:5173`.
+  - `npm run dev:full` (`scripts/devFull.ts`) starts the backend and Vite **in one process**, and sets `VITE_WORKFORCE_API_URL` to the backend URL.
+  - `vite.config.ts` has no proxy.
+- **Tests:**
+  - `server/test/helpers.ts` (`startTestServer` on `PORT=0` with a temp `DATA_DIR`, `api()`, `rawRequest`) and `server/test/sseClient.ts` (`openEventStream`) already drive a real `node:http` server with real `fetch` and SSE parsing.
+  - `server/noProcessExecution.test.ts` scans non-test `.ts` files under `server/`, `src/` and `scripts/`.
 
-### Existing issues to carry (recorded, not caused by this milestone)
+### Existing code this milestone must not break
 
-- The 3A report's limitations list is still open: no task queue, unbounded task history, raw desk ids in text, notice overlap, and the misleading "was backed up" notice wording.
-- The build warns about chunk size (three.js, no code-splitting).
+- The 3D office, layout editor, agent registry and desk assignments (browser-side, `ai-virtual-office:layout:v1`).
+- Workforce UI, `useWorkforce`, both `WorkforceController` implementations, and storage schema v2.
+- `MockRuntimeProvider`, `ServerMockProvider`, and the mock approval demo, in both browser and backend modes.
+- The REST API, the SSE recovery contract (snapshot, `lastEventId`, `state.reset`), the task lifecycle v2, timeouts and cancel grace.
+- The guards: Host, Origin, JSON-only, CORS and loopback binding. Also the audit log, `check:secrets` and the no-process-execution guard.
+- `npm run dev` and `/vo` as browser-only, plus `dev:full`, `server`, `server:build` and `server:start`.
+
+### Deferred minors carried from 3B.1 (not in this milestone unless listed in a stage)
+
+- Stage C: the suppressed-count audit record is written in the next window; guard tests are text scans.
+- All Stage D UI minors from the 3B.1 report.
+- The build still warns about the >500 kB chunk.
+
+## Strict scope restrictions (from plan.md)
+
+- Do NOT install `@anthropic-ai/claude-agent-sdk`.
+- Do NOT implement real Claude execution.
+- Do NOT enable unrestricted Bash, Write, Edit, or Network access.
+- Do NOT deploy to a VPS.
+- Do NOT rewrite the 3D scene or layout editor.
+- Do NOT remove MockRuntimeProvider.
+- Do NOT claim Docker sandbox isolation is implemented if only its architecture has been documented.
+- Do not start Milestone 3B.2 automatically.
 
 ## How I'll work
 
-- **One stage = one branch = one PR into `main`**, as before. I stop for your review after each PR.
-- **Logic first, in pure tested modules:** lifecycle, policy, config, event log. The HTTP layer and React stay thin.
-- **Server tests:** Vitest in Node, starting the server on a random port with a temp data directory, and using real `fetch` and SSE parsing.
-- **Each stage ends with** `npm test`, `npm run build`, and browser checks where the UI changes.
-- **Minimal dependencies.** The server uses Node's built-in `http` (no Express). See Q4 for the one dev tool.
+- **One stage = one branch = one PR into `main`.** Branches are `fix/3b11-a-workspace-redaction`, `feat/3b11-b-tool-gate`, `feat/3b11-c-api-token`, `docs/3b11-d-sandbox` and `test/3b11-e-e2e`. I stop for your review after each PR.
+- **TDD:** every task lists the tests to write first. They must fail (RED) before the code makes them pass (GREEN).
+- **Every task ends with** `npm test` and `npx tsc -b`. Stages that touch the server or frontend also run `npm run build` and `npm run server:build`.
+- **No new dependencies.**
 
 ## Decisions I propose (for your OK)
 
-1. **Backend shape.**
-   - A `server/` folder in this repo: Node + TypeScript, `node:http`, a REST API for commands and queries, and SSE at `GET /api/events` for live updates.
-   - It imports the shared, pure modules from `src/workforce/`, so there is one data model.
-   - It is built to `dist-server/` with Vite's SSR build, so there is no new bundler.
-   - It has its own `tsconfig.server.json` in `tsc -b`.
-2. **Two runtime environments, chosen by config, never mixed silently.**
-   - **Mock (browser)**, the default: `VITE_WORKFORCE_API_URL` is empty, and 3A's local controller and `localStorage` are used as today.
-   - **Local backend**: `VITE_WORKFORCE_API_URL=http://127.0.0.1:8787`. The UI uses a `RemoteWorkforceController` with the same `WorkforceController` interface.
-   - On the server, `RUNTIME=mock` (default) or `RUNTIME=claude`. Claude reports unavailable and refuses tasks with a clear message.
-   - The panel shows an explicit indicator: **Mock · browser**, **Local backend · mock runtime**, or **Local backend · Claude (not available)**, plus the connection state.
-   - If the backend is unreachable, the UI shows **Offline** and doesn't switch to browser mock on its own, so two sets of agents never mix (see Q2).
-3. **Server persistence:**
-   - one JSON file, `data/workforce.json` (gitignored, path from `DATA_DIR`);
-   - written atomically (temp file plus rename), and validated with the existing strict parser on load;
-   - an unreadable file is backed up and the server starts empty;
-   - demo agents are seeded on the first start only.
-   - Documented limits: one process, one writer, no history beyond the caps. No database, Redis, Docker or queue.
-4. **Task lifecycle v2, shared by browser and server.**
-   - Task statuses: `queued`, `starting`, `running`, `waiting_for_approval`, `completed`, `failed`, `cancelling`, `cancelled`.
-   - Agent statuses are unchanged, mapped as follows:
+1. **Workspace is mandatory for Write and Edit.** `needsWorkspace: true` and `lexicalPath` is removed. A Write or Edit with no workspace is denied `no_workspace`. What this does to the mock demo is Q3.
+2. **One canonical root.** `resolveWorkspace` compares against the stored `config.workspaceRoot`, which is the real path from config time. If `realpathSync(root)` no longer equals the stored value, it fails as `escapes_root`. A path through a regular file (`ENOTDIR`) is `invalid_path`.
+3. **Redaction stays one module.** New patterns go into `PATTERNS` in `server/redact.ts`, so every existing sink picks them up. "Basic" is redacted only when its base64 decodes to `user:pass`, so "Basic configuration" survives.
+4. **Tool gate by construction, built on what exists.** No second policy:
+   - A new `server/toolGate.ts` wraps `decideToolUse`, `resolveWorkspace` / `checkPathInWorkspace` and the manager's existing approval machinery (`toolWaiter`, approval timer, `decideApproval`).
+   - `StartContext.requestToolApproval` is **replaced** by `ctx.tools: ToolGate` with one method, `use(request, perform)`.
+   - The gate freezes a clone of the input and computes `digest = sha256(canonicalJson({ taskId, workspaceId, workspaceRealPath, tool, input }))`. It decides with the existing policy and asks a human on `ask`. The approval id is bound to that digest.
+   - **Immediately before `perform`**, the gate re-resolves the workspace and re-runs `decideToolUse` on the frozen input (the use-time path check). It recomputes the digest and checks the task is still running and the approval unused.
+   - Any mismatch is refused as `stale_approval`, audited, and `perform` isn't called. An approval is single-use.
+   - `perform` receives only the frozen input and the checked paths.
+   - `ToolGateResult` gains `stale_approval`. `ToolRequest` keeps its shape.
+5. **The mock uses the same gate.** `ServerMockProvider` calls `ctx.tools.use({ tool: 'Write', input: MOCK_DEMO_WRITE }, () => simulated)`, where `perform` is a no-op that writes nothing.
+6. **Claude SDK plug-in is documented, not built.** The header of `claudeAgent.ts` is rewritten (details in B3). The plan is `canUseTool` → `ctx.tools.use`, with `perform` returning the SDK's allow result with `updatedInput` set to the frozen input.
+   - `permissionMode: 'default'`.
+   - No auto-approve list. The `allowedTools` option is empty, because auto-approved tools skip `canUseTool`.
+   - `disallowedTools` is everything outside the catalogue, plus `Bash`, `WebFetch` and `WebSearch` until the sandbox exists.
+   - `settingSources: []`, no MCP servers except our own, no hooks that approve, and no `additionalDirectories`.
+   - It also records the remaining gap honestly: SDK built-in tools execute *after* `canUseTool` returns. For 3B.2, the recommended step is to replace built-in `Write`/`Edit` with in-process SDK MCP tools whose handler *is* `perform`, so the write happens inside the gate, and to run everything else in the sandbox. Option names must be checked against the installed SDK version.
+7. **Local API token (backend):**
+   - `API_TOKEN` (server-only env, at least 32 characters) if set. Otherwise the server generates one at each start: `randomBytes(32)`, base64url.
+   - A generated token is written atomically to `DATA_DIR/api-token` with mode 0600, so a separately started Vite proxy can read it. **Rotation = restart** (generated) or changing `API_TOKEN` (configured).
+   - Checked with `timingSafeEqual` on SHA-256 digests.
+   - **Every `/api/*` route needs `Authorization: Bearer <token>`, including `GET /api/state`, `/api/workspaces` and `/api/events`.** The only exceptions are `GET /api/health` (it carries no state) and `OPTIONS` preflight.
+   - **No exception for a missing `Origin`.** Guard order: Host, Origin, preflight, **auth (401)**, JSON-only.
+   - The token never appears in logs, responses, audit records, the startup record (`apiToken=configured|generated` only), snapshots or bundles.
+   - `findSecretInConfig` and `check:secrets` also check for the token. An `API_TOKEN` under a `VITE_` name is refused at start.
+   - The token is never accepted in a query string.
+8. **How the browser authenticates.** See Q1. I recommend **Option A, the same-origin Vite proxy**.
 
-     | Task status | Agent status |
-     |---|---|
-     | queued | idle |
-     | starting | thinking |
-     | running | thinking / working (from progress) |
-     | waiting_for_approval | waiting |
-     | cancelling | unchanged |
-     | completed | completed |
-     | failed | error |
-     | cancelled | idle |
+### Q1 background: browser authentication options
 
-   - Still one active task per agent. The server also refuses a second start for a task that is already starting or running (no duplicate execution).
-   - Tasks gain `timeoutMs`, `runtime` (`mock` | `claude`), `sessionId` and `endedReason` (`completed | failed | cancelled | timeout`).
-   - **Storage moves to schema v2** under a new key, `ai-virtual-office:workforce:v2`. Saved v1 data is migrated once (`waiting` becomes `waiting_for_approval`), and the old v1 key is left untouched as a natural backup.
-5. **Runtime contract v2 (server side):**
-   - `start(task, context) → { executionId, sessionId? }`;
-   - `events` (`started`, `progress`, `message`, `approval_requested`, `completed`, `failed`, `cancelled`);
-   - `cancel(taskId)`;
-   - `status(taskId)`;
-   - `result(taskId)`;
-   - `respondToApproval(taskId, approvalId, decision)`;
-   - `dispose()`.
-   - The **task manager** owns the lifecycle around the provider:
-     - it moves a task from `starting` to `running`;
-     - it enforces timeouts, ending the task as `failed`/timeout after `TASK_TIMEOUT_MS`;
-     - it handles `cancelling` (ask the provider, wait a grace period, then force-stop and mark `cancelled`);
-     - it caps output size.
-   - The mock runtime gains a demo control to request approval, replacing "Simulate waiting", so the approval flow is testable without Claude.
-6. **Events:**
-   - **Envelope:** typed SSE events `task.queued`, `task.started`, `task.progress`, `agent.message`, `agent.status_changed`, `task.waiting_for_approval`, `task.completed`, `task.failed` and `task.cancelled`, plus `state.changed` for agent and desk edits.
-   - **Ids:** a monotonically increasing `id`.
-   - **Replay:** the server keeps the last 500 events and replays everything after `Last-Event-ID`.
-   - **Recovery:**
-     - on every connect, the client first loads `GET /api/state`, which returns the full snapshot and the `lastEventId`, then applies only newer events;
-     - if the gap is too old, the server sends `state.reset` and the client reloads the snapshot;
-     - so a reconnect never depends on transient events alone.
-   - A heartbeat comment every 15 s.
-7. **API (local, no user accounts):**
-   - `GET /api/health`: runtime, availability, version, and `credentialsConfigured: boolean`. Never the value.
-   - `GET /api/state` and `GET /api/events`.
-   - Agents: `POST /api/agents`, `PATCH /api/agents/:id`, `DELETE /api/agents/:id`, `PUT /api/agents/:id/desk`.
-   - Tasks: `POST /api/agents/:id/tasks` (title, description, optional `workspaceId`), `POST /api/tasks/:id/cancel`, `POST /api/tasks/:id/approval` (`{ approvalId, decision }`).
-   - Mock-only demo controls under `/api/demo/*`, which return 404 unless `RUNTIME=mock`.
-   - Request bodies are validated with the existing input validators, and errors are JSON with readable messages.
-8. **Security foundation.** It is built and tested now, even though the mock doesn't need it yet, so the Claude provider plugs into it.
-   - **Workspaces by id only.**
-     - The server config lists named workspaces under one `WORKSPACE_ROOT`, for example `WORKSPACES=sandbox:projects/sandbox`.
-     - The browser can only send a `workspaceId`; paths and commands from the browser are rejected outright.
-     - `resolveWorkspace` rejects absolute paths, `..`, NUL bytes, and symlinks that escape the root (it checks the real path).
-   - **Tools.** An explicit `ALLOWED_TOOLS` list, checked against a known catalogue. A pure `decideToolUse(tool, input, policy) → allow | deny | ask`:
-     - tools that write or execute (shell, file writes, network fetch) are **always `ask`**, which means human approval;
-     - anything not allowlisted is `deny`;
-     - there is no bypass mode, and no `dangerously-skip-permissions` or equivalent.
-   - **No process execution in this milestone.** A test fails if `child_process`, `exec(` or `spawn(` appears in `server/` or `src/`. The future Claude provider file will be the single, reviewed exception.
-   - **Credentials:**
-     - `ANTHROPIC_API_KEY` is read only by the server from the environment (`.env`, gitignored; `.env.example` lists the names only);
-     - it never appears in responses, events, logs or the browser bundle;
-     - a test checks that the built `dist/` doesn't contain it.
-   - **Limits:** a task timeout (default 10 min), message and result size caps (default 32 KB per message, 256 KB per task, with a truncation marker), and safe termination via `AbortController` and a grace period.
-   - **Audit log:** JSON Lines in `data/audit.log`, with time, action, task/agent ids, decision and reason. It records task start, cancel, timeout, approvals, denied tools and rejected paths or origins, and never secrets.
-   - **Local exposure:**
-     - the server binds `127.0.0.1` by default;
-     - CORS allows only the configured frontend origin;
-     - every state-changing request must come from an allowed `Origin` and use `Content-Type: application/json`, which blocks other local web pages from driving the API.
-9. **Config** is a typed `server/config.ts` parsed from the environment and validated at start; the server refuses to start with a readable message on bad values. It covers:
-   - `HOST`, `PORT` (8787), `ALLOWED_ORIGINS`;
-   - `DATA_DIR`, `WORKSPACE_ROOT`, `WORKSPACES`;
-   - `RUNTIME`, `TASK_TIMEOUT_MS`, `ALLOWED_TOOLS`;
-   - output limits;
-   - `ANTHROPIC_API_KEY`.
-   - The frontend only gets `VITE_WORKFORCE_API_URL`. The same variables work for a later VPS setup, but deployment isn't built.
-10. **`ClaudeAgentRuntimeProvider`** lives in `server/runtime/claudeAgent.ts`.
-    - It implements contract v2 and reports `available: false`, with the reason "Claude Agent SDK not installed" or "credentials not configured".
-    - It has a comment block on how the SDK's permission callback must call `decideToolUse`, and how workspaces and limits apply.
-    - The SDK is not installed (see Q1).
-11. **Frontend integration:**
-    - `RemoteWorkforceController` uses `fetch` for commands and `EventSource` for events, with the snapshot-plus-replay recovery from decision 6.
-    - New statuses and the approval request appear in the existing agent detail as **Approve** and **Deny**, which only show for a pending approval.
-    - New status labels and marker colours, plus the indicator and connection state from decision 2.
-    - The 3D markers, desks, layout editor and panel structure stay as they are.
+The constraints:
+- the token must never be in a bundle, URL, log or snapshot;
+- `EventSource` can't set headers;
+- `?token=` is out, because it leaks to history, logs and `Referer`.
 
-## Stage A — Shared lifecycle v2 and storage migration (browser only, no server)
+| Option | How | Pros | Costs |
+|---|---|---|---|
+| **A. Vite dev proxy injects the header** (recommended) | The browser calls same-origin `/api/*` on :5173. Vite's proxy (server side, Node) adds `Authorization: Bearer …` and forwards to :8787. `VITE_WORKFORCE_API_URL=/` means "same origin". `dev:full` passes the token in memory. A separate `npm run dev` reads `DATA_DIR/api-token`. The proxy forwards only `/api/*`, removes any incoming `Authorization`/`Cookie`, keeps `Origin` (the backend still checks it), and requires `Sec-Fetch-Site: same-origin`. | The browser never sees the token. Plain `EventSource` and `fetch` keep working without CORS. Small change: `vite.config.ts`, `devFull.ts`, `source.ts`. No UI for pairing. | Works only where Vite runs (dev / `dev:full`). `vite preview` and a future VPS need the backend to serve the UI or Option B. Any local process that reaches :5173 gets an authenticated path. That is the same trust level as Vite already serving the source tree, and it is documented. |
+| B. HttpOnly session cookie after a one-time exchange | The user pastes the token into a "Connect" form. `POST /api/session` (token in the JSON body) sets `vo_session`: HttpOnly, SameSite=Strict, Path=/api. Requests use `fetch(..., { credentials: 'include' })` and `new EventSource(url, { withCredentials: true })`, and CORS adds `Allow-Credentials` for exact origins. | Works with any way of serving the UI, including a later VPS. No proxy. JavaScript never holds the token after the paste. | A manual pairing step after each rotation, plus a new form, a session store, cookie parsing and CSRF reasoning. Cookies are per host name (`localhost` ≠ `127.0.0.1`). About two more tasks. |
+| C. fetch-streamed SSE with a header | Replace `EventSource` with `fetch` plus a `ReadableStream` parser, sending `Authorization`. | Plain bearer auth everywhere. | JavaScript must hold the token, so it must come from somewhere the page can read (typed in, or kept in sessionStorage), where XSS or a snapshot can reach it. It also re-implements stream parsing and reconnects. Not recommended. |
 
-- [x] `TaskStatus` v2, new task fields, the agent-status mapping, and the new activity types (approval requested / decided, cancelling, timeout).
-- [x] `applyRuntimeEvent` and the operations updated for v2: starting, cancelling, approvals, timeout end, and no duplicate start.
-- [x] Storage schema v2, the `:v2` key, and a one-time v1 → v2 migration, with the v1 key kept. Also fix the "was backed up" notice wording (an open 3A minor).
-- [x] The mock runtime: approval request demo control, plus Approve / Deny in the agent detail (still browser-only).
-- [x] Tests (migration, mapping, every transition, duplicate start), a browser regression of 3A's checks, and a PR.
+**What happens to each workflow under A:**
+- `npm run dev` / `/vo`: unchanged. Browser mock, no backend, no token, and the proxy isn't registered unless `VITE_WORKFORCE_API_URL=/`.
+- `dev:full`: works with no setup. It generates the token and wires the proxy in-process.
+- `npm run server` + `npm run dev` with `VITE_WORKFORCE_API_URL=/`: the proxy reads the token file.
+- A direct `VITE_WORKFORCE_API_URL=http://127.0.0.1:8787` still parses, but gets 401. The UI shows "Not authorized — start with `npm run dev:full`" instead of silently weakening.
+- README and `.env.example` document generation, storage (`DATA_DIR/api-token`, 0600, gitignored with `data/`) and rotation.
 
-## Stage B — Backend service core (mock runtime)
+## Stage A — Workspace enforcement and redaction gaps
 
-- [x] `server/` with `node:http`, a small router, JSON errors, typed `config.ts`, `.env.example`, `tsconfig.server.json`, and scripts `server` / `server:build` / `dev:full` (see Q3).
-- [x] JSON file store (atomic write, validation, backup, demo seed) and runtime contract v2 with the server-side mock provider.
-- [x] Task manager: queued → starting → running, timeouts, cancelling → cancelled with a grace period, output caps, and no duplicate execution.
-- [x] REST endpoints from decision 7, and SSE with ids, a 500-event replay buffer, `state.reset`, and a heartbeat.
-- [x] HTTP integration tests (state, commands, the full mock lifecycle, cancel, timeout, reconnect with `Last-Event-ID`) and a PR.
+Branch: `fix/3b11-a-workspace-redaction`.
 
-## Stage C — Security foundation
+- [ ] **A1. Workspace enforcement.**
+  - Files: `server/workspaces.ts`, `server/toolPolicy.ts`, `server/runtime/mockProvider.ts` (only the Q3 change), and their tests.
+  - RED first:
+    - in `workspaces.test.ts`: (a) a root replaced by a symlink after config, so `resolveWorkspace` fails `escapes_root`; (b) `file.txt/x` → `invalid_path`; (c) a symlink inside the workspace re-pointed outside *between two calls*, so the first check passes and the second fails; (d) a path renamed between calls.
+    - in `toolPolicy.test.ts`: Write and Edit with `workspace = null` → `no_workspace`, and existing lexical-path cases removed or rewritten.
+    - in `server/http/routes.test.ts`: `/api/workspaces`, `/api/state` and a 422 workspace error contain neither the root nor the workspace path.
+    - in `mockProvider.test.ts`: the demo approval works with no workspace (per Q3) and with a workspace.
+  - Verify: `npx vitest run server/workspaces.test.ts server/toolPolicy.test.ts server/runtime/mockProvider.test.ts server/http/routes.test.ts`, then `npm test` and `npx tsc -b`.
+- [ ] **A2. Redaction patterns.**
+  - Files: `server/redact.ts`, `server/redact.test.ts`, plus one sink test each in `taskManager.test.ts` and `audit.test.ts`.
+  - Patterns:
+    - URL `scheme://user:pass@` → `scheme://[REDACTED]@`;
+    - `gh[pousr]_[A-Za-z0-9]{36,}` and `github_pat_…`;
+    - `(AKIA|ASIA)[A-Z0-9]{16}`;
+    - `Basic <base64>` when it decodes to something containing `:`;
+    - `--password|--passwd|--pass|--token|--secret|--api-key` followed by `=` or a space, then the value;
+    - existing `sk-` / `Bearer` kept.
+  - RED first: positive cases for each pattern, plus negative cases that must stay untouched:
+    - `https://example.com/@user`;
+    - a 40-hex git SHA;
+    - `AKIA` inside a normal word or with the wrong length;
+    - "Basic configuration";
+    - `--password-file ./secrets.txt` keeps the path;
+    - `password_reset.md`.
+    - Then one test per sink: a `ghp_` token in a mock message, in a failure error and in an audit detail comes out `[REDACTED]`.
+    - Also check that a WebFetch/Bash summary containing a new pattern becomes `not_reviewable`, not a redacted ask.
+  - Verify: `npx vitest run server/redact.test.ts server/taskManager.test.ts server/audit.test.ts`, then `npm test`.
 
-- [x] Workspaces by id plus `resolveWorkspace` (traversal, absolute paths, symlink escape, NUL), with rejections audited.
-- [x] Tool catalogue plus `decideToolUse` (allow / deny / ask), with no bypass mode. Approvals go through the task manager (`waiting_for_approval`, approve / deny endpoint, and a timeout while waiting).
-- [x] Origin allowlist, JSON-only state changes (**including routes with no body**, such as cancel and the demo POSTs, which a plain `text/plain` cross-origin POST can reach today), a **Host-header allowlist** against DNS rebinding (an Origin check alone doesn't stop a rebinding page reading `/api/state` and `/api/events`), CORS, and binding to `127.0.0.1`. Credential handling (server env only, `credentialsConfigured` flag, tests that the bundle and responses carry no key).
-- [x] Structured audit log (JSON Lines) and a guard test against process execution and credential leaks.
-- [x] `ClaudeAgentRuntimeProvider` boundary (unavailable, documented integration points) and a PR.
+## Stage B — Tool gate by construction
 
-## Stage D — Frontend integration
+Branch: `feat/3b11-b-tool-gate`. It depends on A (workspace required, canonical root).
 
-- [x] `RemoteWorkforceController` (REST and SSE, snapshot plus replay recovery, reconnect with backoff, offline state) behind `useWorkforce`, chosen by `VITE_WORKFORCE_API_URL`.
-- [x] Runtime environment indicator and connection status in the panel. New lifecycle labels and marker colours. Approve / Deny wired to the API.
-- [x] Browser checks in both modes, including killing and restarting the server mid-run. Screenshots and a PR.
+- [ ] **B1. `ToolGate` and digest-bound approval.**
+  - Files: new `server/toolGate.ts` and `server/toolGate.test.ts`. Changes to `server/runtime/types.ts` (replace `requestToolApproval` with `tools: ToolGate`; the policy stays reachable only through the gate), `server/taskManager.ts` (`requestToolApproval` becomes private gate plumbing; `toolWaiter` stores the digest; `decideApproval` unchanged for the API), and `server/test/fakeProvider.ts`.
+  - RED first:
+    - `perform` is not called on deny, on human deny, on approval timeout or after cancel;
+    - mutating the caller's input object after `use()` was called doesn't change what `perform` receives (frozen clone);
+    - a symlink in the target path re-pointed outside the workspace *after approval, before perform* → `stale_approval`, audited, `perform` not called;
+    - the workspace directory moved after approval → `stale_approval`;
+    - an approval id can't be used twice;
+    - a second `use()` while one is pending → `approval_pending` (existing behaviour kept);
+    - read tools still `allow` without asking, but are re-checked at use;
+    - a type-level test (`expectTypeOf<StartContext>()`) shows there is no `requestToolApproval` and no raw policy bypass.
+    - Existing `taskManager.test.ts` approval tests must still pass, adapted only to the new context shape.
+  - Verify: `npx vitest run server/toolGate.test.ts server/taskManager.test.ts`, then `npm test` and `npx tsc -b`.
+- [ ] **B2. The mock goes through the gate.**
+  - Files: `server/runtime/mockProvider.ts` and its tests, plus `server/http/routes.test.ts` (demo flow over HTTP).
+  - RED first:
+    - the demo approval goes through `ctx.tools.use` and its `perform` is a no-op;
+    - approve → completed, deny → failed "Approval denied (simulated)";
+    - an approval timeout and a cancel behave as today;
+    - nothing is written in the workspace (check the directory listing in the test).
+  - Verify: `npx vitest run server/runtime/mockProvider.test.ts server/http/routes.test.ts`, then `npm test`.
+- [ ] **B3. Claude SDK integration doc block.**
+  - Files: `server/runtime/claudeAgent.ts` (header only, per decision 6) and `claudeAgent.test.ts`.
+  - The test asserts that the provider is still unavailable, that `SDK_INSTALLED === false`, and that no `@anthropic-ai` import exists in `package.json` or `server/`.
+  - Verify: `npx vitest run server/runtime/claudeAgent.test.ts server/noProcessExecution.test.ts`, then `npm test`, `npx tsc -b`, `npm run build` and `npm run server:build`.
 
-## Stage E — Verify, document, report
+## Stage C — Local API token
 
-- [x] All 10 checks in plan.md §9, actually run: backend alone, frontend ↔ backend, browser mock, state consistency, SSE reconnection, bad workspace paths, unauthorised commands and origins, cancellation and timeout, 3D office and editor regression, build and tests. Also `/vo`.
-- [x] README: architecture, how to run each mode, env variables, API and events, security boundaries, persistence limits.
-- [x] Final report (plan.md "Final report"), stating explicitly that the Claude Agent SDK is **not installed or integrated** (unless Q1 changes that) and that no real agent execution exists.
-- [x] PR
+Branch: `feat/3b11-c-api-token`. The design here assumes Q1 = A. Under B, C2 becomes a session endpoint plus a Connect form.
+
+- [ ] **C1. Backend token and auth guard.**
+  - Files: new `server/auth.ts` and `server/auth.test.ts`. Changes to `server/config.ts` (`API_TOKEN`, refused under a `VITE_` name, minimum length), `server/http/guards.ts` (auth guard, 401 plus `WWW-Authenticate: Bearer`, audited as `request.rejected reason=auth`), `server/app.ts` (resolve the token, write the token file, startup record), `server/redact.ts` (`findSecretInConfig` for the token), `scripts/checkSecrets.ts`, and `server/test/helpers.ts` / `sseClient.ts` (send the token by default, so existing tests stay meaningful).
+  - RED first:
+    - every route except `GET /api/health` and `OPTIONS` returns 401 with no token, with a wrong token, and **with no `Origin` header**;
+    - `GET /api/events` with no token gets 401 before any stream bytes;
+    - `?token=` in the query is ignored (still 401);
+    - a generated token file has mode 0600 and a new value after a restart;
+    - a configured short token is refused at start;
+    - with a capturing logger and audit log, the token appears in no log line, audit record, response body or header;
+    - the existing guard order tests still pass (bad Host still gives 421 before 401).
+  - Verify: `npx vitest run server/auth.test.ts server/http server/config.test.ts`, then `npm test` and `npx tsc -b`.
+- [ ] **C2. Browser path: same-origin proxy (Q1 = A).**
+  - Files: new `scripts/apiProxy.ts` and `scripts/apiProxy.test.ts` (builds Vite `server.proxy` options). Changes to `vite.config.ts` (proxy only when `VITE_WORKFORCE_API_URL=/`; reads `DATA_DIR/api-token` per request), `scripts/devFull.ts` (in-memory token, sets `VITE_WORKFORCE_API_URL=/`), `src/workforce/source.ts` (accept `/` as same origin, `baseUrl: ''`), `src/workforce/remote/sync.ts` / `remoteController.ts` (401 → a clear "Not authorized" connection error), and `src/vite-env.d.ts` if needed.
+  - RED first:
+    - `apiProxy` adds `Authorization`, removes incoming `Authorization` and `Cookie`, refuses anything other than `Sec-Fetch-Site: same-origin` with 403, and forwards only `/api/*`;
+    - `resolveWorkforceSource('/')` gives a same-origin backend;
+    - `sync` opens `EventSource('/api/events?lastEventId=…')`;
+    - a 401 from the snapshot shows the "Not authorized" state and does not fall back to the browser mock.
+  - Verify: `npx vitest run scripts/apiProxy.test.ts src/workforce`, then `npm test`, `npm run build`, `npm run server:build` and `npm run check:secrets`. Also `grep -r "api-token\|Bearer " dist/` must find no token value.
+  - Manual check: `npm run dev:full`, then the browser shows `Live`; `curl 127.0.0.1:8787/api/state` gives 401.
+- [ ] **C3. Docs for the token.**
+  - Files: `README.md` ("Backend" section: auth model, workflows table, generation, storage, rotation, what the proxy trusts) and `.env.example` (`API_TOKEN`, with a note that it must never be a `VITE_` variable).
+  - Verify: `npm test` (the config test that checks `CONFIG_VARIABLES` against `.env.example` covers the new name).
+
+## Stage D — Sandbox architecture (document only)
+
+Branch: `docs/3b11-d-sandbox`.
+
+- [ ] **D1. `docs/sandbox-architecture.md`.**
+  - The first line states: **"Design only. Not implemented. No sandbox isolation is active."**
+  - It covers plan.md Phase 2:
+    - a non-root user;
+    - only the selected workspace mounted (read-write) at a fixed path;
+    - a read-only root filesystem with a tmpfs `/tmp`;
+    - no Docker socket;
+    - `--network none` by default;
+    - CPU, memory, `--pids-limit`, output size and wall-clock limits;
+    - `--rm`, plus labels and a start-up sweep for cleanup after a crash;
+    - an explicit env allowlist;
+    - no credentials in the image or the container filesystem.
+  - It shows where the container sits relative to `ToolGate` (`perform` runs the action inside the container).
+  - It lists technical blockers:
+    - the model API call needs network while tools must not have it, so the agent loop and the tools need to be split, or egress allowed only to the API through a proxy;
+    - how `ANTHROPIC_API_KEY` reaches the SDK without entering the tool container;
+    - the server needs Docker Engine access (socket or CLI), which conflicts with `noProcessExecution.test.ts` and needs a reviewed exception;
+    - Docker Desktop on macOS runs in a VM (bind-mount symlink semantics and performance);
+    - Windows support;
+    - mapping output caps to container logs;
+    - the TOCTOU gap between `canUseTool` and SDK built-in tools.
+  - It ends with an implementation checklist for 3B.2+.
+  - The README links to it.
+  - Verify: `npm test` (unchanged). I review the doc against plan.md Phase 2 line by line.
+
+## Stage E — Real end-to-end test, compatibility, report
+
+Branch: `test/3b11-e-e2e`.
+
+- [ ] **E1. `server/e2e/realServer.test.ts`.**
+  - It uses the real `startServer` (per Q2) on `PORT=0` with `parseConfig`, a temp `DATA_DIR` and a temp workspace, and drives it only through real `fetch` and `openEventStream`. No fakes, no direct manager calls.
+  - Steps:
+    1. `GET /api/health` without a token returns 200.
+    2. `GET /api/state` without a token returns 401, and with the token returns 200.
+    3. Open SSE with the token.
+    4. Create a task (`POST /api/agents/:id/tasks`) and see `task.queued`, `task.started` and `agent.status_changed` events.
+    5. Use the demo approval: `task.waiting_for_approval`, approve, then `task.completed`.
+    6. Start a second task, cancel it, and see `task.cancelled`. The final `GET /api/state` agrees.
+    7. Unauthorized mutation and SSE requests get 401, including one with no Origin.
+    8. Workspace `../x` gets 400 and an unknown workspace gets 422.
+    9. Close SSE, open it again with `Last-Event-ID`, and get only newer events. An old boot id gets `state.reset`.
+  - RED: written before C is merged it fails on the 401 steps, so it is written at the start of E against `main` with A–C merged, and run once with the token header removed to confirm it fails.
+  - Verify: `npx vitest run server/e2e`.
+- [ ] **E2. Compatibility pass, README, report.**
+  - Run and record:
+    - `npm test`;
+    - the new security tests;
+    - E1;
+    - `npx tsc -b`;
+    - `npm run build`;
+    - `npm run server:build`, then `npm run server:start` with a curl smoke test;
+    - `npm run check:secrets`;
+    - `npm audit`.
+  - Then `/vo`: a browser-mock regression of the 3D office, editor and mock approval.
+  - Then `dev:full`: Live badge, approve, deny, cancel, and a server restart going Offline then Live. This uses the Chrome browser tools if available; otherwise I say so in the report.
+  - Then the README: auth, the gate, and the link to the sandbox doc.
+  - Write the final report, `docs/milestone-3b11-report.md`, in the 10-point format from plan.md, including the verdict. It states plainly that the **Claude Agent SDK is not installed** and **sandbox isolation is not implemented**.
+  - Update this file's Status line. Open the PR.
 
 ## Questions for you
 
-- **Q1: Claude Agent SDK package.**
-  - My recommendation is not to install `@anthropic-ai/claude-agent-sdk` in 3B.1. The provider stays a typed boundary that reports "not installed", and we add and test the SDK in the next phase, where it will actually run.
-  - The other option is to install it now, but uncalled.
-- **Q2: Where agents live in backend mode.**
-  - My recommendation: the server's JSON file is the only source of truth, and it starts with its own demo agents. The browser's mock agents stay separate and aren't imported.
-  - Alternatively I can add a one-time "Import agents from this browser" action.
-- **Q3: Dev workflow and `/vo`.**
-  - My recommendation:
-    - `npm run dev` stays frontend-only (browser mock), so `/vo` is unchanged;
-    - a new `npm run dev:full` starts the backend and the frontend in local backend mode;
-    - `npm run server` starts the backend alone.
-  - Alternatively `/vo` could start the backend too.
-- **Q4: One dev dependency.** I'd add `tsx` (dev only) to run the TypeScript server in development with watch. The production server is built with Vite's SSR build, so there are no runtime dependencies. The alternative, without `tsx`, is a `tsc --watch` plus `node --watch` pair, which is slower and has more moving parts.
-- **Q5: Local API protection.**
-  - My recommendation for 3B.1: `127.0.0.1` binding, plus the `Origin` allowlist and JSON-only rule from decision 8, with no login, as the spec says.
-  - Option: also require a random token created at server start and shown in the terminal. That would be stronger against other software on the same machine, but adds a setup step. I'd save it for the VPS milestone.
+- **Q1: How the browser authenticates (the hard one; background above).**
+  - My recommendation: **A, the same-origin Vite proxy** that injects the header. The browser never holds the token, `EventSource` keeps working, and `/vo` is untouched.
+  - What the alternative costs: B (HttpOnly session cookie) is the right shape for a later VPS. It adds a manual pairing step after each token rotation and roughly two more tasks (session endpoint, Connect form, CORS credentials). We can add it in the VPS milestone on top of the same token.
+- **Q2: What "starts the actual backend server" means for the E2E test.**
+  - My recommendation: call the real `startServer()` in the test process on an ephemeral port, with real sockets, real HTTP and real SSE. Then smoke-test the built `server:start` bundle by hand in E2.
+  - What the alternative costs: spawning `node dist-server/index.js` from the test also covers `index.ts` and the bundle. It needs a build before the test, which is slower and flakier on process cleanup, and it adds a process-spawning test file to the guard's review.
+- **Q3: The mock approval demo when a task has no workspace.**
+  - Decision 1 makes Write need a workspace, and the default config has no workspaces, so today's demo button would be denied.
+  - My recommendation: with a workspace, the demo goes through the gate as a simulated Write (nothing written). Without one, it falls back to the simulated run's own approval (no tool request, summary "Simulated approval — nothing runs"), the same as the browser mock. The button keeps working in the default setup.
+  - What the alternative costs:
+    - Requiring a workspace for the demo is purer, but breaks the demo in the default `dev:full` setup until you configure `WORKSPACE_ROOT`.
+    - Auto-creating a demo workspace under `DATA_DIR` would contradict "DATA_DIR must not be inside a workspace".
 
-## Decisions (answered 2026-10-31)
+## Decisions
 
-All five recommendations were accepted:
-
-- **Q1:** the Claude Agent SDK is **not installed** in 3B.1. `ClaudeAgentRuntimeProvider` stays a typed boundary that reports "not installed". The SDK is added and tested in the next phase.
-- **Q2:** in backend mode the server's JSON file is the only source of truth, with its own demo agents. Browser mock agents aren't imported.
-- **Q3:** `npm run dev` and `/vo` stay browser-only. `npm run dev:full` starts the backend and the frontend in local backend mode, and `npm run server` starts the backend alone.
-- **Q4:** add `tsx` as a dev-only dependency to run the TypeScript server in development. The production server is built with Vite's SSR build, with no runtime dependencies.
-- **Q5:** local API protection is `127.0.0.1` binding plus the `Origin` allowlist and JSON-only state changes, with no login or token. A startup token is deferred to the VPS milestone.
+Not answered yet.

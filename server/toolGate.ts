@@ -22,6 +22,11 @@ export function actionDigest(parts: { taskId: string; workspaceId: string | null
   return createHash('sha256').update(canonicalJson(parts)).digest('hex')
 }
 
+/** SHA-256 of the exact tool and input, with no workspace path in it: safe to write to the audit log and to compare with what a person saw. */
+export function actionHash(tool: string, input: unknown): string {
+  return createHash('sha256').update(canonicalJson({ tool, input })).digest('hex')
+}
+
 function deepFreeze<T>(value: T): T {
   if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
     Object.freeze(value)
@@ -45,9 +50,14 @@ export type ToolGateDeps = {
   signal: AbortSignal
   /** Called when an approval is refused because the action changed since it was approved. */
   stale(tool: string, detail: string): void
+  /**
+   * The last check before `perform`: are the permission rules still willing? A once-grant is consumed here, so it can be
+   * used once. A revoked, expired or already used permission refuses.
+   */
+  permit(request: ToolRequest, digest: string, paths: ReadonlyArray<{ readonly arg: string; readonly relative: string }>): { ok: true } | { ok: false }
 }
 
-const deny = (outcome: 'denied_by_policy' | 'stale_approval' | 'cancelled', message: string): GatedOutcome<never> => ({ behavior: 'deny', outcome, message })
+const deny = (outcome: 'denied_by_policy' | 'stale_approval' | 'cancelled' | 'revoked', message: string): GatedOutcome<never> => ({ behavior: 'deny', outcome, message })
 
 export function createToolGate(deps: ToolGateDeps): ToolGate {
   const digestFor = (tool: string, input: unknown, ws: WorkspaceNow): string | null =>
@@ -80,7 +90,10 @@ export function createToolGate(deps: ToolGateDeps): ToolGate {
       const recheck = decideToolUse(deps.policy, tool, input, now.workspace)
       if (recheck.decision === 'deny') return refuse(`path or policy check failed (${recheck.reason})`)
 
-      const value = await perform({ tool, input, workspace: now.workspace, signal: deps.signal, paths: recheck.paths ?? [] })
+      const paths = recheck.paths ?? []
+      if (!deps.permit({ tool, input }, digest, paths).ok) return deny('revoked', `The permission for tool "${tool}" was withdrawn or already used; it was not run.`)
+
+      const value = await perform({ tool, input, workspace: now.workspace, signal: deps.signal, paths })
       return { behavior: 'allow', outcome: answer.outcome, value }
     },
   }

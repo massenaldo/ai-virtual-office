@@ -15,10 +15,10 @@ export type ToolGateResult =
 /** `signal` aborts when the task is cancelled, times out or ends; `paths` are the checked targets, relative, never absolute. */
 export type GatedAction = { readonly tool: string; readonly input: unknown; readonly workspace: ResolvedWorkspace | null; readonly signal: AbortSignal; readonly paths: ReadonlyArray<{ readonly arg: string; readonly relative: string }> }
 
-/** `stale_approval`: the action changed (a path now resolves elsewhere, the workspace moved) between approval and use. */
+/** `stale_approval`: the action changed (a path now resolves elsewhere, the workspace moved) between approval and use. `revoked`: the permission was withdrawn, expired or already used between approval and use. */
 export type GatedOutcome<T> =
   | { behavior: 'allow'; outcome: 'allowed' | 'approved'; value: T }
-  | { behavior: 'deny'; outcome: 'denied_by_policy' | 'denied' | 'expired' | 'cancelled' | 'stale_approval'; message: string }
+  | { behavior: 'deny'; outcome: 'denied_by_policy' | 'denied' | 'expired' | 'cancelled' | 'stale_approval' | 'revoked'; message: string }
 
 /**
  * The only way a runtime may use a tool. `perform` runs only after the server's policy and, for write, execute and

@@ -151,3 +151,6 @@ textarea.field-input{resize:vertical;min-height:54px;font-family:inherit}
 .connection-pill::before{content:"";width:6px;height:6px;border-radius:50%;background:#8e9bad}
 .connection-pill.live::before{background:#65c995}
 .connection-pill.offline::before,.connection-pill.misconfigured::before{background:#ff8a8a}
+.workforce .panel-title{flex-wrap:wrap;justify-content:flex-start}
+.workforce .panel-title .connection-pill{margin-left:auto;text-transform:none;letter-spacing:0;white-space:nowrap}
+.workforce .panel-title .mock-badge{white-space:nowrap}

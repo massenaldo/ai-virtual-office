@@ -1,18 +1,23 @@
 import { useState, type FormEvent } from 'react'
 import { DEPARTMENTS } from '../../layout/catalog'
+import type { Awaitable } from '../controller'
+import { useBusy } from './useBusy'
 import { NAME_MAX, ROLE_MAX, type AgentInput } from '../operations'
 import type { Agent } from '../types'
 import { AGENT_DEPARTMENTS } from '../view'
 
-export type AgentFormProps = { agent?: Agent; onSubmit(input: AgentInput): string | null; onCancel(): void }
+export type AgentFormProps = { agent?: Agent; onSubmit(input: AgentInput): Awaitable<string | null>; onCancel(): void }
 
 /** Create or edit form. onSubmit returns an error message, or null when it was applied. */
 export default function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
   const [input, setInput] = useState<AgentInput>({ name: agent?.name ?? '', role: agent?.role ?? '', department: agent?.department ?? 'backend' })
   const [error, setError] = useState<string | null>(null)
-  const submit = (e: FormEvent) => {
+  const { busy, run } = useBusy()
+  const submit = async (e: FormEvent) => {
     e.preventDefault()
-    setError(onSubmit(input))
+    if (busy) return
+    const result = await run(() => onSubmit(input))
+    if (result !== undefined) setError(result)
   }
   return <form onSubmit={submit} noValidate>
     <label className="field"><span>Name</span><input className="field-input" value={input.name} maxLength={NAME_MAX} autoFocus onChange={(e) => setInput({ ...input, name: e.target.value })}/></label>
@@ -24,7 +29,7 @@ export default function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps)
     </label>
     {error && <p className="form-error" role="alert">{error}</p>}
     <div className="panel-actions">
-      <button type="submit" className="panel-button primary">{agent ? 'Save changes' : 'Create agent'}</button>
+      <button type="submit" className="panel-button primary" disabled={busy}>{agent ? 'Save changes' : 'Create agent'}</button>
       <button type="button" className="panel-button" onClick={onCancel}>Cancel</button>
     </div>
   </form>

@@ -4,7 +4,7 @@ import { DEPARTMENTS } from '../../layout/catalog'
 import type { OfficeLayout } from '../../layout/types'
 import { DEMO_AGENTS } from '../demo'
 import type { Agent, AgentStatus, WorkforceState } from '../types'
-import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, deskStatus, filterAgents, type AgentFilter } from '../view'
+import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentStatusText, deskStatus, filterAgents, type AgentFilter } from '../view'
 
 export type AgentListProps = { state: WorkforceState; layout: OfficeLayout; onOpen(id: string): void; onCreate(): void; onRestoreDemo(): void }
 
@@ -49,7 +49,7 @@ export default function AgentList({ state, layout, onOpen, onCreate, onRestoreDe
             <StatusDot status={a.status}/>
             <span className="agent-row-main"><strong>{a.name}</strong><small>{a.role} · {DEPARTMENTS[a.department].label}</small>
               <span className="agent-chips">{a.demo && <span className="agent-chip demo">Demo</span>}<DeskChip layout={layout} agent={a}/></span></span>
-            <span className="agent-row-status">{AGENT_STATUS_LABEL[a.status]}</span>
+            <span className="agent-row-status">{agentStatusText(state, a)}</span>
           </button>
         </li>)}</ul>}
     <div className="panel-actions">

@@ -22,7 +22,7 @@ try {
   process.exit(1)
 }
 log.info(`AI Virtual Office backend listening on ${backend.url} (runtime: ${parsed.config.runtime})`)
-// The UI ignores this until Stage D connects it.
+// Points the UI at this backend unless already set.
 process.env.VITE_WORKFORCE_API_URL ??= backend.url
 
 let vite: Awaited<ReturnType<typeof createServer>>

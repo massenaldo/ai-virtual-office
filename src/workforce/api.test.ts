@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyWorkforceEvent, parseEventId, type ChangeEvent, type WorkforcePatch } from './api'
+import { applyWorkforceEvent, parseEventId, WORKFORCE_EVENT_TYPES, type ChangeEvent, type WorkforcePatch } from './api'
 import { createDemoWorkforce } from './demo'
 import { addActivity, assignTask } from './operations'
 import { ACTIVITY_LIMIT, type WorkforceState } from './types'
@@ -56,5 +56,13 @@ describe('applyWorkforceEvent', () => {
 
   it('state.reset returns the same state', () => {
     expect(applyWorkforceEvent(demo, { id: 'boot:2', type: 'state.reset', at: NOW, reason: 'gap' })).toBe(demo)
+  })
+})
+
+describe('WORKFORCE_EVENT_TYPES', () => {
+  it('lists every event type once', () => {
+    expect(new Set(WORKFORCE_EVENT_TYPES).size).toBe(11)
+    expect(WORKFORCE_EVENT_TYPES).toContain('state.reset')
+    expect(WORKFORCE_EVENT_TYPES).toContain('task.waiting_for_approval')
   })
 })

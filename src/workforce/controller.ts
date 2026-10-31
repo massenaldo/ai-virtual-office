@@ -9,23 +9,39 @@ import type { ApprovalDecision, WorkforceState } from './types'
 type KV = Pick<Storage, 'getItem' | 'setItem'>
 type Runtime = RuntimeProvider & Partial<MockDemoControls>
 
-export type WorkforceSnapshot = { state: WorkforceState; loadProblem: 'corrupt' | 'unsupported-version' | 'unavailable' | null; preserved: Preserved | null; saveError: string | null }
+export type Awaitable<T> = T | Promise<T>
+export type RuntimeEnvironment = { kind: 'browser' } | { kind: 'backend'; runtime: 'mock' | 'claude' | null; available: boolean | null; reason: string | null }
+export type ConnectionStatus = 'local' | 'connecting' | 'live' | 'offline' | 'misconfigured'
+export type WorkforceSnapshot = {
+  state: WorkforceState
+  loadProblem: 'corrupt' | 'unsupported-version' | 'unavailable' | null
+  preserved: Preserved | null
+  saveError: string | null
+  environment: RuntimeEnvironment
+  connection: ConnectionStatus
+  lastSyncedAt: string | null
+  /** The last command failure that had no form to show it in; null once dismissed or after the next success. */
+  commandError: string | null
+  /** Why the backend connection is down (the server's own message when it gave one); null while connected or in browser mode. */
+  connectionError: string | null
+}
 export type ActionResult = { ok: true } | { ok: false; error: string }
 
 export type WorkforceController = {
   getSnapshot(): WorkforceSnapshot
   subscribe(listener: () => void): () => void
-  createAgent(input: AgentInput): { ok: true; id: string } | { ok: false; error: string }
-  updateAgent(id: string, patch: Partial<AgentInput>): ActionResult
+  createAgent(input: AgentInput): Awaitable<{ ok: true; id: string } | { ok: false; error: string }>
+  updateAgent(id: string, patch: Partial<AgentInput>): Awaitable<ActionResult>
   removeAgent(id: string): void
-  assignDesk(agentId: string, deskId: string | null): ActionResult
-  startTask(agentId: string, input: TaskInput): ActionResult
-  cancelTask(taskId: string): void
-  decideApproval(taskId: string, approvalId: string, decision: ApprovalDecision): void
+  assignDesk(agentId: string, deskId: string | null): Awaitable<ActionResult>
+  startTask(agentId: string, input: TaskInput): Awaitable<ActionResult>
+  cancelTask(taskId: string): Awaitable<ActionResult>
+  decideApproval(taskId: string, approvalId: string, decision: ApprovalDecision): Awaitable<ActionResult>
   requestApproval(taskId: string): void
   forceError(taskId: string): void
   restoreDemoAgents(): void
   dismissLoadProblem(): void
+  dismissCommandError(): void
   dispose(): void
 }
 
@@ -40,7 +56,7 @@ export function createWorkforceController(opts: { storage: KV | null; now?: () =
   const loaded = loadWorkforce(opts.storage, now())
   const listeners = new Set<() => void>()
   let current = loaded.state
-  let snapshot: WorkforceSnapshot = { state: current, loadProblem: loaded.problem, preserved: loaded.preserved, saveError: null }
+  let snapshot: WorkforceSnapshot = { state: current, loadProblem: loaded.problem, preserved: loaded.preserved, saveError: null, environment: { kind: 'browser' }, connection: 'local', lastSyncedAt: null, commandError: null, connectionError: null }
   let disposed = false
 
   const publish = (patch: Partial<WorkforceSnapshot>) => {
@@ -104,16 +120,19 @@ export function createWorkforceController(opts: { storage: KV | null; now?: () =
       commit(ops.requestCancel(current, taskId, now(), runtime.mode))
       runtime.cancel(taskId)
       commit(ops.cancelTask(current, taskId, now()))
+      return { ok: true }
     },
     decideApproval(taskId, approvalId, decision) {
       const before = current
       commit(ops.decideApproval(current, taskId, approvalId, decision, now(), runtime.mode))
       if (current !== before) runtime.respondToApproval(taskId, approvalId, decision)
+      return { ok: true }
     },
     requestApproval: (taskId) => runtime.requestApproval?.(taskId),
     forceError: (taskId) => runtime.forceError?.(taskId),
     restoreDemoAgents: () => commit(restoreDemoAgents(current, now())),
     dismissLoadProblem: () => { if (snapshot.loadProblem) publish({ loadProblem: null }) },
+    dismissCommandError: () => {},
     dispose() {
       disposed = true
       unsubscribe()

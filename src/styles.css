@@ -137,3 +137,20 @@ textarea.field-input{resize:vertical;min-height:54px;font-family:inherit}
 .desk-marker.waiting .desk-marker-dot{background:#e5b878}
 .desk-marker.error .desk-marker-dot{background:#ff8a8a}
 .desk-marker.completed .desk-marker-dot{background:#83c1df}
+.desk-marker.phase-queued .desk-marker-dot{box-shadow:0 0 0 2px #8e9bad55}
+.desk-marker.phase-starting .desk-marker-dot{background:#a89af5;animation:marker-pulse 1.2s ease-in-out infinite}
+.desk-marker.phase-waiting_for_approval{border-color:#e5b878}
+.desk-marker.phase-waiting_for_approval .desk-marker-dot{background:#e5b878;animation:marker-pulse 1.2s ease-in-out infinite}
+.desk-marker.phase-cancelling .desk-marker-dot{background:transparent;border:1.5px solid #8e9bad}
+@keyframes marker-pulse{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.desk-marker .desk-marker-dot{animation:none}}
+.task-card.cancelled{opacity:.8}
+.mock-badge.backend{color:#83c1df;background:#1d2b36;border-color:#2f4a5c}
+.mock-badge.unavailable{color:#ff8a8a;background:#2e1c1e;border-color:#5c2629}
+.connection-pill{display:inline-flex;align-items:center;gap:5px;font-size:9px;color:#aab4c3;background:#1b2430;border:1px solid #29323e;border-radius:999px;padding:1px 7px}
+.connection-pill::before{content:"";width:6px;height:6px;border-radius:50%;background:#8e9bad}
+.connection-pill.live::before{background:#65c995}
+.connection-pill.offline::before,.connection-pill.misconfigured::before{background:#ff8a8a}
+.workforce .panel-title{flex-wrap:wrap;justify-content:flex-start}
+.workforce .panel-title .connection-pill{margin-left:auto;text-transform:none;letter-spacing:0;white-space:nowrap}
+.workforce .panel-title .mock-badge{white-space:nowrap}

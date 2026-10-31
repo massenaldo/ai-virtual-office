@@ -1,7 +1,7 @@
 # Milestone 3B.1 — Real Agent Runtime Foundation: Tasks
 
 **Spec:** [`plan.md`](plan.md) (Milestone 3B.1 brief). This file is my working task list for that spec.
-**Status:** Approved, 2026-10-31. Q1–Q5 answered with the recommendations (see "Decisions" at the end). Stages A–C are done (C in review); Stage D is next.
+**Status:** Approved, 2026-10-31. Q1–Q5 answered with the recommendations (see "Decisions" at the end). Stages A–C are done and merged; Stage D is done (in review); Stage E is next.
 **Earlier milestones:** [`milestone-3a-tasks.md`](docs/milestones/milestone-3a-tasks.md) ([report](docs/milestone-3a-report.md)), and [`milestone-2-tasks.md`](docs/milestones/milestone-2-tasks.md).
 
 ## What this milestone is
@@ -183,9 +183,9 @@ The app gets a small **local backend**. It owns agents, tasks and activity, runs
 
 ## Stage D — Frontend integration
 
-- [ ] `RemoteWorkforceController` (REST and SSE, snapshot plus replay recovery, reconnect with backoff, offline state) behind `useWorkforce`, chosen by `VITE_WORKFORCE_API_URL`.
-- [ ] Runtime environment indicator and connection status in the panel. New lifecycle labels and marker colours. Approve / Deny wired to the API.
-- [ ] Browser checks in both modes, including killing and restarting the server mid-run. Screenshots and a PR.
+- [x] `RemoteWorkforceController` (REST and SSE, snapshot plus replay recovery, reconnect with backoff, offline state) behind `useWorkforce`, chosen by `VITE_WORKFORCE_API_URL`.
+- [x] Runtime environment indicator and connection status in the panel. New lifecycle labels and marker colours. Approve / Deny wired to the API.
+- [x] Browser checks in both modes, including killing and restarting the server mid-run. Screenshots and a PR.
 
 ## Stage E — Verify, document, report
 

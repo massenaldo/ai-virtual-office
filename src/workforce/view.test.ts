@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import css from '../styles.css?raw'
 import { createDefaultLayout } from '../layout/defaultLayout'
 import type { OfficeLayout } from '../layout/types'
 import { createDemoWorkforce } from './demo'
 import { addActivity, assignTask, cancelTask } from './operations'
-import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskClickTarget, deskMarkers, workforceNotice, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, removalPrompt, TASK_STATUS_LABEL } from './view'
+import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskClickTarget, deskMarkers, environmentBadge, environmentNote, connectionLabel, agentStatusText, workforceNotice, TASK_RUNTIME_LABEL, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, removalPrompt, TASK_STATUS_LABEL } from './view'
 
 const NOW = '2026-10-30T09:00:00.000Z'
 const layout = createDefaultLayout()
@@ -113,7 +114,7 @@ describe('deskMarkers', () => {
   it('lists agents on existing desks', () => {
     const markers = deskMarkers(layout, demo, null)
     expect(markers).toHaveLength(6)
-    expect(markers.find((m) => m.id === 'agent-demo-pm')).toEqual({ id: 'agent-demo-pm', label: 'Atlas', status: 'idle', x: -2.7, z: -4.4, selected: false })
+    expect(markers.find((m) => m.id === 'agent-demo-pm')).toEqual({ id: 'agent-demo-pm', label: 'Atlas', status: 'idle', x: -2.7, z: -4.4, selected: false, phase: null })
     const selected = deskMarkers(layout, demo, 'agent-demo-pm')
     expect(selected.filter((m) => m.selected).map((m) => m.id)).toEqual(['agent-demo-pm'])
   })
@@ -152,5 +153,61 @@ describe('workforceNotice', () => {
     expect(workforceNotice('corrupt', 'left-in-place')).toBe("Saved agents couldn't be loaded, so none are shown. That data is left untouched.")
     expect(workforceNotice('unsupported-version', 'backup-created')).toBe('Saved agents come from a newer version of the app, so none are shown. The saved data was backed up.')
     expect(workforceNotice('unavailable', null)).toBe('Browser storage is unavailable, so agent changes cannot be saved in this window.')
+  })
+})
+
+describe('runtime indicator and lifecycle labels', () => {
+  const mock = { kind: 'backend', runtime: 'mock', available: true, reason: null } as const
+
+  it('environmentBadge names each environment', () => {
+    expect(environmentBadge({ kind: 'browser' })).toEqual({ label: 'Mock · browser', title: 'Tasks are simulated in the browser. No AI is run.', tone: 'browser' })
+    expect(environmentBadge(mock)).toMatchObject({ label: 'Local backend · mock runtime', tone: 'backend', title: "Tasks run on the local backend's mock runtime. No Claude SDK is installed and no AI is run." })
+    expect(environmentBadge({ kind: 'backend', runtime: 'claude', available: false, reason: 'Claude Agent SDK not installed' })).toEqual({ label: 'Local backend · Claude (not available)', title: 'Claude Agent SDK not installed. Tasks are refused.', tone: 'unavailable' })
+    expect(environmentBadge({ kind: 'backend', runtime: 'claude', available: false, reason: null }).title).toBe('Claude Agent SDK not installed. Tasks are refused.')
+    expect(environmentBadge({ kind: 'backend', runtime: null, available: null, reason: null }).label).toBe('Local backend')
+  })
+
+  it('environmentNote says mock runtime only for the backend mock', () => {
+    expect(environmentNote(mock)).toBe('Mock runtime only; no Claude SDK.')
+    expect(environmentNote({ kind: 'browser' })).toBeNull()
+    expect(environmentNote({ kind: 'backend', runtime: 'claude', available: false, reason: null })).toBeNull()
+  })
+
+  it('connectionLabel covers every connection status', () => {
+    const T = '2026-10-31T09:15:30.000Z'
+    expect(connectionLabel({ connection: 'local', lastSyncedAt: null })).toBeNull()
+    expect(connectionLabel({ connection: 'connecting', lastSyncedAt: null })).toBe('Connecting…')
+    expect(connectionLabel({ connection: 'connecting', lastSyncedAt: T })).toBe('Reconnecting…')
+    expect(connectionLabel({ connection: 'live', lastSyncedAt: T })).toBe('Live')
+    expect(connectionLabel({ connection: 'offline', lastSyncedAt: null })).toBe('Offline · retrying')
+    expect(connectionLabel({ connection: 'offline', lastSyncedAt: T })).toBe(`Offline · last synced ${formatTime(T)} · retrying`)
+    expect(connectionLabel({ connection: 'misconfigured', lastSyncedAt: null })).toBe('Not configured')
+  })
+
+  it('agentStatusText prefers the lifecycle phase', () => {
+    const { state, taskId } = withTask('agent-demo-pm')
+    const withStatus = (status: 'waiting_for_approval' | 'cancelling' | 'starting' | 'running') => ({ ...state, tasks: state.tasks.map((t) => (t.id === taskId ? { ...t, status } : t)) })
+    const pm = (s: typeof state) => s.agents.find((a) => a.id === 'agent-demo-pm')!
+    expect(agentStatusText(withStatus('waiting_for_approval'), pm(withStatus('waiting_for_approval')))).toBe('Waiting for approval')
+    expect(agentStatusText(withStatus('cancelling'), pm(withStatus('cancelling')))).toBe('Cancelling')
+    expect(agentStatusText(withStatus('starting'), pm(withStatus('starting')))).toBe('Starting')
+    const running = withStatus('running')
+    expect(agentStatusText(running, { ...pm(running), status: 'working' })).toBe('Working')
+    expect(agentStatusText(demo, agent('agent-demo-qa'))).toBe('Idle')
+  })
+
+  it('deskMarkers carry the active task phase', () => {
+    const { state, taskId } = withTask('agent-demo-pm')
+    const waiting = { ...state, tasks: state.tasks.map((t) => (t.id === taskId ? { ...t, status: 'waiting_for_approval' as const } : t)) }
+    expect(deskMarkers(layout, waiting, null).find((m) => m.id === 'agent-demo-pm')?.phase).toBe('waiting_for_approval')
+    expect(deskMarkers(layout, demo, null).every((m) => m.phase === null)).toBe(true)
+  })
+
+  it('labels where a task ran', () => {
+    expect(TASK_RUNTIME_LABEL).toEqual({ mock: 'Simulated run', claude: 'Claude runtime' })
+  })
+
+  it('styles define a marker rule for every phase', () => {
+    for (const p of ['queued', 'starting', 'waiting_for_approval', 'cancelling']) expect(css).toContain(`.desk-marker.phase-${p}`)
   })
 })

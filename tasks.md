@@ -337,7 +337,7 @@ Branch: `fix/3b12-3-auth-proxy`. Opus reviews the PR before merge.
 
 Branch: `feat/3b12-4-redaction`.
 
-- [ ] **4.1 JWT, Slack, Google, PEM, `-p` and URL passwords with `@` or `/`.** (Decision 10)
+- [x] **4.1 JWT, Slack, Google, PEM, `-p` and URL passwords with `@` or `/`.** (Decision 10)
   - Files: `server/redact.ts` (new `PATTERNS` entries, `redactPrivateKeys` scanner run first in `redactSecrets`, and a replacement for the URL userinfo rule) and `server/redact.test.ts`. Plus one sink test each in `server/taskManager.test.ts` (runtime message), `server/audit.test.ts` (detail) and `server/toolPolicy.test.ts` (a Bash command containing a JWT → `not_reviewable`).
   - RED first, positive cases:
     - a real-shaped JWT;

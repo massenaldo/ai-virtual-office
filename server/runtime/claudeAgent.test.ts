@@ -45,6 +45,15 @@ describe('ClaudeAgentRuntimeProvider', () => {
     expect(source).not.toContain('requestToolApproval')
   })
 
+  it('points at the gated Write/Edit design, which exists and says it is a design', () => {
+    expect(source).toContain('docs/gated-tools.md')
+    const doc = readFileSync(new URL('../../docs/gated-tools.md', import.meta.url), 'utf8')
+    expect(doc.startsWith('**Design only. Not implemented.**')).toBe(true)
+    expect(doc).toContain('vo_write')
+    expect(doc).toContain('vo_edit')
+    expect(doc).toContain('O_NOFOLLOW')
+  })
+
   it('is not wired to the SDK: not installed, no import, still unavailable', () => {
     expect(SDK_INSTALLED).toBe(false)
     expect(new ClaudeAgentRuntimeProvider({ credentialsConfigured: true }).availability).toEqual({ available: false, reason: 'Claude Agent SDK not installed' })

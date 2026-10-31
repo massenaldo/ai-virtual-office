@@ -27,7 +27,8 @@ import type { ExecutionResult, ExecutionStatus, ServerRuntimeProvider, StartCont
  *    - KNOWN GAP, to close in 3B.2 before any real write: the SDK's built-in tools (Write, Edit, Read) run after
  *      `canUseTool` returns, so the gate's use-time check and the actual file access are still two steps. The fix is to
  *      disallow the built-in Write and Edit and offer in-process SDK MCP tools whose handler IS `perform`, so the change
- *      happens inside the gate, and to run the session inside the sandbox (docs/sandbox-architecture.md).
+ *      happens inside the gate, and to run the session inside the sandbox (docs/sandbox-architecture.md). The design of those
+ *      tools is in docs/gated-tools.md (design only, not implemented).
  * 4. Limits. Stream output only as RuntimeEvents, so the manager's caps, redaction, timeouts and approval timer apply.
  *    Never write files or logs directly.
  * 5. Termination. Pass an AbortController linked to `ctx.signal` to the SDK. On `cancel(taskId)`, abort and emit

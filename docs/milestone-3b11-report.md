@@ -1,6 +1,6 @@
 # Milestone 3B.1.1 — Security Hardening & E2E Verification: Final Report
 
-**Brief:** [`plan.md`](../plan.md) · **Tasks:** [`tasks.md`](../tasks.md) · **Date:** 2026-10-31
+**Brief:** [`milestone-3b11-plan.md`](milestones/milestone-3b11-plan.md) · **Tasks:** [`milestone-3b11-tasks.md`](milestones/milestone-3b11-tasks.md) · **Date:** 2026-10-31
 
 > **The Claude Agent SDK is not installed or integrated, and no real agent execution exists.** The backend runs the mock runtime only. **Sandbox isolation is not implemented:** `docs/sandbox-architecture.md` is a design only, and Docker is not even installed on the machine this was built on. Every workspace, tool and token check described below is a policy check on the host, not isolation.
 

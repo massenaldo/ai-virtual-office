@@ -1,319 +1,486 @@
-# Milestone 3B.1.1 — Security Hardening & E2E Verification: Tasks
+# Milestone 3B.1.2 — Final Security Hardening: Tasks
 
-**Spec:** [`plan.md`](plan.md) (Milestone 3B.1.1 brief). This file is my working task list for that spec.
-**Status:** Approved, 2026-10-31. Q1–Q3 answered with the recommendations (see "Decisions"). Stage A is merged; Stage B is merged; Stage C is merged; Stages A–D are merged; Stage E is in review. The final report is `docs/milestone-3b11-report.md`.
-**Earlier milestones:** [`milestone-3b1-tasks.md`](docs/milestones/milestone-3b1-tasks.md) ([report](docs/milestone-3b1-report.md)), [`milestone-3a-tasks.md`](docs/milestones/milestone-3a-tasks.md) ([report](docs/milestone-3a-report.md)).
+**Spec:** [`plan.md`](plan.md) (Milestone 3B.1.2 brief). This file is my working task list for that spec.
+**Status:** Approved for execution, 2026-10-31. The decisions below are applied as written; no stage has started.
+**Earlier milestones:** [`milestone-3b11-tasks.md`](docs/milestones/milestone-3b11-tasks.md) ([report](docs/milestone-3b11-report.md)), [`milestone-3b1-tasks.md`](docs/milestones/milestone-3b1-tasks.md) ([report](docs/milestone-3b1-report.md)).
+
+**Note on the brief:** `plan.md` stops mid-word in Phase 6 ("Digest visibility at approval time. - Hard"). I read Phase 6 as the deferred findings in section 10 of `docs/milestone-3b11-report.md`:
+- the digest is not visible at approval time;
+- nothing protects the gap between the final re-check and `perform` (path strings, not file descriptors; hard links inside a workspace);
+- `GatedAction` has no abort signal;
+- plus the open items listed there.
+
+I also assume the same scope restrictions as 3B.1.1, and a final report in the same 10-point format.
 
 ## What this milestone is
 
-The 3B.1 audit said **READY WITH ISSUES**. This milestone closes those issues before any real Claude runtime is connected.
+3B.1.1 ended **READY WITH ISSUES**. This milestone closes the remaining high-priority security and reliability gaps before any real Claude runtime is connected.
 
-- It hardens what exists:
-  - workspace checks;
-  - secret redaction;
-  - the tool gate, so a future provider can't run a tool except through it;
-  - a local API token.
-- It writes the Docker sandbox design down. It doesn't build the sandbox.
-- It adds a real end-to-end test against the running server.
+- It fixes what leaks:
+  - the open health route can return a raw save error that contains the data directory path;
+  - error paths that echo internal messages.
+- It proves what is claimed:
+  - stale-approval tests through the real `TaskManager`;
+  - a test of the dev proxy and SSE through a real Vite server.
+- It closes known gaps:
+  - `/api` prefix edge cases;
+  - two servers sharing one `DATA_DIR`;
+  - six missing redaction shapes;
+  - hard links;
+  - a missing abort signal.
+- It builds the large Write/Edit review screen, so a change too long for the 200-character summary is shown in full and approved by digest, not refused.
+- It writes down two designs it does not build: the gated in-process Write/Edit tool for the SDK, and long-term browser authentication.
 - It does **not** install the Claude Agent SDK or run anything real. The mock runtime stays, and stays the default.
 
 ## Current state (from inspecting the code, 2026-10-31)
 
-- **Branch and checks:** `main` at #25 (3B.1 Stage E).
-  - `npm test`: 58 files, 720 tests pass.
-  - `tsc -b` is clean. `npm run build`, `server:build` and `check:secrets` pass. `npm audit` reports 0 vulnerabilities.
-  - The SDK is not installed. `SDK_INSTALLED = false` in `server/runtime/claudeAgent.ts`.
-- **Workspaces** (`server/workspaces.ts`):
-  - `parseWorkspaces` stores `workspaceRoot` as a real path when the config loads.
-  - `resolveWorkspace`, however, compares against `realpathSync(config.workspaceRoot)` **at call time**, not against the stored root. If the root is later swapped for a symlink, the check follows it.
-  - `checkPathInWorkspace` treats `ENOTDIR` like `ENOENT` and walks up, so `file.txt/x` is accepted.
-  - The header comment states that time of check to time of use is not guaranteed, and that "a runtime must re-check at use time". Nothing does that re-check yet.
-- **Tool policy** (`server/toolPolicy.ts`):
-  - `TOOL_CATALOGUE` marks `Write` and `Edit` as `needsWorkspace: false`. With no workspace, `decideToolUse` falls back to `lexicalPath`, a text-only check.
-  - Write, execute and network tools can only ever be `ask`. A summary that redaction or the length cap would change is refused as `not_reviewable`.
-- **Approval flow** (`server/taskManager.ts`):
-  - `TaskManager.requestToolApproval(taskId, request)` calls `decideToolUse`. On `ask`, it stores a `toolWaiter { approvalId, tool, resolve }` and emits `approval_requested`.
-  - `decideApproval` settles that waiter with `{ behavior: 'allow', outcome: 'approved' }`.
-  - **The approval isn't bound to the action.** The result carries no input, digest or workspace. The provider gets back only "allowed", then does the work itself with whatever input it holds. Nothing re-checks the path at execution time. The provider also receives the workspace's real path (`StartContext.workspace.path`).
-- **Runtime contract** (`server/runtime/types.ts`):
-  - `StartContext` = `{ agent, signal, workspace, tools: ToolPolicy, requestToolApproval, audit }`.
-  - `ServerMockProvider.requestApproval` (`server/runtime/mockProvider.ts`) calls `ctx.requestToolApproval({ tool: 'Write', input: MOCK_DEMO_WRITE })` and writes nothing.
-  - The header of `claudeAgent.ts` describes the intended `canUseTool`, `permissionMode` and settings rules.
-- **Redaction** (`server/redact.ts`): four patterns, which are `sk-ant-`, `sk-`, `Bearer` and `key|secret|token|password = value`.
-  - Not covered: URL credentials (`https://u:p@host`), `ghp_` / `github_pat_`, `AKIA…`, `Basic …`, and `--password value`.
-  - Redaction is applied in `TaskManager.cap` (messages, progress, errors, results), `sanitizeSummary`, the audit log, `redactingLogger` and `scrub`.
-- **HTTP** (`server/http/guards.ts`, `router.ts`, `sse.ts`, `app.ts`):
-  - Guards run in this order: Host (421), Origin (403), preflight, JSON-only (415).
-  - **A request with no `Origin` passes the Origin guard** (curl, other local software). There is no authentication of any kind.
-  - CORS never sends credentials.
-  - `GET /api/events` takes `?lastEventId=` because `EventSource` can't send headers on its first connect.
-- **Frontend** (`src/workforce/source.ts`, `remote/client.ts`, `remote/sync.ts`):
-  - `resolveWorkforceSource` accepts only an `http(s)` origin. `client.ts` calls `fetch(baseUrl + path)` cross-origin.
-  - `sync.ts` opens `new EventSource(\`${baseUrl}/api/events?lastEventId=…\`)`. **EventSource can't send an `Authorization` header.**
-- **Dev workflow:**
-  - `npm run dev` runs Vite only (browser mock). `/vo` (`scripts/vo.sh`) runs `VO_AUTO_EXIT=1 npm run dev` and checks health with `curl localhost:5173`.
-  - `npm run dev:full` (`scripts/devFull.ts`) starts the backend and Vite **in one process**, and sets `VITE_WORKFORCE_API_URL` to the backend URL.
-  - `vite.config.ts` has no proxy.
-- **Tests:**
-  - `server/test/helpers.ts` (`startTestServer` on `PORT=0` with a temp `DATA_DIR`, `api()`, `rawRequest`) and `server/test/sseClient.ts` (`openEventStream`) already drive a real `node:http` server with real `fetch` and SSE parsing.
-  - `server/noProcessExecution.test.ts` scans non-test `.ts` files under `server/`, `src/` and `scripts/`.
+- **Branch and checks:** `main` at `1938776` (#31, 3B.1.1 Stage E). `npx vitest run`: **822 tests pass in 63 files**. The SDK is not installed (`SDK_INSTALLED = false`).
+- **Health and state** (`server/http/routes.ts`):
+  - `GET /api/health` is the only route the auth guard skips (`server/http/guards.ts`, `auth`: `GET` plus `/api/health`).
+  - It returns `persistence: { ok, error: store.saveError }` and `audit: deps.audit.status`.
+  - `GET /api/state` (authenticated) returns `saveError: store.saveError` in `StateResponse` (`src/workforce/api.ts`). `src/App.tsx` shows it as "Agent changes couldn't be saved: …".
+- **Save errors** (`server/store.ts`, `openWorkforceStore` → `save`): `saveError = error.message`. A Node fs message contains the absolute path, e.g. `EACCES: permission denied, open '/…/data/workforce.json.tmp-123'`. The log line also includes `filePath`. That is fine for the local log, but the message reaches both routes.
+- **Audit status** (`server/audit.ts`, `fail`): already code-only (`status = { ok: false, error: code }`, with `'write failed'` as fallback). The code is not checked against a list, though.
+- **Other error paths:**
+  - `router.ts`: unhandled errors become a generic 500. `HttpError` messages are our own text. 400 "Invalid URL.", 404 and 405 are fixed strings. The log line includes `req.url`.
+  - `taskManager.ts` `launch()`: puts `Runtime failed to start: ${error.message}` into the task's `errorMessage`. `cap()` hides only the workspace and root paths, not `DATA_DIR`, the home directory or the cwd.
+  - `store.ts`: throws `Couldn't read <path>` at startup. This goes to local stderr only.
+- **Tool gate** (`server/toolGate.ts`, `createToolGate`):
+  - It freezes a clone of the input and computes `actionDigest({ taskId, workspaceId, workspacePath, tool, input })`. It calls `deps.approve(request, digest)`, then re-checks liveness, the workspace, the digest and `decideToolUse` before `perform`.
+  - **But `TaskManager.launch` wires `approve: (request) => this.approveTool(taskId, request)` and drops the digest.** `toolWaiter` is `{ approvalId, tool, resolve }`, and `PendingApproval` (`src/workforce/types.ts`) is `{ id, tool, summary, requestedAt }`. So the digest is never stored or shown, and the reviewer cannot see what they are bound to.
+  - `GatedAction` = `{ tool, input, workspace }`: no signal, no checked paths.
+  - The existing tests are `server/toolGate.test.ts`, which tests the gate with stub deps, not through `TaskManager`.
+- **Approval** (`TaskManager.decideApproval`): checks the task, its status and that `pendingApproval.id === approvalId`, then settles the waiter. The body is `{ approvalId, decision }` (`parseApproval`).
+- **Summaries** (`server/toolPolicy.ts`):
+  - `SUMMARY_MAX_CHARS = 200`.
+  - Write and Edit summaries embed the whole JSON-escaped content.
+  - Any ask whose flattened summary is longer than 200 characters, or which redaction would change, is denied `not_reviewable`.
+  - `cap()` passes summaries through `sanitizeSummary` and `hidePaths`.
+  - The approval card (`src/workforce/ui/AgentDetail.tsx`) shows `pendingApproval.tool` and `summary` in a `<p>`.
+- **Workspace checks** (`server/workspaces.ts`, `checkPathInWorkspace`) resolve real paths but never look at `nlink`. A hard link inside the workspace to a file elsewhere on the same volume passes.
+- **Auth and proxy** (`server/auth.ts`, `scripts/apiProxy.ts`, `vite.config.ts`):
+  - `createApiGate` acts only when `path.startsWith('/api/')`. The Vite proxy key is the string `'/api'`, a plain prefix.
+  - So `/api` and `/apiX` are forwarded **without** the token (backend 401). `/API/state` and `/%61pi/state` are not proxied at all.
+  - `tokenReader` reads `DATA_DIR/api-token` on every request.
+  - `resolveApiToken` writes a fresh token at each start. A second server on the same `DATA_DIR` silently replaces the first one's token, and both also write `workforce.json` and `audit.log`.
+  - `ServerConfig.apiToken` holds the configured token as a plain string ("never log or serialise the config").
+- **Proxy tests:** `scripts/apiProxy.test.ts` (unit, fake req/res) and `scripts/viteServes.test.ts` (real Vite, no backend, no proxy). Nothing exercises the proxy or SSE through a real Vite server.
+- **Redaction** (`server/redact.ts`, `PATTERNS`):
+  - Covered: URL `user:pass@`, `gh*_`, `github_pat_`, `AKIA`/`ASIA`, `-u`/`--user`, Basic, `--password` and similar flags, `sk-ant-`, `sk-`, Bearer, and `key=value`.
+  - Not covered: JWT, `xox…`, `AIza…`, PEM private keys, `-p<password>`, and URL passwords containing `@` or `/`. The userinfo pattern stops at the first `/` or `@`.
+  - `scrub` cuts to `maxChars + 256` **before** redacting, so a PEM block can arrive without its END line.
+- **E2E** (`server/e2e/realServer.test.ts`): 7 tests on the real `startServer`. The `readdirSync(ws.path('sandbox'))` check is vacuous, because the mock's `perform` (`() => 'simulated'`) never writes.
+- **Test helpers** (`server/test/helpers.ts`): `startTestServer`, `testConfig` (`API_TOKEN = TEST_TOKEN`), `rawRequest`, `tempDataDir`; `server/test/sseClient.ts` (`openEventStream`); `server/test/fakeProvider.ts`.
 
 ### Existing code this milestone must not break
 
-- The 3D office, layout editor, agent registry and desk assignments (browser-side, `ai-virtual-office:layout:v1`).
-- Workforce UI, `useWorkforce`, both `WorkforceController` implementations, and storage schema v2.
-- `MockRuntimeProvider`, `ServerMockProvider`, and the mock approval demo, in both browser and backend modes.
-- The REST API, the SSE recovery contract (snapshot, `lastEventId`, `state.reset`), the task lifecycle v2, timeouts and cancel grace.
-- The guards: Host, Origin, JSON-only, CORS and loopback binding. Also the audit log, `check:secrets` and the no-process-execution guard.
-- `npm run dev` and `/vo` as browser-only, plus `dev:full`, `server`, `server:build` and `server:start`.
+- The 3D office, layout editor, agent registry and desk assignments.
+- Workforce UI, `useWorkforce`, both controllers, and storage schema v2.
+- `MockRuntimeProvider`, `ServerMockProvider`, and the mock approval demo in browser and backend modes, with and without a workspace.
+- The REST API, SSE recovery (snapshot, `lastEventId`, `state.reset`), the task lifecycle, timeouts and cancel grace.
+- The guards (Host, Origin, auth, JSON-only, CORS, loopback). Also the token rules, the dev proxy, the audit log, `check:secrets` and `noProcessExecution.test.ts`.
+- `npm run dev` and `/vo` as browser-only, plus `dev:full`, `server`, `server:build`, `server:start`, and the E2E test.
 
-### Deferred minors carried from 3B.1 (not in this milestone unless listed in a stage)
-
-- Stage C: the suppressed-count audit record is written in the next window; guard tests are text scans.
-- All Stage D UI minors from the 3B.1 report.
-- The build still warns about the >500 kB chunk.
-
-## Strict scope restrictions (from plan.md)
+## Strict scope restrictions
 
 - Do NOT install `@anthropic-ai/claude-agent-sdk`.
 - Do NOT implement real Claude execution.
-- Do NOT enable unrestricted Bash, Write, Edit, or Network access.
+- Do NOT enable unrestricted Bash, Write, Edit or Network access. The gated Write/Edit tool is **designed in a doc only**, and `perform` in the mock still writes nothing.
 - Do NOT deploy to a VPS.
 - Do NOT rewrite the 3D scene or layout editor.
-- Do NOT remove MockRuntimeProvider.
-- Do NOT claim Docker sandbox isolation is implemented if only its architecture has been documented.
+- Do NOT remove `MockRuntimeProvider`.
+- Do NOT claim a sandbox exists. `docs/sandbox-architecture.md` stays design-only.
+- Do not build the browser session-cookie flow. It is documented only (Stage 3).
 - Do not start Milestone 3B.2 automatically.
 
 ## How I'll work
 
-- **One stage = one branch = one PR into `main`.** Branches are `fix/3b11-a-workspace-redaction`, `feat/3b11-b-tool-gate`, `feat/3b11-c-api-token`, `docs/3b11-d-sandbox` and `test/3b11-e-e2e`. I stop for your review after each PR.
-- **TDD:** every task lists the tests to write first. They must fail (RED) before the code makes them pass (GREEN).
-- **Every task ends with** `npm test` and `npx tsc -b`. Stages that touch the server or frontend also run `npm run build` and `npm run server:build`.
+- **One stage = one branch = one PR into `main`**, using an in-place feature branch in this folder with no sibling worktree folders. Branches:
+  - `fix/3b12-1-info-disclosure`
+  - `test/3b12-2-tool-gate-integration`
+  - `fix/3b12-3-auth-proxy`
+  - `feat/3b12-4-redaction`
+  - `feat/3b12-5-write-review`
+  - `fix/3b12-6-reliability`
+  - `docs/3b12-7-report`
+- **Order and stacking:** Stage 5 depends on Stage 2 (the digest on `PendingApproval`). Stage 6 depends on Stage 2 (`GatedAction`). If a dependency is not merged yet, the branch is stacked on it. Stages 1, 3 and 4 are independent. Stage 7 runs once 1 to 6 are merged.
+- **Conventional commits.** After each PR I stop for your merge.
+- **TDD:** every task lists the tests to write first. They must fail (RED) before the code makes them pass (GREEN), and I record the RED run in the PR.
+- **Every task ends with** `npx vitest run <its files>`, then `npm test` and `npx tsc -b`. Stages that touch the server or frontend also run `npm run build`, `npm run server:build` and `npm run check:secrets`.
+- **Model split:** Sonnet implements each task. Opus does the security review in Stage 7, and reviews the Stage 3 and Stage 5 PRs before merge.
 - **No new dependencies.**
 
-## Decisions I propose (for your OK)
+## Decisions I propose (applied as written)
 
-1. **Workspace is mandatory for Write and Edit.** `needsWorkspace: true` and `lexicalPath` is removed. A Write or Edit with no workspace is denied `no_workspace`. What this does to the mock demo is Q3.
-2. **One canonical root.** `resolveWorkspace` compares against the stored `config.workspaceRoot`, which is the real path from config time. If `realpathSync(root)` no longer equals the stored value, it fails as `escapes_root`. A path through a regular file (`ENOTDIR`) is `invalid_path`.
-3. **Redaction stays one module.** New patterns go into `PATTERNS` in `server/redact.ts`, so every existing sink picks them up. "Basic" is redacted only when its base64 decodes to `user:pass`, so "Basic configuration" survives.
-4. **Tool gate by construction, built on what exists.** No second policy:
-   - A new `server/toolGate.ts` wraps `decideToolUse`, `resolveWorkspace` / `checkPathInWorkspace` and the manager's existing approval machinery (`toolWaiter`, approval timer, `decideApproval`).
-   - `StartContext.requestToolApproval` is **replaced** by `ctx.tools: ToolGate` with one method, `use(request, perform)`.
-   - The gate freezes a clone of the input and computes `digest = sha256(canonicalJson({ taskId, workspaceId, workspaceRealPath, tool, input }))`. It decides with the existing policy and asks a human on `ask`. The approval id is bound to that digest.
-   - **Immediately before `perform`**, the gate re-resolves the workspace and re-runs `decideToolUse` on the frozen input (the use-time path check). It recomputes the digest and checks the task is still running and the approval unused.
-   - Any mismatch is refused as `stale_approval`, audited, and `perform` isn't called. An approval is single-use.
-   - `perform` receives only the frozen input and the checked paths.
-   - `ToolGateResult` gains `stale_approval`. `ToolRequest` keeps its shape.
-5. **The mock uses the same gate.** `ServerMockProvider` calls `ctx.tools.use({ tool: 'Write', input: MOCK_DEMO_WRITE }, () => simulated)`, where `perform` is a no-op that writes nothing.
-6. **Claude SDK plug-in is documented, not built.** The header of `claudeAgent.ts` is rewritten (details in B3). The plan is `canUseTool` → `ctx.tools.use`, with `perform` returning the SDK's allow result with `updatedInput` set to the frozen input.
-   - `permissionMode: 'default'`.
-   - No auto-approve list. The `allowedTools` option is empty, because auto-approved tools skip `canUseTool`.
-   - `disallowedTools` is everything outside the catalogue, plus `Bash`, `WebFetch` and `WebSearch` until the sandbox exists.
-   - `settingSources: []`, no MCP servers except our own, no hooks that approve, and no `additionalDirectories`.
-   - It also records the remaining gap honestly: SDK built-in tools execute *after* `canUseTool` returns. For 3B.2, the recommended step is to replace built-in `Write`/`Edit` with in-process SDK MCP tools whose handler *is* `perform`, so the write happens inside the gate, and to run everything else in the sandbox. Option names must be checked against the installed SDK version.
-7. **Local API token (backend):**
-   - `API_TOKEN` (server-only env, at least 32 characters) if set. Otherwise the server generates one at each start: `randomBytes(32)`, base64url.
-   - A generated token is written atomically to `DATA_DIR/api-token` with mode 0600, so a separately started Vite proxy can read it. **Rotation = restart** (generated) or changing `API_TOKEN` (configured).
-   - Checked with `timingSafeEqual` on SHA-256 digests.
-   - **Every `/api/*` route needs `Authorization: Bearer <token>`, including `GET /api/state`, `/api/workspaces` and `/api/events`.** The only exceptions are `GET /api/health` (it carries no state) and `OPTIONS` preflight.
-   - **No exception for a missing `Origin`.** Guard order: Host, Origin, preflight, **auth (401)**, JSON-only.
-   - The token never appears in logs, responses, audit records, the startup record (`apiToken=configured|generated` only), snapshots or bundles.
-   - `findSecretInConfig` and `check:secrets` also check for the token. An `API_TOKEN` under a `VITE_` name is refused at start.
-   - The token is never accepted in a query string.
-8. **How the browser authenticates.** See Q1. I recommend **Option A, the same-origin Vite proxy**.
+1. **Errors leave the process as codes, never messages.**
+   - `store.saveError` becomes `SaveErrorCode | null`. `SaveErrorCode` is a closed list: `EACCES | EPERM | ENOSPC | EROFS | EISDIR | ENOENT | EMFILE | EIO | write_failed`, and anything else maps to `write_failed`.
+   - `GET /api/health` returns `persistence: { ok, error: code }`. `audit.status.error` uses the same allowlist.
+   - `GET /api/state` returns `saveError` as a fixed human sentence chosen by code, e.g. "Permission denied (EACCES).", with no path. `src/App.tsx` keeps showing it.
+   - The full message, with path, goes only to the server log.
+   - The health route keeps its other fields. They are configuration facts the UI needs (`runtime`, `available`, `reason`, `credentialsConfigured`, `startedAt`, `version`), and none holds a path or secret.
+   - *Alternative:* move persistence and audit status behind auth. This costs a second health shape and a UI change for little gain, because a code is not sensitive.
+2. **Runtime start failures are generic in state.**
+   - `launch()` stores "Runtime failed to start." and logs the error itself.
+   - `cap()` additionally hides `DATA_DIR`, `process.cwd()` and the home directory as `<data-dir>`, `<cwd>` and `<home>`, as a backstop for any later message.
+   - *Alternative:* a generic absolute-path regex. It would also mangle legitimate relative output, and it gives a false sense of completeness.
+3. **The digest is part of the approval.**
+   - `approve(request, digest)` is wired through. `toolWaiter` stores the digest, and the waiter is settled only for that digest.
+   - `PendingApproval` gains `digest: string | null`. It is null for the mock's own simulated approval.
+   - `POST /api/tasks/:id/approval` takes an optional `digest`. When the pending approval has one, the body must carry the same value, or the response is 409 "That approval is no longer pending." The UI always sends it.
+   - The approval card shows the first 12 hex characters, with the full value in a tooltip.
+   - This is Stage 2, because Stage 5 needs it.
+   - *Alternative:* keep binding by approval id only. The id is already unique per action, but the human would still not be able to see or confirm what they approved, which is the finding.
+4. **Large Write/Edit review = a separate, bounded `review` payload on the pending approval** (Stage 5).
+   - `PendingApproval` gains `review: ToolReview | null`, where `ToolReview` is `{ workspaceId, path, bytes, lines, digest }` plus `{ kind: 'write', content }` or `{ kind: 'edit', oldString, newString, replaceAll }`.
+   - `path` is workspace-relative. The content is exactly the frozen input, never truncated, never reformatted.
+   - The summary becomes a short line that always fits the 200-character cap: `Write <path> (1.2 kB, 40 lines): review the full content`.
+   - **`REVIEW_MAX_BYTES = 32768`** (the default `MAX_MESSAGE_BYTES`) applies to the UTF-8 size of all displayed fields together. Above it the request is denied `not_reviewable`, as today. It is a fixed constant, not configurable.
+   - Also denied `not_reviewable`:
+     - content that redaction would change (a secret would be shown and persisted);
+     - content with control characters other than `\t`, `\n` and `\r`;
+     - content with C1 controls;
+     - content with bidi overrides or isolates (U+202A–U+202E, U+2066–U+2069), because what is shown would not be what is written ("Trojan Source").
+   - The review travels in state and events like the rest of `PendingApproval`, and is persisted in `workforce.json` (mode 0600) only while pending. A restart fails the task, so it never outlives the approval. `storage.ts` validates its shape and size on load.
+   - Bash, WebFetch and WebSearch keep the 200-character summary rule. No review payload.
+   - *Alternatives:*
+     - Serving the review from an authenticated `GET /api/tasks/:id/approvals/:approvalId/review` kept only in memory. It keeps Write content out of `workforce.json` and the event buffer, but costs a route, a fetch-and-retry in the UI and a mock-browser variant.
+     - A real file diff against the current file. The file is not covered by the digest and can change after review, so it would show something that is not bound.
+     - Both are recorded for 3B.2.
+5. **UI review pane.**
+   - When `review` is set, the approval card shows the workspace id, target path, size, digest and a scrollable monospace pane: the full content with line numbers for Write, or "Replace" / "With" blocks plus the "all occurrences" flag for Edit.
+   - Whitespace is visible (tabs and trailing spaces marked).
+   - **Approve is disabled until the pane has been opened.** Deny always works.
+6. **Proxy prefix: exact `/api/` only.**
+   - The Vite proxy key becomes the regex `'^/api/'`.
+   - `createApiGate` decodes and lowercases the path once. Any path whose decoded, lowercased form starts with `/api` (`/api`, `/apiX`, `/API/…`, `/%61pi/…`, `/api%2F…`, `//api/…`) but is not literally `/api/…` gets a 404 from the gate and never reaches the backend.
+   - *Alternative:* forward variants with the token. That widens what the token authorises for no user benefit.
+7. **One server per `DATA_DIR`.**
+   - At start the server creates `DATA_DIR/server.lock` with `wx`, mode 0600, holding `{ pid, startedAt }`.
+   - If the lock exists and `process.kill(pid, 0)` says the process is alive, start is refused: "Another server is using DATA_DIR (pid N)." This happens before the token is written.
+   - A lock whose pid is dead is replaced and logged.
+   - The lock is removed on `close()`.
+   - `noProcessExecution.test.ts` is unaffected, because a signal-0 check is not process execution.
+   - `dev:full` and `server` print the same refusal.
+   - *Alternative:* a per-process token file name (`api-token.<pid>`). Two servers would then still corrupt `workforce.json` and `audit.log`, and the proxy would not know which file to read.
+8. **The token value is wrapped.**
+   - `ServerConfig.apiToken` becomes `Secret | null`. `Secret.toJSON()`, `toString()` and `util.inspect` all return `[REDACTED]`, and `.reveal()` is used only in `auth.ts` and `app.ts`.
+   - `findSecretInConfig` stays as a second line of defence.
+   - *Alternative:* split `parseConfig` into `{ config, secrets }`. It is cleaner, but touches every `testConfig` call site for the same guarantee.
+9. **Long-term browser auth is documented, not built** (`docs/browser-auth.md`):
+   - The dev proxy stays the local-dev path.
+   - Before anything is served beyond this machine, an HttpOnly, `SameSite=Strict`, `Path=/api` session cookie is issued after a one-time pairing (the token pasted once into a Connect form, `POST /api/session`), with the backend serving the UI same-origin.
+   - The doc states plainly that `Sec-Fetch-Site` is **not** authentication against local programs.
+10. **New redaction rules stay in `server/redact.ts`.**
+    - **JWT:** `eyJ…` three-part base64url, each part at least 8 characters.
+    - **Slack:** `xox[abposr]-…` and `xapp-…`.
+    - **Google:** `AIza` followed by exactly 35 characters `[0-9A-Za-z_-]`.
+    - **PEM:** private keys go through a small linear scanner function, not a lazy regex. It redacts from `-----BEGIN … PRIVATE KEY-----` to the matching END line, **or to the end of the text when the END line is missing**, because `scrub` may have cut it.
+    - **`-p`:** only the attached form after `mysql`, `mysqldump`, `mariadb` or `mysqladmin` (`-pSECRET`), and `sshpass -p VALUE`. `ssh -p 22`, `mkdir -p`, `docker run -p 8080:80`, `cp -p` and `pg_dump -p 5432` are untouched.
+    - **URL userinfo:** the password may contain `@` and `/`. The userinfo runs to the last `@` that is followed by a host and then `/`, `?`, `#`, whitespace or the end. A password that would contain `/` is rejected as a credential when the part before the first `/` is all digits (a port), so `https://host:8080/a/@scope/pkg` survives. An empty user (`redis://:p@ss@host`) is covered.
+11. **Hard links and the final gap.**
+    - `checkPathInWorkspace` gains an `existing file with nlink > 1` → `unsafe_link` deny reason, applied to Read, Write and Edit targets at ask time and at the use-time re-check. The deny text is "path is a hard link".
+    - `GatedAction` gains `signal: AbortSignal` (the task's) and `paths: { arg, relative }[]`. The gate refuses `cancelled` if the signal is already aborted just before `perform`.
+    - The remaining gap (path strings, not descriptors) is closed by contract in the gated-tool doc: open with `O_NOFOLLOW`, `fstat` and compare `dev`/`ino`/`nlink`, write to a temp file in the same directory and `rename`.
+    - Nothing writes real files in this milestone.
+12. **The gated in-process Write/Edit tool is a doc** (`docs/gated-tools.md`), linked from the header of `server/runtime/claudeAgent.ts` and from the README.
+    - SDK built-in `Write` and `Edit` go in `disallowedTools` and are never used.
+    - Our MCP tools `vo_write` and `vo_edit` have a handler that *is* `ctx.tools.use(request, perform)`, with the real fs work inside `perform`.
 
-### Q1 background: browser authentication options
+## Stage 1 — Information disclosure
 
-The constraints:
-- the token must never be in a bundle, URL, log or snapshot;
-- `EventSource` can't set headers;
-- `?token=` is out, because it leaks to history, logs and `Referer`.
+Branch: `fix/3b12-1-info-disclosure`.
 
-| Option | How | Pros | Costs |
-|---|---|---|---|
-| **A. Vite dev proxy injects the header** (recommended) | The browser calls same-origin `/api/*` on :5173. Vite's proxy (server side, Node) adds `Authorization: Bearer …` and forwards to :8787. `VITE_WORKFORCE_API_URL=/` means "same origin". `dev:full` passes the token in memory. A separate `npm run dev` reads `DATA_DIR/api-token`. The proxy forwards only `/api/*`, removes any incoming `Authorization`/`Cookie`, keeps `Origin` (the backend still checks it), and requires `Sec-Fetch-Site: same-origin`. | The browser never sees the token. Plain `EventSource` and `fetch` keep working without CORS. Small change: `vite.config.ts`, `devFull.ts`, `source.ts`. No UI for pairing. | Works only where Vite runs (dev / `dev:full`). `vite preview` and a future VPS need the backend to serve the UI or Option B. Any local process that reaches :5173 gets an authenticated path. That is the same trust level as Vite already serving the source tree, and it is documented. |
-| B. HttpOnly session cookie after a one-time exchange | The user pastes the token into a "Connect" form. `POST /api/session` (token in the JSON body) sets `vo_session`: HttpOnly, SameSite=Strict, Path=/api. Requests use `fetch(..., { credentials: 'include' })` and `new EventSource(url, { withCredentials: true })`, and CORS adds `Allow-Credentials` for exact origins. | Works with any way of serving the UI, including a later VPS. No proxy. JavaScript never holds the token after the paste. | A manual pairing step after each rotation, plus a new form, a session store, cookie parsing and CSRF reasoning. Cookies are per host name (`localhost` ≠ `127.0.0.1`). About two more tasks. |
-| C. fetch-streamed SSE with a header | Replace `EventSource` with `fetch` plus a `ReadableStream` parser, sending `Authorization`. | Plain bearer auth everywhere. | JavaScript must hold the token, so it must come from somewhere the page can read (typed in, or kept in sessionStorage), where XSS or a snapshot can reach it. It also re-implements stream parsing and reconnects. Not recommended. |
-
-**What happens to each workflow under A:**
-- `npm run dev` / `/vo`: unchanged. Browser mock, no backend, no token, and the proxy isn't registered unless `VITE_WORKFORCE_API_URL=/`.
-- `dev:full`: works with no setup. It generates the token and wires the proxy in-process.
-- `npm run server` + `npm run dev` with `VITE_WORKFORCE_API_URL=/`: the proxy reads the token file.
-- A direct `VITE_WORKFORCE_API_URL=http://127.0.0.1:8787` still parses, but gets 401. The UI shows "Not authorized — start with `npm run dev:full`" instead of silently weakening.
-- README and `.env.example` document generation, storage (`DATA_DIR/api-token`, 0600, gitignored with `data/`) and rotation.
-
-## Stage A — Workspace enforcement and redaction gaps
-
-Branch: `fix/3b11-a-workspace-redaction`.
-
-- [x] **A1. Workspace enforcement.**
-  - Files: `server/workspaces.ts`, `server/toolPolicy.ts`, `server/runtime/mockProvider.ts` (only the Q3 change), and their tests.
+- [ ] **1.1 Safe persistence and audit status.** (Decision 1)
+  - Files: `server/store.ts` (`SaveErrorCode`, `saveErrorCode(error)`, `saveErrorText(code)`), `server/audit.ts` (allowlisted code), `server/http/routes.ts` (health and state), `src/workforce/api.ts` (types only; `saveError` stays `string | null`), and the tests `server/store.test.ts`, `server/http/routes.test.ts` and `server/audit.test.ts`.
   - RED first:
-    - in `workspaces.test.ts`: (a) a root replaced by a symlink after config, so `resolveWorkspace` fails `escapes_root`; (b) `file.txt/x` → `invalid_path`; (c) a symlink inside the workspace re-pointed outside *between two calls*, so the first check passes and the second fails; (d) a path renamed between calls.
-    - in `toolPolicy.test.ts`: Write and Edit with `workspace = null` → `no_workspace`, and existing lexical-path cases removed or rewritten.
-    - in `server/http/routes.test.ts`: `/api/workspaces`, `/api/state` and a 422 workspace error contain neither the root nor the workspace path.
-    - in `mockProvider.test.ts`: the demo approval works with no workspace (per Q3) and with a workspace.
-  - Verify: `npx vitest run server/workspaces.test.ts server/toolPolicy.test.ts server/runtime/mockProvider.test.ts server/http/routes.test.ts`, then `npm test` and `npx tsc -b`.
-- [x] **A2. Redaction patterns.**
-  - Files: `server/redact.ts`, `server/redact.test.ts`, plus one sink test each in `taskManager.test.ts` and `audit.test.ts`.
-  - Patterns:
-    - URL `scheme://user:pass@` → `scheme://[REDACTED]@`;
-    - `gh[pousr]_[A-Za-z0-9]{36,}` and `github_pat_…`;
-    - `(AKIA|ASIA)[A-Z0-9]{16}`;
-    - `Basic <base64>` when it decodes to something containing `:`;
-    - `--password|--passwd|--pass|--token|--secret|--api-key` followed by `=` or a space, then the value;
-    - existing `sk-` / `Bearer` kept.
-  - RED first: positive cases for each pattern, plus negative cases that must stay untouched:
-    - `https://example.com/@user`;
-    - a 40-hex git SHA;
-    - `AKIA` inside a normal word or with the wrong length;
-    - "Basic configuration";
-    - `--password-file ./secrets.txt` keeps the path;
-    - `password_reset.md`.
-    - Then one test per sink: a `ghp_` token in a mock message, in a failure error and in an audit detail comes out `[REDACTED]`.
-    - Also check that a WebFetch/Bash summary containing a new pattern becomes `not_reviewable`, not a redacted ask.
-  - Verify: `npx vitest run server/redact.test.ts server/taskManager.test.ts server/audit.test.ts`, then `npm test`.
-
-## Stage B — Tool gate by construction
-
-Branch: `feat/3b11-b-tool-gate`. It depends on A (workspace required, canonical root).
-
-- [x] **B1. `ToolGate` and digest-bound approval.**
-  - Files: new `server/toolGate.ts` and `server/toolGate.test.ts`. Changes to `server/runtime/types.ts` (replace `requestToolApproval` with `tools: ToolGate`; the policy stays reachable only through the gate), `server/taskManager.ts` (`requestToolApproval` becomes private gate plumbing; `toolWaiter` stores the digest; `decideApproval` unchanged for the API), and `server/test/fakeProvider.ts`.
+    - Using the existing `writeFile` test seam, make it throw a real-shaped fs error, e.g. `Object.assign(new Error(\`EACCES: permission denied, open '${dataDir}/workforce.json.tmp-1'\`), { code: 'EACCES' })`.
+    - Assert that `store.saveError === 'EACCES'`.
+    - Assert that `GET /api/health` without a token has `persistence: { ok: false, error: 'EACCES' }` and that its body text contains neither `dataDir` nor `tmpdir()` nor `/`-rooted paths.
+    - Assert that `GET /api/state` `saveError` is "Permission denied (EACCES)." with no path.
+    - An unknown code (`EWEIRD`) and an error without a code both give `write_failed`.
+    - The audit log failing with `EISDIR` gives `audit: { ok: false, error: 'EISDIR' }`.
+    - The server log line still has the full message.
+  - Verify: `npx vitest run server/store.test.ts server/audit.test.ts server/http/routes.test.ts`, then `npm test` and `npx tsc -b`.
+- [ ] **1.2 Disclosure sweep of every unauthenticated response and error path.** (Decision 2)
+  - Files: new `server/http/disclosure.test.ts`; `server/taskManager.ts` (`launch()` catch, `hidePaths` extra labels; the manager gets `dataDir` through `config`), `server/http/router.ts` (log `pathOf(req)`, never the query string), and `server/taskManager.test.ts`.
   - RED first:
-    - `perform` is not called on deny, on human deny, on approval timeout or after cancel;
-    - mutating the caller's input object after `use()` was called doesn't change what `perform` receives (frozen clone);
-    - a symlink in the target path re-pointed outside the workspace *after approval, before perform* → `stale_approval`, audited, `perform` not called;
-    - the workspace directory moved after approval → `stale_approval`;
-    - an approval id can't be used twice;
-    - a second `use()` while one is pending → `approval_pending` (existing behaviour kept);
-    - read tools still `allow` without asking, but are re-checked at use;
-    - a type-level test (`expectTypeOf<StartContext>()`) shows there is no `requestToolApproval` and no raw policy bypass.
-    - Existing `taskManager.test.ts` approval tests must still pass, adapted only to the new context shape.
-  - Verify: `npx vitest run server/toolGate.test.ts server/taskManager.test.ts`, then `npm test` and `npx tsc -b`.
-- [x] **B2. The mock goes through the gate.**
-  - Files: `server/runtime/mockProvider.ts` and its tests, plus `server/http/routes.test.ts` (demo flow over HTTP).
+    - A table-driven test against a real `startTestServer` with a workspace. For each response it asserts that the body and headers contain no `dataDir`, workspace root, `process.cwd()`, `os.homedir()`, `TEST_TOKEN`, `"stack"`, `at ` frames or `Error:`. The responses are:
+      - `GET /api/health`;
+      - `OPTIONS` preflight;
+      - 401 (no token, wrong token);
+      - 404 and 405;
+      - 421 (bad Host);
+      - 403 (bad Origin);
+      - 415;
+      - 400 (bad URL, bad JSON, `../x` workspace);
+      - 413;
+      - 422 (unknown workspace);
+      - 409;
+      - and a forced 500 (a route dep that throws an `Error` with a path).
+    - `taskManager.test.ts`: a provider whose `start` throws `new Error(\`ENOENT: open '${dataDir}/x'\`)` gives task `errorMessage === 'Runtime failed to start.'`, and the log has the original. A runtime `failed` event containing `dataDir` or `homedir()` comes out as `<data-dir>` or `<home>`.
+    - The router logs `GET /api/state` without `?lastEventId=…`.
+  - Verify: `npx vitest run server/http/disclosure.test.ts server/taskManager.test.ts server/http`, then `npm test` and `npx tsc -b`.
+
+## Stage 2 — Tool gate reliability
+
+Branch: `test/3b12-2-tool-gate-integration`.
+
+- [ ] **2.1 The digest travels with the approval.** (Decision 3)
+  - Files:
+    - `server/taskManager.ts`: `approveTool(taskId, request, digest)`; `toolWaiter: { approvalId, tool, digest, resolve }`; `decideApproval(taskId, approvalId, decision, opts, digest?)`.
+    - `server/http/inputs.ts`: `parseApproval` accepts optional `digest`, 64 lowercase hex characters.
+    - `server/http/routes.ts`.
+    - `src/workforce/types.ts`: `PendingApproval.digest: string | null`.
+    - `src/workforce/runtime/types.ts`: `approval_requested` carries `digest?`.
+    - `src/workforce/operations.ts`.
+    - `src/workforce/storage.ts`: serialise and parse `digest`. An old file without it parses as `null`. No schema bump.
+    - The browser mock sets `digest: null`.
+    - `src/workforce/remote/commands.ts` sends `digest`.
+    - `src/workforce/ui/AgentDetail.tsx`: short digest with a tooltip.
   - RED first:
-    - the demo approval goes through `ctx.tools.use` and its `perform` is a no-op;
-    - approve → completed, deny → failed "Approval denied (simulated)";
-    - an approval timeout and a cancel behave as today;
-    - nothing is written in the workspace (check the directory listing in the test).
-  - Verify: `npx vitest run server/runtime/mockProvider.test.ts server/http/routes.test.ts`, then `npm test`.
-- [x] **B3. Claude SDK integration doc block.**
-  - Files: `server/runtime/claudeAgent.ts` (header only, per decision 6) and `claudeAgent.test.ts`.
-  - The test asserts that the provider is still unavailable, that `SDK_INSTALLED === false`, and that no `@anthropic-ai` import exists in `package.json` or `server/`.
-  - Verify: `npx vitest run server/runtime/claudeAgent.test.ts server/noProcessExecution.test.ts`, then `npm test`, `npx tsc -b`, `npm run build` and `npm run server:build`.
+    - The `approval_requested` state for a gated Write has `pendingApproval.digest === actionDigest(...)` for that task, workspace, tool and input.
+    - Approving with a wrong digest gives 409, `perform` is not called, and the task stays waiting.
+    - Approving with no digest when one is pending gives 409.
+    - The mock's own approval (no workspace) has `digest: null` and approves with no digest.
+    - A storage round trip keeps `digest`, and a v2 file without the field loads.
+    - The UI test shows the 12-character prefix.
+  - Verify: `npx vitest run server/taskManager.test.ts server/http src/workforce`, then `npm test`, `npx tsc -b` and `npm run build`.
+- [ ] **2.2 Stale-approval integration tests through the real `TaskManager`.**
+  - Files: new `server/toolGate.integration.test.ts` (real `TaskManager`, real store in a temp `DATA_DIR`, real workspace from `server/test/workspaces.ts`, and `server/test/fakeProvider.ts` extended with a `useTool(taskId, request, perform)` hook that records `perform` calls). Fixes go in `toolGate.ts` or `taskManager.ts` only if a test exposes a gap.
+  - RED first (each must assert `perform` was **never** called, the outcome, and the audit record `tool.stale`, `tool.denied` or none):
+    - **Task state:**
+      - approve, then `cancelTask` in the same tick before the gate resumes → `cancelled`;
+      - the task times out while waiting → `expired`;
+      - the agent is removed → `cancelled`;
+      - the approval timer fires after approve → no double settle.
+    - **Workspace:**
+      - the workspace directory is renamed between ask and approve → `stale_approval` ("workspace unavailable");
+      - the workspace is replaced by a symlink to another folder → `stale_approval`;
+      - the target's parent becomes a symlink outside → `stale_approval` ("path or policy check failed").
+    - **Tool name and input:**
+      - the caller mutates `request.tool` and `request.input` after `use()` → `perform` receives the original frozen values and the digest is unchanged;
+      - a second `use()` for a different input while one is pending → `approval_pending`, and the first approval still only performs the first input.
+    - **Binding:**
+      - task B's `approvalId` posted to task A → 409;
+      - the same approval id approved twice → the second is 409 and `perform` runs once;
+      - an approval decided after its task finished → 409.
+  - If a case finds a real gap, the fix goes in this branch with that test as the RED.
+  - Verify: `npx vitest run server/toolGate.integration.test.ts server/toolGate.test.ts server/taskManager.test.ts`, then `npm test` and `npx tsc -b`.
+- [ ] **2.3 Doc: the gated in-process Write/Edit tool.** (Decisions 11 and 12)
+  - Files: new `docs/gated-tools.md`, the header of `server/runtime/claudeAgent.ts` (a pointer only), and `server/runtime/claudeAgent.test.ts`.
+  - The doc covers:
+    - why SDK built-in `Write` and `Edit` are never used (they execute after `canUseTool` returns);
+    - the `vo_write` and `vo_edit` MCP tool schemas (Claude Code field names, so `toolPolicy` is unchanged);
+    - handler = `ctx.tools.use`;
+    - `perform` steps: re-open by descriptor with `O_NOFOLLOW`, `fstat` `dev`/`ino`/`nlink` check, temp file in the same directory, `fsync`, `rename`, and the size cap;
+    - honouring `action.signal`;
+    - what the agent gets back, including errors without host paths;
+    - `disallowedTools` additions;
+    - how it combines with the sandbox design;
+    - a 3B.2 checklist.
+  - The first line says "Design only. Not implemented."
+  - RED first: extend `claudeAgent.test.ts` to assert that the header links `docs/gated-tools.md`, that `docs/gated-tools.md` exists and starts with "Design only", and (existing checks) that `SDK_INSTALLED === false` and there is no `@anthropic-ai` import in `package.json` or `server/`.
+  - Verify: `npx vitest run server/runtime/claudeAgent.test.ts server/noProcessExecution.test.ts`, then `npm test`.
 
-## Stage C — Local API token
+## Stage 3 — Authentication and proxy reliability
 
-Branch: `feat/3b11-c-api-token`. The design here assumes Q1 = A. Under B, C2 becomes a session endpoint plus a Connect form.
+Branch: `fix/3b12-3-auth-proxy`. Opus reviews the PR before merge.
 
-- [x] **C1. Backend token and auth guard.**
-  - Files: new `server/auth.ts` and `server/auth.test.ts`. Changes to `server/config.ts` (`API_TOKEN`, refused under a `VITE_` name, minimum length), `server/http/guards.ts` (auth guard, 401 plus `WWW-Authenticate: Bearer`, audited as `request.rejected reason=auth`), `server/app.ts` (resolve the token, write the token file, startup record), `server/redact.ts` (`findSecretInConfig` for the token), `scripts/checkSecrets.ts`, and `server/test/helpers.ts` / `sseClient.ts` (send the token by default, so existing tests stay meaningful).
+- [ ] **3.1 `/api` prefix edge cases.** (Decision 6)
+  - Files: `scripts/apiProxy.ts` (`createApiGate` canonical-path check; proxy key `'^/api/'`) and `scripts/apiProxy.test.ts`.
   - RED first:
-    - every route except `GET /api/health` and `OPTIONS` returns 401 with no token, with a wrong token, and **with no `Origin` header**;
-    - `GET /api/events` with no token gets 401 before any stream bytes;
-    - `?token=` in the query is ignored (still 401);
-    - a generated token file has mode 0600 and a new value after a restart;
-    - a configured short token is refused at start;
-    - with a capturing logger and audit log, the token appears in no log line, audit record, response body or header;
-    - the existing guard order tests still pass (bad Host still gives 421 before 401).
-  - Verify: `npx vitest run server/auth.test.ts server/http server/config.test.ts`, then `npm test` and `npx tsc -b`.
-- [x] **C2. Browser path: same-origin proxy (Q1 = A).**
-  - Files: new `scripts/apiProxy.ts` and `scripts/apiProxy.test.ts` (builds Vite `server.proxy` options). Changes to `vite.config.ts` (proxy only when `VITE_WORKFORCE_API_URL=/`; reads `DATA_DIR/api-token` per request), `scripts/devFull.ts` (in-memory token, sets `VITE_WORKFORCE_API_URL=/`), `src/workforce/source.ts` (accept `/` as same origin, `baseUrl: ''`), `src/workforce/remote/sync.ts` / `remoteController.ts` (401 → a clear "Not authorized" connection error), and `src/vite-env.d.ts` if needed.
+    - `/api`, `/apiX`, `/api?x=1`, `/API/state`, `/Api/state`, `/%61pi/state`, `/api%2Fstate`, `/%2Fapi/state` and `//api/state` each get 404 from the gate, `next()` is not called, and no `authorization` header is set;
+    - `/api/state` and `/api/events?lastEventId=…` still pass with the token;
+    - `/`, `/src/main.tsx` and `/@vite/client` are untouched;
+    - `apiProxyFor(...).proxy` has exactly the key `'^/api/'`.
+  - Verify: `npx vitest run scripts/apiProxy.test.ts`, then `npm test`.
+- [ ] **3.2 A real Vite server, the real backend and SSE, in one automated test.**
+  - Files: new `scripts/viteProxy.test.ts`.
+    - It starts `startServer` on `PORT=0` with a temp `DATA_DIR` and a generated token.
+    - Then Vite `createServer({ configFile: 'vite.config.ts', server: { port: 0 } })`, with `VITE_WORKFORCE_API_URL=/`, `PORT` and `DATA_DIR` set in `process.env` before creation and restored after.
+    - It uses `node:http` requests (so `Sec-Fetch-Site` can be set) and `openEventStream` pointed at Vite.
+  - RED first: written against the merged 3.1 behaviour, then run once against `main`'s `apiProxy.ts` to confirm the prefix cases fail. Assertions:
+    - same-origin `GET /api/state` through Vite → 200;
+    - without `Sec-Fetch-Site` → 403;
+    - an incoming `Authorization: Bearer attacker` is replaced;
+    - every 3.1 variant gets a non-2xx response and never produces a backend `request.rejected reason=auth` audit record;
+    - SSE through Vite: create a task through Vite, receive `task.queued` and `task.started`;
+    - reconnect with `Last-Event-ID` and receive only newer events;
+    - the stream stays open across one heartbeat;
+    - no response body or header contains the token;
+    - `data/api-token` is still not served (as in `viteServes.test.ts`).
+  - Verify: `npx vitest run scripts/viteProxy.test.ts scripts/viteServes.test.ts`, then `npm test`.
+- [ ] **3.3 One server per `DATA_DIR`, and the token kept out of config text.** (Decisions 7 and 8)
+  - Files: new `server/dataDirLock.ts` and `server/dataDirLock.test.ts`; `server/app.ts` (lock before `resolveApiToken`, release in `close()`); `server/config.ts` and new `server/secret.ts` (`Secret`); `server/auth.ts`; `server/index.ts`; `scripts/devFull.ts` (clear message); `server/test/helpers.ts` if needed.
   - RED first:
-    - `apiProxy` adds `Authorization`, removes incoming `Authorization` and `Cookie`, refuses anything other than `Sec-Fetch-Site: same-origin` with 403, and forwards only `/api/*`;
-    - `resolveWorkforceSource('/')` gives a same-origin backend;
-    - `sync` opens `EventSource('/api/events?lastEventId=…')`;
-    - a 401 from the snapshot shows the "Not authorized" state and does not fall back to the browser mock.
-  - Verify: `npx vitest run scripts/apiProxy.test.ts src/workforce`, then `npm test`, `npm run build`, `npm run server:build` and `npm run check:secrets`. Also `grep -r "api-token\|Bearer " dist/` must find no token value.
-  - Manual check: `npm run dev:full`, then the browser shows `Live`; `curl 127.0.0.1:8787/api/state` gives 401.
-- [x] **C3. Docs for the token.**
-  - Files: `README.md` ("Backend" section: auth model, workflows table, generation, storage, rotation, what the proxy trusts) and `.env.example` (`API_TOKEN`, with a note that it must never be a `VITE_` variable).
-  - Verify: `npm test` (the config test that checks `CONFIG_VARIABLES` against `.env.example` covers the new name).
+    - a second `startServer` on the same `DATA_DIR` rejects with "Another server is using DATA_DIR", and the first server's token file and token are unchanged and still accepted;
+    - a lock holding a dead pid is replaced;
+    - `close()` removes the lock, so a restart on the same `DATA_DIR` works (existing restart tests stay green);
+    - the lock file has mode 0600;
+    - `JSON.stringify(config)`, `String(config.apiToken)` and `util.inspect(config)` show `[REDACTED]`, never the value;
+    - with a capturing logger and audit log, a full E2E-style run (start, 401, 200, SSE, error paths, the second-server refusal) never prints the token;
+    - after `npm run build`, `grep -r` for the test token and `api-token` in `dist/` finds nothing (this extends `check:secrets`).
+  - Verify: `npx vitest run server/dataDirLock.test.ts server/auth.test.ts server/config.test.ts server/app.test.ts server/e2e`, then `npm test`, `npx tsc -b`, `npm run build`, `npm run server:build` and `npm run check:secrets`.
+- [ ] **3.4 Doc: long-term browser authentication.** (Decision 9)
+  - Files: new `docs/browser-auth.md` and a README link.
+  - The doc covers:
+    - the threat model: other local programs, web pages, the LAN, and a future VPS;
+    - what the dev proxy protects and what it does not, with a clear statement that `Sec-Fetch-Site` is not authentication against local programs;
+    - Options A, B and C from the 3B.1.1 Q1 table, with the decision: cookie pairing before anything leaves the machine;
+    - the cookie design (HttpOnly, `SameSite=Strict`, `Path=/api`, rotation, logout, CSRF reasoning, `localhost` vs `127.0.0.1`);
+    - what changes in `client.ts` and `sync.ts` (`credentials: 'include'`, `withCredentials`);
+    - the rule that the token is never in URLs, logs, bundles or errors, and where each rule is enforced and tested.
+  - The first line says "Decision record. The cookie flow is not built."
+  - Verify: `npm test` (unchanged). I check the doc against plan.md Phase 3 items 4 and 5 line by line.
 
-## Stage D — Sandbox architecture (document only)
+## Stage 4 — Secret redaction
 
-Branch: `docs/3b11-d-sandbox`.
+Branch: `feat/3b12-4-redaction`.
 
-- [x] **D1. `docs/sandbox-architecture.md`.**
-  - The first line states: **"Design only. Not implemented. No sandbox isolation is active."**
-  - It covers plan.md Phase 2:
-    - a non-root user;
-    - only the selected workspace mounted (read-write) at a fixed path;
-    - a read-only root filesystem with a tmpfs `/tmp`;
-    - no Docker socket;
-    - `--network none` by default;
-    - CPU, memory, `--pids-limit`, output size and wall-clock limits;
-    - `--rm`, plus labels and a start-up sweep for cleanup after a crash;
-    - an explicit env allowlist;
-    - no credentials in the image or the container filesystem.
-  - It shows where the container sits relative to `ToolGate` (`perform` runs the action inside the container).
-  - It lists technical blockers:
-    - the model API call needs network while tools must not have it, so the agent loop and the tools need to be split, or egress allowed only to the API through a proxy;
-    - how `ANTHROPIC_API_KEY` reaches the SDK without entering the tool container;
-    - the server needs Docker Engine access (socket or CLI), which conflicts with `noProcessExecution.test.ts` and needs a reviewed exception;
-    - Docker Desktop on macOS runs in a VM (bind-mount symlink semantics and performance);
-    - Windows support;
-    - mapping output caps to container logs;
-    - the TOCTOU gap between `canUseTool` and SDK built-in tools.
-  - It ends with an implementation checklist for 3B.2+.
-  - The README links to it.
-  - Verify: `npm test` (unchanged). I review the doc against plan.md Phase 2 line by line.
+- [ ] **4.1 JWT, Slack, Google, PEM, `-p` and URL passwords with `@` or `/`.** (Decision 10)
+  - Files: `server/redact.ts` (new `PATTERNS` entries, `redactPrivateKeys` scanner run first in `redactSecrets`, and a replacement for the URL userinfo rule) and `server/redact.test.ts`. Plus one sink test each in `server/taskManager.test.ts` (runtime message), `server/audit.test.ts` (detail) and `server/toolPolicy.test.ts` (a Bash command containing a JWT → `not_reviewable`).
+  - RED first, positive cases:
+    - a real-shaped JWT;
+    - a JWT in `Authorization: Bearer` (no double marker issue);
+    - `xoxb-…`, `xoxp-…`, `xapp-1-…`;
+    - `AIza` + 35 characters;
+    - RSA, EC, OPENSSH and `ENCRYPTED PRIVATE KEY` blocks, including the whole multi-line body;
+    - a PEM block with no END line;
+    - a PEM block cut by `scrub(…, 100)`;
+    - `mysql -uroot -pS3cret db`;
+    - `sshpass -p 'x y' ssh h`;
+    - `https://u:p@ss@host/x`;
+    - `postgres://u:pa/ss@db:5432/app`;
+    - `redis://:p@ss@host:6379`.
+  - RED first, negative cases (must stay untouched):
+    - `eyJ` alone and a two-part `a.b`;
+    - `xox` in prose;
+    - `AIza` with 34 characters;
+    - `-----BEGIN CERTIFICATE-----` and `BEGIN PUBLIC KEY`;
+    - `ssh -p 22 host`, `mkdir -p a/b`, `docker run -p 8080:80`, `cp -p`, `pg_dump -p 5432`;
+    - `https://host:8080/a/@scope/pkg`, `http://localhost:5173/@vite/client`, `https://example.com/@user`, `ssh://git@host`;
+    - every existing negative.
+  - RED first, cost tests (each under 50 ms on a 100 kB input):
+    - 10,000 `-----BEGIN RSA PRIVATE KEY-----` lines with no END;
+    - a 100 kB `https://a:` followed by `@`-free text;
+    - 100 kB of `eyJ.` repeats;
+    - 100 kB of `xox-`.
+  - Verify: `npx vitest run server/redact.test.ts server/taskManager.test.ts server/audit.test.ts server/toolPolicy.test.ts`, then `npm test` and `npm run check:secrets`.
 
-## Stage E — Real end-to-end test, compatibility, report
+## Stage 5 — Large Write/Edit review
 
-Branch: `test/3b11-e-e2e`.
+Branch: `feat/3b12-5-write-review`. It depends on 2.1. Opus reviews the PR before merge.
 
-- [x] **E1. `server/e2e/realServer.test.ts`.**
-  - It uses the real `startServer` (per Q2) on `PORT=0` with `parseConfig`, a temp `DATA_DIR` and a temp workspace, and drives it only through real `fetch` and `openEventStream`. No fakes, no direct manager calls.
-  - Steps:
-    1. `GET /api/health` without a token returns 200.
-    2. `GET /api/state` without a token returns 401, and with the token returns 200.
-    3. Open SSE with the token.
-    4. Create a task (`POST /api/agents/:id/tasks`) and see `task.queued`, `task.started` and `agent.status_changed` events.
-    5. Use the demo approval: `task.waiting_for_approval`, approve, then `task.completed`.
-    6. Start a second task, cancel it, and see `task.cancelled`. The final `GET /api/state` agrees.
-    7. Unauthorized mutation and SSE requests get 401, including one with no Origin.
-    8. Workspace `../x` gets 400 and an unknown workspace gets 422.
-    9. Close SSE, open it again with `Last-Event-ID`, and get only newer events. An old boot id gets `state.reset`.
-  - RED: written before C is merged it fails on the 401 steps, so it is written at the start of E against `main` with A–C merged, and run once with the token header removed to confirm it fails.
-  - Verify: `npx vitest run server/e2e`.
-- [x] **E2. Compatibility pass, README, report.**
+- [ ] **5.1 Server: the bounded `review` payload.** (Decision 4)
+  - Files:
+    - `server/toolPolicy.ts`: `buildReview(tool, input, rel, workspaceId)`, `REVIEW_MAX_BYTES`, `reviewable(text)` (control, C1 and bidi check plus the redaction check). The Write/Edit summary becomes the short line. `decideToolUse` returns `review` on `ask` for Write and Edit.
+    - `server/taskManager.ts`: `approveTool` puts `review` (with the digest) on `approval_requested`; `cap()` applies `hidePaths` to `path` only and never cuts content.
+    - `src/workforce/types.ts` (`ToolReview`, `PendingApproval.review`), `src/workforce/runtime/types.ts`, `src/workforce/operations.ts`.
+    - `src/workforce/storage.ts`: validates `review` (shape, kind, sizes at most `REVIEW_MAX_BYTES`, digest equal to `pendingApproval.digest`); an invalid review makes the record invalid, following the existing parse rules.
+    - Tests in `server/toolPolicy.test.ts`, `server/taskManager.test.ts`, `server/toolGate.integration.test.ts` and `src/workforce/storage.test.ts`.
+  - RED first:
+    - a 5 kB multi-line Write is now `ask` (it was `not_reviewable`), its summary is 200 characters or fewer, and `review.content === input.content` byte for byte (tabs, CRLF, trailing spaces, emoji);
+    - an Edit has `oldString`, `newString` and `replaceAll`;
+    - exactly `REVIEW_MAX_BYTES` → `ask`, and one byte more → `not_reviewable`;
+    - content with `‮`, `⁦`, `\u0007`, `\u0085`, or an `sk-ant-…` key → `not_reviewable`;
+    - `review.path` is relative and contains no workspace path;
+    - `review.digest === pendingApproval.digest === actionDigest(…)`;
+    - changing one byte of the input after approval → `stale_approval` (via 2.2's harness);
+    - the review survives a `workforce.json` round trip, and an oversized or mismatched review on load is rejected;
+    - Bash with a long command is still `not_reviewable`.
+  - Verify: `npx vitest run server/toolPolicy.test.ts server/taskManager.test.ts server/toolGate.integration.test.ts src/workforce/storage.test.ts`, then `npm test` and `npx tsc -b`.
+- [ ] **5.2 UI: the review pane.** (Decision 5)
+  - Files: new `src/workforce/ui/ApprovalReview.tsx` (and its test), `src/workforce/ui/AgentDetail.tsx` (renders it; Approve is disabled until it has been opened; sends `digest`), `src/workforce/view.ts` (`formatReviewLines`, whitespace markers), its CSS, and `src/workforce/view.test.ts`.
+  - RED first:
+    - with a Write review, the pane shows the workspace id, path, size, digest prefix and every line, numbered (a 2,000-line file renders all 2,000 lines, with no ellipsis);
+    - Approve is disabled until "Show full change" is opened, and Deny is always enabled;
+    - an Edit shows "Replace" and "With" blocks and the all-occurrences flag;
+    - tabs and trailing spaces are marked;
+    - content containing `<script>` renders as text;
+    - with no review (the mock demo, Bash) the card is unchanged;
+    - approving posts `{ approvalId, decision, digest }`.
+  - Manual check (Chrome tools if available, otherwise noted in the report): with `WORKSPACE_ROOT` set, the `dev:full` mock demo's gated Write shows the pane, and approve and deny both work. Without a workspace, the card is unchanged. No test-only provider is wired into the app; the large-file cases are covered at the Vitest level.
+  - Verify: `npx vitest run src/workforce`, then `npm test`, `npx tsc -b` and `npm run build`.
+
+## Stage 6 — Deferred reliability items
+
+Branch: `fix/3b12-6-reliability`. It depends on 2.1 and 2.2.
+
+- [ ] **6.1 Hard links, the abort signal and checked paths on `GatedAction`.** (Decision 11)
+  - Files: `server/workspaces.ts` (`nlink > 1` → `unsafe_link` for an existing regular file), `server/toolPolicy.ts` (`DenyReason` plus text), `server/runtime/types.ts` (`GatedAction.signal`, `GatedAction.paths`), `server/toolGate.ts` (`deps.signal`; refuse `cancelled` if aborted just before `perform`), `server/taskManager.ts` (passes `run.abort.signal`), `server/runtime/mockProvider.ts` (unchanged behaviour), and the tests.
+  - RED first:
+    - `fs.linkSync(outside, ws/inside.txt)`: Read, Write and Edit of `inside.txt` are each denied `unsafe_link`;
+    - a link created after approval → `stale_approval` at use time;
+    - a file with `nlink === 1` is still fine;
+    - `perform` receives `action.signal`, and it is aborted when the task is cancelled during an async `perform`;
+    - the signal aborted between approval and `perform` → `cancelled`, and `perform` is not called;
+    - `action.paths` lists `{ arg: 'file_path', relative }` with no absolute path;
+    - an `expectTypeOf<GatedAction>()` check.
+  - Verify: `npx vitest run server/workspaces.test.ts server/toolPolicy.test.ts server/toolGate.test.ts server/toolGate.integration.test.ts server/runtime/mockProvider.test.ts`, then `npm test` and `npx tsc -b`.
+- [ ] **6.2 Open items: E2E gap and audit suppression record.**
+  - Files: `server/e2e/realServer.test.ts`, `server/audit.ts` and `server/audit.test.ts`.
+  - E2E: replace the vacuous `readdirSync` check with real assertions on `audit.log`:
+    - `tool.asked` for `Write` with the summary's relative path;
+    - `approval.decided`;
+    - no `tool.stale`;
+    - `pendingApproval.digest` is a 64-character hex value in the `task.waiting_for_approval` patch;
+    - the approval is posted with that digest.
+    - Keep the directory check, labelled "the mock's perform writes nothing".
+  - Audit: the suppressed-count record is written at the first audit write of any action in a new window and on `close()`, not only at the next rejected request.
+  - RED first:
+    - the new E2E assertions fail against the current mock (no digest);
+    - a test with 31 rejections followed by a `task.start` in the next window shows the `suppressed` record before `task.start`.
+  - Verify: `npx vitest run server/e2e server/audit.test.ts server/auditWiring.test.ts`, then `npm test`.
+
+## Stage 7 — Verification, security review, docs and report
+
+Branch: `docs/3b12-7-report`, stacked on the last merged stage.
+
+- [ ] **7.1 Full verification and Opus security review.**
   - Run and record:
-    - `npm test`;
-    - the new security tests;
-    - E1;
+    - `npm test` (count and files compared with 822/63);
     - `npx tsc -b`;
     - `npm run build`;
-    - `npm run server:build`, then `npm run server:start` with a curl smoke test;
+    - `npm run server:build`, then `node dist-server/index.js` with a curl smoke test (health has no path; a second instance on the same `DATA_DIR` is refused; state 401 then 200);
     - `npm run check:secrets`;
+    - `grep -r "api-token\|Bearer " dist/`;
     - `npm audit`.
-  - Then `/vo`: a browser-mock regression of the 3D office, editor and mock approval.
-  - Then `dev:full`: Live badge, approve, deny, cancel, and a server restart going Offline then Live. This uses the Chrome browser tools if available; otherwise I say so in the report.
-  - Then the README: auth, the gate, and the link to the sandbox doc.
-  - Write the final report, `docs/milestone-3b11-report.md`, in the 10-point format from plan.md, including the verdict. It states plainly that the **Claude Agent SDK is not installed** and **sandbox isolation is not implemented**.
-  - Update this file's Status line. Open the PR.
+  - Browser checks:
+    - `/vo` (mock: 3D office, editor, mock approval);
+    - `dev:full` (Live, approve with digest shown, deny, cancel, restart Offline then Live).
+    - These use the Chrome tools if available; otherwise I say so in the report.
+  - Then an **Opus security review** of the whole milestone diff (`git diff 1938776..HEAD`), focused on disclosure, the gate and digest binding, the review payload (truncation, rendering, Trojan Source), proxy canonicalisation, the lock, and redaction ReDoS.
+  - Each Critical or High finding is fixed in this branch with a RED test first. Medium and lower findings are fixed or ruled on in the report.
+  - Verify: all of the above green after the fixes.
+- [ ] **7.2 README, report and status.**
+  - Files: `README.md` and new `docs/milestone-3b12-report.md`.
+  - README changes:
+    - the health shape;
+    - the single-server lock;
+    - the review screen and digest;
+    - the new redaction shapes;
+    - links to `docs/gated-tools.md` and `docs/browser-auth.md`;
+    - "Known limitations" updated.
+  - The report uses the same 10 sections as `docs/milestone-3b11-report.md`: verdict, files changed, then one section each for disclosure, the gate and digest, auth and proxy, redaction, large-write review, reliability, checks and review outcome, and remaining blockers and deferred findings.
+  - Its banner states that **the Claude Agent SDK is not installed, no real execution exists, and sandbox isolation is not implemented**.
+  - Archive `plan.md` and this file under `docs/milestones/` as `milestone-3b12-plan.md` and `milestone-3b12-tasks.md`, matching 3B.1.1. Update this Status line. Open the PR.
+  - Verify: `npm test`. Check that the README and report links resolve (`ls` each linked path).
 
-## Questions for you
+## Questions (answered by the recommendations; applied as written)
 
-- **Q1: How the browser authenticates (the hard one; background above).**
-  - My recommendation: **A, the same-origin Vite proxy** that injects the header. The browser never holds the token, `EventSource` keeps working, and `/vo` is untouched.
-  - What the alternative costs: B (HttpOnly session cookie) is the right shape for a later VPS. It adds a manual pairing step after each token rotation and roughly two more tasks (session endpoint, Connect form, CORS credentials). We can add it in the VPS milestone on top of the same token.
-- **Q2: What "starts the actual backend server" means for the E2E test.**
-  - My recommendation: call the real `startServer()` in the test process on an ephemeral port, with real sockets, real HTTP and real SSE. Then smoke-test the built `server:start` bundle by hand in E2.
-  - What the alternative costs: spawning `node dist-server/index.js` from the test also covers `index.ts` and the bundle. It needs a build before the test, which is slower and flakier on process cleanup, and it adds a process-spawning test file to the guard's review.
-- **Q3: The mock approval demo when a task has no workspace.**
-  - Decision 1 makes Write need a workspace, and the default config has no workspaces, so today's demo button would be denied.
-  - My recommendation: with a workspace, the demo goes through the gate as a simulated Write (nothing written). Without one, it falls back to the simulated run's own approval (no tool request, summary "Simulated approval — nothing runs"), the same as the browser mock. The button keeps working in the default setup.
-  - What the alternative costs:
-    - Requiring a workspace for the demo is purer, but breaks the demo in the default `dev:full` setup until you configure `WORKSPACE_ROOT`.
-    - Auto-creating a demo workspace under `DATA_DIR` would contradict "DATA_DIR must not be inside a workspace".
+- **Q1: Where does the large-write review content live?**
+  - Recommendation: on `PendingApproval.review`, bounded at 32 KiB and refused above that (decision 4).
+  - What the alternative costs: an authenticated in-memory review endpoint keeps content out of `workforce.json` and the event buffer, but adds a route, a UI fetch with retry, and a browser-mock variant.
+- **Q2: How are two servers on one `DATA_DIR` handled?**
+  - Recommendation: a lock file with a liveness check, refusing the second server (decision 7).
+  - What the alternative costs: per-process token files still let two servers corrupt `workforce.json` and `audit.log`.
+- **Q3: Does health hide status codes behind auth?**
+  - Recommendation: no. Allowlisted codes only, never messages (decision 1).
+  - What the alternative costs: a second health shape and a UI change, for codes that are not sensitive.
+- **Q4: Which `-p` forms are redacted?**
+  - Recommendation: only the attached MySQL-family form and `sshpass -p` (decision 10).
+  - What the alternative costs: redacting every `-p VALUE` hides ports, `mkdir -p` targets and Docker port maps in every log and summary, and makes those Bash summaries `not_reviewable`.
 
 ## Decisions
 
-Answered 2026-10-31 ("go with recommendations"):
-
-- **Q1:** Option A, the same-origin Vite proxy that injects the header.
-- **Q2:** call the real `startServer()` in the test process on an ephemeral port; smoke-test the built bundle by hand in E2.
-- **Q3:** with a workspace the demo goes through the gate as a simulated Write; without one it falls back to the simulated run's own approval.
+Applied 2026-10-31 as written above (no open questions): Q1 review payload on `PendingApproval`, Q2 `DATA_DIR` lock file, Q3 allowlisted codes in open health, Q4 narrow `-p` rule.

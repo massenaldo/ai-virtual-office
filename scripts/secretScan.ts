@@ -12,6 +12,7 @@ export function findSecretLeaks(files: BuiltFile[], keyValue: string | undefined
     if (keyValue !== undefined && keyValue.length >= 8 && text.includes(keyValue)) problems.push(`${path}: contains the ANTHROPIC_API_KEY value`)
     if (tokenValue !== undefined && tokenValue.length >= 8 && text.includes(tokenValue)) problems.push(`${path}: contains the API token value`)
     if (KEY_SHAPE.test(text)) problems.push(`${path}: contains an sk-ant- key`)
+    if (text.includes('api-token') && !SERVER_BUNDLE.has(path)) problems.push(`${path}: mentions the api-token file (only the server bundle may)`)
     if (text.includes('ANTHROPIC_API_KEY') && !SERVER_BUNDLE.has(path)) problems.push(`${path}: mentions ANTHROPIC_API_KEY (only dist-server/index.js and its source map may)`)
   }
   return problems

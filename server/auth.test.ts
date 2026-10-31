@@ -1,5 +1,6 @@
 import { readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { inspect } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import { AUDIT_FILE } from './audit'
 import { MIN_TOKEN_CHARS, resolveApiToken, TOKEN_FILE, tokenMatches } from './auth'
@@ -143,6 +144,11 @@ describe('the token never leaks', () => {
     seen.push(JSON.stringify(await rawRequest(s.url, { path: '/api/state', noAuth: true })))
     await new Promise((r) => setTimeout(r, 100))
     seen.push(readFileSync(join(s.dataDir, AUDIT_FILE), 'utf8'), readFileSync(join(s.dataDir, 'workforce.json'), 'utf8'), rec.lines.join('\n'))
+    // The refusal of a second server and every printable form of the in-process objects stay clean too.
+    const second = parseConfig({ PORT: '0', DATA_DIR: s.dataDir, API_TOKEN: TEST_TOKEN })
+    if (!second.ok) throw new Error(second.errors.join('; '))
+    const refusal = await startServer(second.config, { log: rec }).catch((e: Error) => e.message)
+    seen.push(String(refusal), JSON.stringify(s.app.apiToken), inspect(s.app.apiToken), JSON.stringify(s.app.config), inspect(s.app.config, { depth: 6 }), rec.lines.join('\n'))
     for (const text of seen) expect(text).not.toContain(TEST_TOKEN)
     expect(readFileSync(join(s.dataDir, AUDIT_FILE), 'utf8')).toContain('auth=configured')
   })

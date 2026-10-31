@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createApiGate, type GateRequest } from './apiProxy'
+import { apiProxyFor, createApiGate, type GateRequest } from './apiProxy'
 
 const TOKEN = 'proxy-token-0123456789-abcdefghijklmnopqrstuvwxyz'
 
@@ -35,11 +35,30 @@ describe('createApiGate', () => {
   })
 
   it('does not touch anything outside /api/', () => {
-    for (const url of ['/', '/src/main.tsx', '/apix', '/@vite/client']) {
+    for (const url of ['/', '/src/main.tsx', '/@vite/client', '/assets/index.js', '/apple.png.map']) {
       const { req, next } = run(url, { authorization: 'keep', cookie: 'keep' })
       expect(next).toHaveBeenCalledOnce()
       expect(req.headers).toEqual({ authorization: 'keep', cookie: 'keep' })
     }
+  })
+
+  it.each(['/api', '/apiX', '/api?x=1', '/API/state', '/Api/state', '/%61pi/state', '/api%2Fstate', '/%2Fapi/state', '//api/state', '/api/%2e%2e/x', '/api/../x', '/api//state', '/api%5cstate'])('answers %s with 404 and neither forwards nor adds a token', (url) => {
+    const { req, res, next } = run(url, SAME)
+    expect(next).not.toHaveBeenCalled()
+    expect(res.statusCode).toBe(404)
+    expect(req.headers.authorization).toBeUndefined()
+    expect(JSON.parse(res.body)).toEqual({ error: 'Not found.' })
+  })
+
+  it.each(['/api/state', '/api/events?lastEventId=b1%3A5', '/api/agents/agent-demo-pm/tasks', '/api/tasks/t-1/approval'])('still forwards %s with the token', (url) => {
+    const { req, next } = run(url, SAME)
+    expect(next).toHaveBeenCalledOnce()
+    expect(req.headers.authorization).toBe(`Bearer ${TOKEN}`)
+  })
+
+  it('registers the proxy only for the exact /api/ prefix', () => {
+    expect(Object.keys(apiProxyFor({ VITE_WORKFORCE_API_URL: '/' })!.proxy)).toEqual(['^/api/'])
+    expect(apiProxyFor({})).toBeNull()
   })
 
   it('answers 503 when no token is available, without forwarding', () => {

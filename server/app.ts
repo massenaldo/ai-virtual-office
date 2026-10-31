@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { AddressInfo } from 'node:net'
 import type { MOCK_TIMINGS } from '../src/workforce/runtime/mockRuntime'
 import { resolveApiToken, type ApiToken } from './auth'
+import { acquireDataDirLock } from './dataDirLock'
 import { openAuditLog, type AuditInput, type AuditLog } from './audit'
 import type { ServerConfig } from './config'
 import { deriveEvents } from './deriveEvents'
@@ -34,7 +35,7 @@ export type AppDeps = {
   responseHeaders?: (req: IncomingMessage) => Record<string, string>
 }
 
-export type App = { config: ServerConfig; apiToken: ApiToken; store: WorkforceStore; audit: AuditLog; events: EventLog; provider: ServerRuntimeProvider; manager: TaskManager; startedAt: string; streams: Set<ServerResponse>; handler: (req: IncomingMessage, res: ServerResponse) => void; closeStreams(): void }
+export type App = { config: ServerConfig; apiToken: ApiToken; store: WorkforceStore; audit: AuditLog; events: EventLog; provider: ServerRuntimeProvider; manager: TaskManager; startedAt: string; streams: Set<ServerResponse>; handler: (req: IncomingMessage, res: ServerResponse) => void; closeStreams(): void; releaseLock(): void }
 
 export type RunningServer = { url: string; port: number; app: App; close(): Promise<void> }
 
@@ -60,23 +61,30 @@ export function createApp(config: ServerConfig, deps: AppDeps = {}): App {
   const log = redactingLogger(deps.log ?? consoleLogger)
   const now = deps.now ?? (() => new Date().toISOString())
   const events = new EventLog({ capacity: config.eventBufferSize, now, bootId: deps.bootId, log })
-  // Every commit, from any path, becomes typed events in the same tick, so state and log can't disagree.
-  const store = openWorkforceStore({ dataDir: config.dataDir, now, log, writeFile: deps.storeWriteFile, onCommit: (before, after) => { events.append(deriveEvents(before, after)) } })
-  // The store opens first: it creates DATA_DIR, where the audit log lives.
-  const audit = deps.audit ?? openAuditLog({ dataDir: config.dataDir, maxBytes: config.auditLogMaxBytes, now, log, hide: config.workspaceRoot ? [config.workspaceRoot] : [] })
-  const apiToken = resolveApiToken({ configured: config.apiToken, dataDir: config.dataDir })
-  const provider = deps.provider ?? (config.runtime === 'mock' ? new ServerMockProvider({ timings: deps.mockTimings }) : new ClaudeAgentRuntimeProvider({ credentialsConfigured: config.credentialsConfigured }))
-  const manager = new TaskManager({ store, provider, config, policy: toolPolicyFrom(config), now, log, onLifecycle: (e) => audit.write(toAuditInput(e)) })
-  const streams = new Set<ServerResponse>()
-  const startedAt = now()
-  const routes = createRoutes({ config, store, events, provider, manager, now, startedAt, heartbeatMs: deps.heartbeatMs ?? HEARTBEAT_MS, streams, log, maxStreams: deps.maxStreams, audit })
-  const onReject = (r: { requestId: string; code: string; method: string; path: string }) => audit.write({ action: 'request.rejected', actor: 'api', requestId: r.requestId, reason: r.code, detail: `${r.method} ${r.path}` })
-  const guards = [...createSecurityGuards({ allowedOrigins: config.allowedOrigins, apiToken: apiToken.value, onReject }), ...(deps.guards ?? [])]
-  const responseHeaders = (req: IncomingMessage) => ({ ...securityHeaders(req, config.allowedOrigins), ...(deps.responseHeaders?.(req) ?? {}) })
-  const handler = createRouter({ routes, guards, responseHeaders, log, onRejected: onReject })
-  return {
-    config, apiToken, store, audit, events, provider, manager, startedAt, streams, handler,
-    closeStreams: () => { for (const res of streams) res.end(); streams.clear() },
+  // One server per DATA_DIR: taken before anything in the folder is opened or rewritten, released by close().
+  const lock = acquireDataDirLock(config.dataDir)
+  try {
+    // Every commit, from any path, becomes typed events in the same tick, so state and log can't disagree.
+    const store = openWorkforceStore({ dataDir: config.dataDir, now, log, writeFile: deps.storeWriteFile, onCommit: (before, after) => { events.append(deriveEvents(before, after)) } })
+    // The store opens first: it creates DATA_DIR, where the audit log lives.
+    const audit = deps.audit ?? openAuditLog({ dataDir: config.dataDir, maxBytes: config.auditLogMaxBytes, now, log, hide: config.workspaceRoot ? [config.workspaceRoot] : [] })
+    const apiToken = resolveApiToken({ configured: config.apiToken?.reveal() ?? null, dataDir: config.dataDir })
+    const provider = deps.provider ?? (config.runtime === 'mock' ? new ServerMockProvider({ timings: deps.mockTimings }) : new ClaudeAgentRuntimeProvider({ credentialsConfigured: config.credentialsConfigured }))
+    const manager = new TaskManager({ store, provider, config, policy: toolPolicyFrom(config), now, log, onLifecycle: (e) => audit.write(toAuditInput(e)) })
+    const streams = new Set<ServerResponse>()
+    const startedAt = now()
+    const routes = createRoutes({ config, store, events, provider, manager, now, startedAt, heartbeatMs: deps.heartbeatMs ?? HEARTBEAT_MS, streams, log, maxStreams: deps.maxStreams, audit })
+    const onReject = (r: { requestId: string; code: string; method: string; path: string }) => audit.write({ action: 'request.rejected', actor: 'api', requestId: r.requestId, reason: r.code, detail: `${r.method} ${r.path}` })
+    const guards = [...createSecurityGuards({ allowedOrigins: config.allowedOrigins, apiToken: apiToken.value, onReject }), ...(deps.guards ?? [])]
+    const responseHeaders = (req: IncomingMessage) => ({ ...securityHeaders(req, config.allowedOrigins), ...(deps.responseHeaders?.(req) ?? {}) })
+    const handler = createRouter({ routes, guards, responseHeaders, log, onRejected: onReject })
+    return {
+        config, apiToken, store, audit, events, provider, manager, startedAt, streams, handler, releaseLock: lock.release,
+      closeStreams: () => { for (const res of streams) res.end(); streams.clear() },
+    }
+  } catch (error) {
+    lock.release()
+    throw error
   }
 }
 
@@ -112,6 +120,7 @@ export async function startServer(config: ServerConfig, deps: AppDeps = {}): Pro
       app.closeStreams()
       await app.manager.dispose()
       await stop()
+      app.releaseLock()
     },
   }
 }

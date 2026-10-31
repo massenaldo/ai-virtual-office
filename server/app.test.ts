@@ -54,6 +54,16 @@ describe('app', () => {
     expect((await s.api('GET', '/api/state')).status).toBe(200)
   })
 
+  it('refuses a second server on the same DATA_DIR and leaves the first one working', async () => {
+    const dataDir = tempDataDir()
+    const first = await startTestServer({ DATA_DIR: dataDir, API_TOKEN: '' })
+    running = first
+    const token = readFileSync(join(dataDir, 'api-token'), 'utf8')
+    await expect(startServer(testConfig({ DATA_DIR: dataDir }), { log: silentLogger })).rejects.toThrow('Another server is using DATA_DIR.')
+    expect(readFileSync(join(dataDir, 'api-token'), 'utf8')).toBe(token)
+    expect((await first.api('GET', '/api/state')).status).toBe(200)
+  })
+
   it('binds 127.0.0.1 by default', async () => {
     const s = await startServer(testConfig())
     running = s

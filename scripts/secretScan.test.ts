@@ -32,6 +32,10 @@ describe('findSecretLeaks', () => {
     expect(findSecretLeaks([{ path: 'dist/a.js', text: 'short' }], undefined, 'short')).toEqual([])
   })
 
+  it('flags the token file name in anything but the server bundle', () => {
+    expect(findSecretLeaks([{ path: 'dist/assets/index.js', text: 'x api-token y' }, { path: 'dist-server/index.js', text: 'api-token' }], undefined)).toEqual(['dist/assets/index.js: mentions the api-token file (only the server bundle may)'])
+  })
+
   it('ignores a key shorter than 8 characters', () => {
     expect(findSecretLeaks([{ path: 'dist/a.js', text: 'short abc123' }], 'abc123')).toEqual([])
   })

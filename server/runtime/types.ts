@@ -1,6 +1,5 @@
 import type { MockDemoControls, RuntimeAvailability, RuntimeEvent } from '../../src/workforce/runtime/types'
 import type { ActivitySource, Agent, AgentTask, ApprovalDecision, TaskRuntime } from '../../src/workforce/types'
-import type { ToolPolicy } from '../toolPolicy'
 import type { ResolvedWorkspace } from '../workspaces'
 
 // Runtime contract v2, server side. It reuses the browser's RuntimeEvent so one event stream feeds applyRuntimeEvent.
@@ -12,16 +11,31 @@ export type ToolGateResult =
   | { behavior: 'allow'; outcome: 'allowed' | 'approved' }
   | { behavior: 'deny'; outcome: 'denied_by_policy' | 'denied' | 'expired' | 'cancelled'; message: string }
 
+/** What `perform` receives: a deep-frozen copy of the request's input and the workspace as it was checked just before. */
+export type GatedAction = { readonly tool: string; readonly input: unknown; readonly workspace: ResolvedWorkspace | null }
+
+/** `stale_approval`: the action changed (a path now resolves elsewhere, the workspace moved) between approval and use. */
+export type GatedOutcome<T> =
+  | { behavior: 'allow'; outcome: 'allowed' | 'approved'; value: T }
+  | { behavior: 'deny'; outcome: 'denied_by_policy' | 'denied' | 'expired' | 'cancelled' | 'stale_approval'; message: string }
+
+/**
+ * The only way a runtime may use a tool. `perform` runs only after the server's policy and, for write, execute and
+ * network tools, a human approved exactly this action, re-checked immediately before it runs. The runtime never sees the
+ * policy, the workspace path or an approval id, so it cannot use a tool any other way through this contract.
+ */
+export interface ToolGate {
+  use<T>(request: ToolRequest, perform: (action: GatedAction) => Promise<T> | T): Promise<GatedOutcome<T>>
+}
+
 /** What a runtime needs to run one task. */
 export type StartContext = {
   agent: Agent
   signal: AbortSignal
   /** The resolved workspace; path is a real path and stays on the server. null when the task has none. */
   workspace: ResolvedWorkspace | null
-  /** The policy in force. A provider may narrow it, never widen it. */
-  tools: ToolPolicy
-  /** The only way to get permission to use a tool. Bound to this task. Settles exactly once. */
-  requestToolApproval: (request: ToolRequest) => Promise<ToolGateResult>
+  /** The only way to use a tool. Bound to this task. */
+  tools: ToolGate
   /** Writes a runtime.note audit record for this task (scrubbed and truncated). */
   audit: (note: string) => void
 }

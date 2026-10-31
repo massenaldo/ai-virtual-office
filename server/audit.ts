@@ -16,7 +16,7 @@ export const REJECTED_PER_MINUTE = 30
 export type AuditAction =
   | 'config.startup' | 'task.start' | 'task.cancel' | 'task.force_cancelled' | 'task.timeout'
   | 'approval.requested' | 'approval.decided' | 'approval.timeout'
-  | 'tool.allowed' | 'tool.denied' | 'tool.asked' | 'workspace.rejected' | 'request.rejected' | 'runtime.note'
+  | 'tool.allowed' | 'tool.denied' | 'tool.asked' | 'tool.stale' | 'workspace.rejected' | 'request.rejected' | 'runtime.note'
 
 export type AuditActor = 'api' | 'system' | 'runtime'
 

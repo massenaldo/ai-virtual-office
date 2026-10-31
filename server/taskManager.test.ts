@@ -6,7 +6,7 @@ import type { AgentTask } from '../src/workforce/types'
 import { silentLogger } from './log'
 import { ClaudeAgentRuntimeProvider } from './runtime/claudeAgent'
 import { ServerMockProvider } from './runtime/mockProvider'
-import type { ServerRuntimeProvider } from './runtime/types'
+import type { ServerRuntimeProvider, StartContext } from './runtime/types'
 import { openWorkforceStore, type WorkforceStore } from './store'
 import { TaskManager, type LifecycleAction, type TaskManagerOptions } from './taskManager'
 import { DEFAULT_ALLOWED_TOOLS } from './toolPolicy'
@@ -462,10 +462,16 @@ describe('tool approvals', () => {
     return { m, id, ctx: fake.starts[0].ctx }
   }
   const write = { tool: 'Write', input: { file_path: 'notes.md', content: 'hello' } }
+  /** The gate's answer without the value perform produced, so the approval outcomes read as before. */
+  async function gate(ctx: StartContext, request: { tool: string; input: unknown }) {
+    const r = await ctx.tools.use(request, () => 'done')
+    if (r.behavior === 'allow') { const { value: _value, ...rest } = r; return rest }
+    return r
+  }
 
   it('allows a read inside the workspace without asking', async () => {
     const { id, ctx } = await running()
-    await expect(ctx.requestToolApproval({ tool: 'Read', input: { file_path: 'notes.md' } })).resolves.toEqual({ behavior: 'allow', outcome: 'allowed' })
+    await expect(gate(ctx, { tool: 'Read', input: { file_path: 'notes.md' } })).resolves.toEqual({ behavior: 'allow', outcome: 'allowed' })
     expect(task(id).status).toBe('running')
     expect(events.find((e) => e.action === 'tool.allowed')).toMatchObject({ actor: 'runtime', tool: 'Read', decision: 'allow', reason: 'read_only', detail: 'Read notes.md' })
   })
@@ -473,10 +479,10 @@ describe('tool approvals', () => {
   it('denies unknown, unlisted and outside tools without changing state', async () => {
     const { ctx } = await running()
     const before = store.state
-    await expect(ctx.requestToolApproval({ tool: 'Rm', input: {} })).resolves.toEqual({ behavior: 'deny', outcome: 'denied_by_policy', message: 'Tool "Rm" denied by policy: unknown tool.' })
+    await expect(gate(ctx, { tool: 'Rm', input: {} })).resolves.toEqual({ behavior: 'deny', outcome: 'denied_by_policy', message: 'Tool "Rm" denied by policy: unknown tool.' })
     expect(store.state).toBe(before)
-    await expect(ctx.requestToolApproval({ tool: 'Bash', input: { command: 'ls' } })).resolves.toMatchObject({ message: 'Tool "Bash" denied by policy: not in ALLOWED_TOOLS.' })
-    await expect(ctx.requestToolApproval({ tool: 'Read', input: { file_path: '/etc/passwd' } })).resolves.toMatchObject({ message: 'Tool "Read" denied by policy: path is outside the task workspace.' })
+    await expect(gate(ctx, { tool: 'Bash', input: { command: 'ls' } })).resolves.toMatchObject({ message: 'Tool "Bash" denied by policy: not in ALLOWED_TOOLS.' })
+    await expect(gate(ctx, { tool: 'Read', input: { file_path: '/etc/passwd' } })).resolves.toMatchObject({ message: 'Tool "Read" denied by policy: path is outside the task workspace.' })
     expect(store.state).toBe(before)
     const denied = events.filter((e) => e.action === 'tool.denied')
     expect(denied).toHaveLength(3)
@@ -486,7 +492,7 @@ describe('tool approvals', () => {
   it('asks for a write and waits for approval', async () => {
     const { m, id, ctx } = await running()
     let settled: unknown = 'pending'
-    void ctx.requestToolApproval(write).then((r) => { settled = r })
+    void gate(ctx, write).then((r) => { settled = r })
     expect(task(id)).toMatchObject({ status: 'waiting_for_approval', pendingApproval: { tool: 'Write', summary: 'Write notes.md (5 B)' } })
     expect(agent().status).toBe('waiting')
     await tick()
@@ -501,7 +507,7 @@ describe('tool approvals', () => {
 
   it('a human deny resolves denied and the task keeps running', async () => {
     const { m, id, ctx } = await running()
-    const p = ctx.requestToolApproval(write)
+    const p = gate(ctx, write)
     m.decideApproval(id, task(id).pendingApproval!.id, 'deny')
     await expect(p).resolves.toEqual({ behavior: 'deny', outcome: 'denied', message: 'Denied by a human reviewer.' })
     expect(task(id).status).toBe('running')
@@ -509,7 +515,7 @@ describe('tool approvals', () => {
 
   it('approval timeout resolves expired and fails the task', async () => {
     const { m, id, ctx } = await running({ approvalTimeoutMs: 2000 })
-    const p = ctx.requestToolApproval(write)
+    const p = gate(ctx, write)
     const approvalId = task(id).pendingApproval!.id
     await vi.advanceTimersByTimeAsync(2000)
     await expect(p).resolves.toEqual({ behavior: 'deny', outcome: 'expired', message: 'No approval decision within 2 s' })
@@ -527,7 +533,7 @@ describe('tool approvals', () => {
     it('releases a waiting request as cancelled exactly once', async () => {
       const { m, id, ctx } = await running(extra)
       const spy = vi.fn()
-      void ctx.requestToolApproval(write).then(spy)
+      void gate(ctx, write).then(spy)
       expect(task(id).status).toBe('waiting_for_approval')
       await act(m, id)
       await tick()
@@ -542,19 +548,18 @@ describe('tool approvals', () => {
   it('a second request while one is pending is denied', async () => {
     const { id, ctx } = await running()
     const first = vi.fn()
-    void ctx.requestToolApproval(write).then(first)
-    await expect(ctx.requestToolApproval(write)).resolves.toEqual({ behavior: 'deny', outcome: 'denied_by_policy', message: 'Tool "Write" denied by policy: another tool approval is already pending for this task.' })
+    void gate(ctx, write).then(first)
+    await expect(gate(ctx, write)).resolves.toEqual({ behavior: 'deny', outcome: 'denied_by_policy', message: 'Tool "Write" denied by policy: another tool approval is already pending for this task.' })
     await tick()
     expect(first).not.toHaveBeenCalled()
     expect(task(id).status).toBe('waiting_for_approval')
   })
 
   it('a request for a task that is not running resolves cancelled', async () => {
-    const { m, id, ctx } = await running()
+    const { id, ctx } = await running()
     const cancelled = { behavior: 'deny', outcome: 'cancelled', message: 'The task is no longer running.' }
-    await expect(m.requestToolApproval('task-x', write)).resolves.toEqual(cancelled)
     fake.emit({ type: 'completed', taskId: id, summary: 'done' })
-    await expect(ctx.requestToolApproval(write)).resolves.toEqual(cancelled)
+    await expect(gate(ctx, write)).resolves.toEqual(cancelled)
   })
 
   it('hides workspace paths in runtime output', async () => {
@@ -598,7 +603,7 @@ describe('tool approvals', () => {
 
   it('state never contains the workspace path', async () => {
     const { ctx } = await running()
-    void ctx.requestToolApproval({ tool: 'Write', input: { file_path: join(ws.path('sandbox'), 'notes.md'), content: 'x' } })
+    void gate(ctx, { tool: 'Write', input: { file_path: join(ws.path('sandbox'), 'notes.md'), content: 'x' } })
     expect(JSON.stringify(store.state)).not.toContain(ws.root)
   })
 

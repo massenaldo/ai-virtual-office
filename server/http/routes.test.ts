@@ -191,6 +191,18 @@ describe('workspaces', () => {
     for (const b of bodies) expect(JSON.stringify(b)).not.toContain(ws.root)
   })
 
+  it('the demo approval in a workspace goes through the gate and writes nothing', async () => {
+    const id = (await w.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'Build API', workspaceId: 'sandbox' })).body.task.id as string
+    await until(async () => (await w.api('GET', '/api/state')).body.state.tasks[0].status === 'running')
+    expect((await w.api('POST', `/api/demo/tasks/${id}/request-approval`)).status).toBe(202)
+    const pending = (await w.api('GET', '/api/state')).body.state.tasks[0].pendingApproval
+    expect(pending).toMatchObject({ tool: 'Write', summary: 'Write simulated.txt (39 B)' })
+    await w.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'deny' })
+    await until(async () => (await w.api('GET', '/api/state')).body.state.tasks[0].status === 'failed')
+    expect((await w.api('GET', '/api/state')).body.state.tasks[0].errorMessage).toBe('Approval denied (simulated)')
+    expect(readdirSync(ws.path('sandbox'))).toEqual([])
+  })
+
   it('starts a task in a workspace', async () => {
     const r = await w.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'Build API', workspaceId: 'sandbox' })
     expect(r.status).toBe(202)

@@ -163,7 +163,8 @@ export function formatReviewLines(text: string): ReviewLine[] {
     const trail = /[ ]+$/.exec(body)?.[0] ?? ''
     const main = trail ? body.slice(0, -trail.length) : body
     const segments: ReviewSegment[] = []
-    for (const part of main.split(/(\t)/)) if (part !== '') segments.push(part === '\t' ? { kind: 'tab', text: part } : { kind: 'text', text: part })
+    // Every tab and every carriage return is its own marked segment, wherever it sits in the line.
+    for (const part of main.split(/([\t\r])/)) if (part !== '') segments.push(part === '\t' ? { kind: 'tab', text: part } : part === '\r' ? { kind: 'cr', text: part } : { kind: 'text', text: part })
     if (trail) segments.push({ kind: 'trail', text: trail })
     if (cr) segments.push({ kind: 'cr', text: '\r' })
     return { no: i + 1, segments }

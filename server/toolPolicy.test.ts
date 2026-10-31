@@ -149,11 +149,27 @@ describe('decideToolUse', () => {
       ['a bell', 'a\u0007b'],
       ['a C1 control', 'a\u0085b'],
       ['a null', 'a\u0000b'],
+      ['a line separator', 'a\u2028b'],
+      ['a paragraph separator', 'a\u2029b'],
+      ['a zero-width space', 'a\u200bb'],
+      ['a left-to-right mark', 'a\u200eb'],
+      ['a byte order mark', 'a\ufeffb'],
+      ['a soft hyphen', 'a\u00adb'],
+      ['a tag character', 'a\u{e0041}b'],
+      ['a variation selector', 'a\ufe0fb'],
+      ['a Hangul filler', 'a\u3164b'],
+      ['a lone surrogate', 'a\ud800b'],
       ['a secret', `key ${secret}`],
       ['a key=value secret', 'api_key=abc123456'],
     ])('refuses content with %s', (_name, content) => {
       expect(decide('Write', { file_path: 'f.txt', content })).toEqual(deny('not_reviewable'))
       expect(decide('Edit', { file_path: 'f.txt', old_string: 'x', new_string: content })).toEqual(deny('not_reviewable'))
+    })
+
+    it('refuses invisible and reordering characters in a command or any other approval summary too', () => {
+      for (const bad of ['\u202e', '\u2028', '\u200b', '\ufeff', '\u0085']) expect(decide('Bash', { command: `echo a${bad}b` })).toEqual(deny('not_reviewable'))
+      expect(decide('WebSearch', { query: 'a\u202eb' })).toEqual(deny('not_reviewable'))
+      expect(decide('Bash', { command: 'echo 1\nls -l' })).toMatchObject({ decision: 'ask', summary: 'Run command: echo 1 ls -l' })
     })
 
     it('shows tabs, newlines and carriage returns as they are', () => {

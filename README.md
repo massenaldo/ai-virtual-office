@@ -97,14 +97,14 @@ A small Node server (`server/`, no framework, no runtime dependencies) owns agen
 
 | Method and path | Purpose |
 |---|---|
-| `GET /api/health` | Runtime, availability, persistence and audit status. The only route that needs no token |
+| `GET /api/health` | Runtime, availability, and persistence and audit status as codes (`EACCES`, `ENOSPC`, `write_failed`, …), never messages or paths. The only route that needs no token |
 | `GET /api/state` | Full state and `lastEventId` |
 | `GET /api/workspaces` | Workspace ids (never paths) |
 | `GET /api/events` | Server-sent events; resume with `Last-Event-ID` or `?lastEventId=` |
 | `POST /api/agents`, `PATCH` / `DELETE /api/agents/:id` | Create, update, remove an agent |
 | `PUT /api/agents/:id/desk` | Assign or clear a desk |
 | `POST /api/agents/:id/tasks` | Start a task (`title`, `description`, optional `workspaceId`) |
-| `POST /api/tasks/:id/cancel`, `POST /api/tasks/:id/approval` | Cancel; approve or deny (`approvalId`, `decision`) |
+| `POST /api/tasks/:id/cancel`, `POST /api/tasks/:id/approval` | Cancel; approve or deny (`approvalId`, `decision`, and the pending approval's `digest` when it has one, or the answer is 409) |
 | `POST /api/demo/...` | Mock-only demo controls: request approval, force error, restore demo agents |
 
 **Events.** Ids are `<boot>:<seq>`. Types: `task.queued`, `task.started`, `agent.status_changed`, `agent.message`, `task.progress`, `task.waiting_for_approval`, `task.completed`, `task.failed`, `task.cancelled`, `state.changed`, `state.reset`. Each change event carries a patch of the records it touched. `state.reset` means the client's id is too old, from another server run, or ahead of the server: reload `GET /api/state`.
@@ -113,7 +113,7 @@ A small Node server (`server/`, no framework, no runtime dependencies) owns agen
 - Bound to loopback; `Host` and `Origin` allowlists (421 / 403); JSON-only mutations (415); CORS only for allowed origins; security headers.
 - API token: every route except health, including the event stream and requests with no `Origin`, needs the bearer token (401 otherwise). Compared in constant time; never accepted in a URL; never logged, audited, returned or compiled into the bundle (`check:secrets` looks for it).
 - Workspaces are named by id; the browser never sends a path. Paths are checked against the workspace real path (symlinks resolved, `..` refused, a path through a regular file refused) and the root stored at startup. Write and Edit always need a workspace; without one the mock demo falls back to the simulated run's own approval.
-- Tool gate: a runtime can only use a tool through `ctx.tools.use(request, perform)`. The input is a frozen copy, the approval is for that copy, and a digest of task, workspace, tool and input plus the path and workspace are re-checked right before `perform` runs (otherwise `stale_approval`, audited as `tool.stale`). A Write or Edit approval carries a review: the exact content or change (up to 32 KiB), the workspace, the file and the action digest, shown in a pane with numbered lines and visible tabs and trailing spaces. Approve stays disabled until the pane has been opened. Anything that cannot be shown whole (too big, control or bidi characters, a secret, the workspace path) is refused instead of approved. Only the mock may raise an approval of its own.
+- Tool gate: a runtime can only use a tool through `ctx.tools.use(request, perform)`. The input is a frozen copy, the approval is for that copy, and a digest of task, workspace, tool and input plus the path and workspace are re-checked right before `perform` runs (otherwise `stale_approval`, audited as `tool.stale`). A Write or Edit approval carries a review: the exact content or change (up to 32 KiB), the workspace, the file and the action digest, shown in a pane with numbered lines and visible tabs, trailing spaces and carriage returns. Anything that cannot be shown whole is refused instead of approved: too big, control characters, invisible or reordering characters (bidi, zero-width, line and paragraph separators, byte order mark, tag characters, variation selectors, lone surrogates; this also refuses emoji joined with a zero-width joiner), a secret, or the workspace path. The same invisible-character refusal applies to every other approval summary. "Approve stays disabled until the pane is opened" is a nudge in the page, not something the server enforces: the server only requires the right digest. Only the mock may raise an approval of its own.
 - Tool policy: unknown tools denied; read tools allowed inside a workspace; write, execute and network tools always need a human approval whose summary shows the whole action (otherwise denied); no bypass mode.
 - Secrets are redacted from logs, state, events and the audit log (API keys, Bearer and Basic credentials, URL passwords, GitHub, AWS, Slack, Google and JWT tokens, private key blocks, `--password`-style arguments, `curl -u`, `mysql -pSECRET`, `sshpass -p`); workspace paths are hidden in runtime output; `npm run check:secrets` scans the built bundles.
 - `data/audit.log` (JSONL, mode 0600, rotated at 5 MB) records lifecycle, tool and rejected-request events, never bodies.
@@ -175,7 +175,8 @@ Add `?stats` to the URL (for example http://localhost:5173/?stats) to show a sma
 - Lighting has no real-time ambient occlusion or post-processing; soft contact shadows stand in for it.
 - `npm run build` warns that the main JavaScript chunk is larger than 500 kB (three.js); the app is not code-split yet.
 - **Agents are a simulation**, in the browser and on the backend. No real Claude or Agent SDK execution exists yet; task results are canned text that says so.
-- Backend mode has no login, one server process and one JSON file; it is meant for the local machine only.
+- Backend mode has no login beyond the token, one server process per data folder (a lock refuses a second one) and one JSON file; it is meant for the local machine only. The review shows what a Write or Edit would do, but no real tool runs yet and no sandbox exists.
+- Design documents, none of them built: [`docs/gated-tools.md`](docs/gated-tools.md) (in-process Write/Edit tools for the SDK), [`docs/browser-auth.md`](docs/browser-auth.md) (session cookie), [`docs/sandbox-architecture.md`](docs/sandbox-architecture.md) (Docker).
 - Agent data is per browser and per origin, like the layout: `localhost:5173` and `127.0.0.1:5173` keep separate agents.
 - One task per agent at a time, with no queue. Finished tasks are never trimmed, only activity is.
 - In the floor plan, a room's label can sit over the centre-row desks and hide the selected agent's desk outline; the marker's ring still shows which desk it is.

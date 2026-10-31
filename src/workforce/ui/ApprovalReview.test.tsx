@@ -18,6 +18,10 @@ describe('formatReviewLines', () => {
     expect(lines.at(-1)).toMatchObject({ no: 2000, segments: [{ kind: 'text', text: 'line 2000' }] })
   })
 
+  it('marks a carriage return in the middle of a line, not only at its end', () => {
+    expect(formatReviewLines('a\rb')[0].segments).toEqual([{ kind: 'text', text: 'a' }, { kind: 'cr', text: '\r' }, { kind: 'text', text: 'b' }])
+  })
+
   it('does not count the empty piece after a final newline, and shows nothing for empty text', () => {
     expect(formatReviewLines('a\nb\n')).toHaveLength(2)
     expect(formatReviewLines('')).toEqual([])

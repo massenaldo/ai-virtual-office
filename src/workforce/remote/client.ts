@@ -1,6 +1,9 @@
 import { MUTATION_HEADERS } from '../api'
 
 /** status is null when no response arrived (network failure or abort). */
+/** What a 401 means to the person running the app, whatever the server's own wording. */
+export const NOT_AUTHORIZED = 'Not authorized. Start the app with npm run dev:full, or run npm run server and npm run dev with VITE_WORKFORCE_API_URL=/.'
+
 export type ApiResult<T> = { ok: true; status: number; body: T } | { ok: false; status: number | null; error: string }
 export type MutationMethod = 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 export type ApiClient = {
@@ -19,7 +22,7 @@ export function createApiClient(opts: { baseUrl: string; fetch?: typeof fetch })
     try {
       response = await doFetch(baseUrl + path, init)
     } catch {
-      return { ok: false, status: null, error: `Can't reach the backend at ${baseUrl}.` }
+      return { ok: false, status: null, error: baseUrl === '' ? "Can't reach the backend." : `Can't reach the backend at ${baseUrl}.` }
     }
     let parsed: unknown
     try {
@@ -29,6 +32,7 @@ export function createApiClient(opts: { baseUrl: string; fetch?: typeof fetch })
       parsed = undefined
     }
     if (response.ok) return { ok: true, status: response.status, body: parsed as T }
+    if (response.status === 401) return { ok: false, status: 401, error: NOT_AUTHORIZED }
     const message = typeof parsed === 'object' && parsed !== null && typeof (parsed as { error?: unknown }).error === 'string' ? (parsed as { error: string }).error : null
     return { ok: false, status: response.status, error: message ?? `Request failed (${response.status}).` }
   }

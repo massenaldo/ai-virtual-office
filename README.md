@@ -23,10 +23,10 @@ Open http://localhost:5173.
 |---|---|
 | `npm run dev` | Frontend only, with the browser mock (default; `/vo` uses this) |
 | `npm run server` | The backend alone, on `127.0.0.1:8787` |
-| `npm run dev:full` | The backend and the frontend, with the UI pointed at the backend |
+| `npm run dev:full` | The backend and the frontend, with the UI reaching it through the same-origin dev proxy (no setup, no token to copy) |
 | `npm run server:build` then `npm run server:start` | The production backend bundle (`dist-server/index.js`, only `node:` imports) |
 
-To use the backend with a separately started frontend, set `VITE_WORKFORCE_API_URL=http://127.0.0.1:8787` when starting `npm run dev`. An invalid value shows "Not configured" instead of falling back to the browser mock.
+To use the backend with a separately started frontend, run `npm run server`, then `VITE_WORKFORCE_API_URL=/ npm run dev`. The value `/` means "this page's own origin": the Vite dev server adds the API token on the server side and forwards `/api/*` to the backend (see "API token" below). An invalid value shows "Not configured" instead of falling back to the browser mock, and a direct `http://127.0.0.1:8787` is accepted but gets "Not authorized", because the browser has no token.
 
 ## Open with Claude Code `/vo`
 
@@ -90,13 +90,14 @@ A small Node server (`server/`, no framework, no runtime dependencies) owns agen
 | `ALLOWED_TOOLS` | `Read,Glob,Grep,Write,Edit` | Tool allowlist; write, execute and network tools always need approval |
 | `MAX_MESSAGE_BYTES`, `MAX_TASK_OUTPUT_BYTES`, `EVENT_BUFFER_SIZE`, `AUDIT_LOG_MAX_BYTES` | 32768, 262144, 500, 5242880 | Output and log limits |
 | `ANTHROPIC_API_KEY` | unset | Server only, unused until the Claude provider exists. Never a frontend variable |
-| `VITE_WORKFORCE_API_URL` | empty | Frontend only. Empty = browser mock |
+| `API_TOKEN` | generated at each start | Token every API request must send as `Authorization: Bearer <token>`. At least 32 characters, no spaces. Server only: never a `VITE_` variable (refused at start) |
+| `VITE_WORKFORCE_API_URL` | empty | Frontend only. Empty = browser mock; `/` = same-origin backend through the dev proxy |
 
-**API** (JSON; every POST/PUT/PATCH/DELETE needs `Content-Type: application/json`, even without a body):
+**API** (JSON; every route except `GET /api/health` needs `Authorization: Bearer <token>`; every POST/PUT/PATCH/DELETE needs `Content-Type: application/json`, even without a body):
 
 | Method and path | Purpose |
 |---|---|
-| `GET /api/health` | Runtime, availability, persistence and audit status |
+| `GET /api/health` | Runtime, availability, persistence and audit status. The only route that needs no token |
 | `GET /api/state` | Full state and `lastEventId` |
 | `GET /api/workspaces` | Workspace ids (never paths) |
 | `GET /api/events` | Server-sent events; resume with `Last-Event-ID` or `?lastEventId=` |
@@ -110,12 +111,18 @@ A small Node server (`server/`, no framework, no runtime dependencies) owns agen
 
 **Security boundaries.** These are policy checks, not an OS sandbox.
 - Bound to loopback; `Host` and `Origin` allowlists (421 / 403); JSON-only mutations (415); CORS only for allowed origins; security headers.
-- No login or token yet; a startup token is planned for the VPS milestone.
+- API token: every route except health, including the event stream and requests with no `Origin`, needs the bearer token (401 otherwise). Compared in constant time; never accepted in a URL; never logged, audited, returned or compiled into the bundle (`check:secrets` looks for it).
 - Workspaces are named by id; the browser never sends a path. Paths are checked against the workspace real path (symlinks resolved, `..` refused, a path through a regular file refused) and the root stored at startup. Write and Edit always need a workspace; without one the mock demo falls back to the simulated run's own approval.
 - Tool gate: a runtime can only use a tool through `ctx.tools.use(request, perform)`. The input is frozen, the approval is bound to a digest of task, workspace, tool and input, and the path and workspace are re-checked right before `perform` runs (otherwise `stale_approval`, audited as `tool.stale`).
 - Tool policy: unknown tools denied; read tools allowed inside a workspace; write, execute and network tools always need a human approval whose summary shows the whole action (otherwise denied); no bypass mode.
 - Secrets are redacted from logs, state, events and the audit log; workspace paths are hidden in runtime output; `npm run check:secrets` scans the built bundles.
 - `data/audit.log` (JSONL, mode 0600, rotated at 5 MB) records lifecycle, tool and rejected-request events, never bodies.
+
+**API token.** Set `API_TOKEN` (32+ characters) or let the server generate a fresh 256-bit token at each start, written to `data/api-token` (mode 0600, git-ignored with `data/`). The audit log records only `auth=configured` or `auth=generated`.
+- *Browser:* the dev proxy (`scripts/apiProxy.ts`) runs in Node. For requests the browser marks `Sec-Fetch-Site: same-origin` it replaces any `Authorization` and `Cookie` header with the token and forwards `/api/*`; everything else gets 403. It reads the token on every request, so a backend restart is picked up. It only exists where Vite runs (`dev:full`, `dev` with `VITE_WORKFORCE_API_URL=/`), and any local process that can send such a request to port 5173 gets an authenticated path, the same trust level as Vite serving the source tree. `vite preview` and a VPS need the backend to serve the UI, or a session-cookie flow (not built).
+- *Rotation:* restart the server (generated), or change `API_TOKEN` and restart. A configured token is never written to disk.
+- *Other clients:* `curl -H "Authorization: Bearer $(cat data/api-token)" http://127.0.0.1:8787/api/state`.
+- `/vo` and `npm run dev` stay browser-only and need no token.
 
 **Persistence.** `data/workforce.json` (atomic writes, mode 0600). An unreadable file is backed up before a fresh start. A task running at shutdown is marked failed with "Interrupted by a server restart". The event buffer is in memory, so a restart makes every old event id a `state.reset`.
 

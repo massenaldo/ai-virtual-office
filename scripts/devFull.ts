@@ -22,8 +22,9 @@ try {
   process.exit(1)
 }
 log.info(`AI Virtual Office backend listening on ${backend.url} (runtime: ${parsed.config.runtime})`)
-// Points the UI at this backend unless already set.
-process.env.VITE_WORKFORCE_API_URL ??= backend.url
+// Points the UI at this backend through the dev proxy (same origin; the proxy adds the API token) unless already set.
+process.env.VITE_WORKFORCE_API_URL ??= '/'
+process.env.PORT ??= String(backend.port)
 
 let vite: Awaited<ReturnType<typeof createServer>>
 try {

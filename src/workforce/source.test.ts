@@ -14,6 +14,13 @@ describe('resolveWorkforceSource', () => {
     for (const raw of [undefined, '', '   ']) expect(resolveWorkforceSource(raw)).toEqual({ kind: 'browser' })
   })
 
+  it('"/" selects the same-origin backend behind the dev proxy', () => {
+    expect(resolveWorkforceSource('/')).toEqual({ kind: 'backend', baseUrl: '' })
+    expect(resolveWorkforceSource(' / ')).toEqual({ kind: 'backend', baseUrl: '' })
+    expect(resolveWorkforceSource('//evil.example')).toMatchObject({ kind: 'invalid' })
+    expect(resolveWorkforceSource('/api')).toMatchObject({ kind: 'invalid' })
+  })
+
   it('an http(s) origin selects the backend, without a trailing slash', () => {
     expect(resolveWorkforceSource('http://127.0.0.1:8787/')).toEqual({ kind: 'backend', baseUrl: BASE })
   })

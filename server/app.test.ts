@@ -1,10 +1,10 @@
-import { mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { startServer } from './app'
 import { silentLogger } from './log'
 import { WORKFORCE_FILE } from './store'
-import { startTestServer, tempDataDir, testConfig, TEST_TOKEN, type TestServer } from './test/helpers'
+import { rawRequest, startTestServer, tempDataDir, testConfig, TEST_TOKEN, type TestServer } from './test/helpers'
 
 let running: { close(): Promise<void> } | null = null
 afterEach(async () => { await running?.close(); running = null })
@@ -24,6 +24,25 @@ describe('app', () => {
     const res = await s.api('GET', '/api/health')
     expect(res.body).toMatchObject({ runtime: 'claude', available: false, reason: 'Claude Agent SDK not installed', credentialsConfigured: true })
     expect(JSON.stringify(res.body)).not.toContain('sk-test-123')
+  })
+
+  it('health and state show a save failure as a code and a fixed sentence, never a path', async () => {
+    const dataDir = tempDataDir()
+    let fail = false
+    const s = await startTestServer({ DATA_DIR: dataDir }, { storeWriteFile: (path, text) => { if (fail) throw Object.assign(new Error(`EACCES: permission denied, open '${dataDir}/workforce.json.tmp-9'`), { code: 'EACCES' }); writeFileSync(path, text) } })
+    running = s
+    fail = true
+    expect((await s.api('POST', '/api/agents', { name: 'Nova', role: 'R', department: 'backend' })).status).toBe(201)
+    const open = await rawRequest(s.url, { path: '/api/health', noAuth: true })
+    expect(JSON.parse(open.body).persistence).toEqual({ ok: false, error: 'EACCES' })
+    expect(open.body).not.toContain(dataDir)
+    expect(open.body).not.toMatch(/\/(tmp|var|private|Users|home)\//)
+    const state = await s.api('GET', '/api/state')
+    expect(state.body.saveError).toBe('Permission denied (EACCES).')
+    expect(JSON.stringify(state.body.saveError)).not.toContain(dataDir)
+    fail = false
+    await s.api('POST', '/api/agents', { name: 'Quill', role: 'R', department: 'backend' })
+    expect(JSON.parse((await rawRequest(s.url, { path: '/api/health', noAuth: true })).body).persistence).toEqual({ ok: true, error: null })
   })
 
   it('health reports an unavailable audit log and the server keeps serving', async () => {

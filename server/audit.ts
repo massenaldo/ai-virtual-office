@@ -1,3 +1,4 @@
+import { errorCode } from './errorCodes'
 import { appendFileSync, chmodSync, mkdirSync, renameSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Logger } from './log'
@@ -33,7 +34,7 @@ export type AuditOptions = { dataDir: string; maxBytes: number; now: () => strin
 
 export const nullAudit: AuditLog = { write: () => {}, status: { ok: true, error: null }, filePath: '' }
 
-const codeOf = (error: unknown): string => (error as NodeJS.ErrnoException).code ?? 'write failed'
+const codeOf = errorCode
 
 export function openAuditLog({ dataDir, maxBytes, now, log, hide = [] }: AuditOptions): AuditLog {
   const filePath = join(dataDir, AUDIT_FILE)

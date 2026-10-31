@@ -1,3 +1,4 @@
+import { errorSentence } from '../errorCodes'
 import type { ServerResponse } from 'node:http'
 import pkg from '../../package.json' with { type: 'json' }
 import type { StateResponse, WorkspacesResponse } from '../../src/workforce/api'
@@ -58,7 +59,7 @@ export function createRoutes(deps: RouteDeps): Route[] {
       path: '/api/state',
       // The state and the last event id are read in the same tick, so a client can apply exactly the events after it.
       handler: () => {
-        const body: StateResponse = { state: store.state, lastEventId: events.lastEventId, loadProblem: store.load.problem, preserved: store.load.preserved, saveError: store.saveError }
+        const body: StateResponse = { state: store.state, lastEventId: events.lastEventId, loadProblem: store.load.problem, preserved: store.load.preserved, saveError: store.saveError === null ? null : errorSentence(store.saveError) }
         return { status: 200, body }
       },
     },

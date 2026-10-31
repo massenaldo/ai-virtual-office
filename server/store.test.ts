@@ -98,7 +98,7 @@ describe('commit', () => {
     if (!a.ok) throw new Error(a.error)
     expect(store.commit(a.state)).toBe(true)
     expect(store.state).toBe(a.state)
-    expect(store.saveError).toBe('disk full')
+    expect(store.saveError).toBe('write_failed')
     fail = false
     const b = createAgent(store.state, { name: 'Quill', role: 'Writer', department: 'design' }, NOW)
     if (!b.ok) throw new Error(b.error)
@@ -115,6 +115,23 @@ describe('commit', () => {
       store.commit(r.state)
     }
     expect(errors.filter((m) => m.includes('disk full'))).toHaveLength(1)
+  })
+
+  it('keeps only a safe error code, and the full message only in the server log', () => {
+    const errors: string[] = []
+    const seen: Array<string | null> = []
+    const fail = (error: Error) => {
+      const store = open({ writeFile: vi.fn(() => { throw error }), log: { ...silentLogger, error: (m) => errors.push(m) } })
+      const r = createAgent(store.state, { name: 'Nova', role: 'R', department: 'design' }, NOW)
+      if (!r.ok) throw new Error(r.error)
+      store.commit(r.state)
+      seen.push(store.saveError)
+    }
+    fail(Object.assign(new Error(`EACCES: permission denied, open '${dir}/workforce.json.tmp-1'`), { code: 'EACCES' }))
+    fail(Object.assign(new Error(`weird at ${dir}`), { code: 'EWEIRD' }))
+    fail(new Error(`no code at ${dir}`))
+    expect(seen).toEqual(['EACCES', 'write_failed', 'write_failed'])
+    expect(errors.some((m) => m.includes('EACCES: permission denied') && m.includes(dir))).toBe(true)
   })
 })
 

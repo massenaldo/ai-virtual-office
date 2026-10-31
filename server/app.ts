@@ -28,6 +28,8 @@ export type AppDeps = {
   heartbeatMs?: number
   maxStreams?: number
   audit?: AuditLog
+  /** Test seam: replaces the store's atomic file write. */
+  storeWriteFile?: (path: string, text: string) => void
   guards?: Guard[]
   responseHeaders?: (req: IncomingMessage) => Record<string, string>
 }
@@ -59,7 +61,7 @@ export function createApp(config: ServerConfig, deps: AppDeps = {}): App {
   const now = deps.now ?? (() => new Date().toISOString())
   const events = new EventLog({ capacity: config.eventBufferSize, now, bootId: deps.bootId, log })
   // Every commit, from any path, becomes typed events in the same tick, so state and log can't disagree.
-  const store = openWorkforceStore({ dataDir: config.dataDir, now, log, onCommit: (before, after) => { events.append(deriveEvents(before, after)) } })
+  const store = openWorkforceStore({ dataDir: config.dataDir, now, log, writeFile: deps.storeWriteFile, onCommit: (before, after) => { events.append(deriveEvents(before, after)) } })
   // The store opens first: it creates DATA_DIR, where the audit log lives.
   const audit = deps.audit ?? openAuditLog({ dataDir: config.dataDir, maxBytes: config.auditLogMaxBytes, now, log, hide: config.workspaceRoot ? [config.workspaceRoot] : [] })
   const apiToken = resolveApiToken({ configured: config.apiToken, dataDir: config.dataDir })

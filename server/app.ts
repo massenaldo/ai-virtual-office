@@ -120,6 +120,7 @@ export async function startServer(config: ServerConfig, deps: AppDeps = {}): Pro
       app.closeStreams()
       await app.manager.dispose()
       await stop()
+      app.audit.close()
       app.releaseLock()
     },
   }

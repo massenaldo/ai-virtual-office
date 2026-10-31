@@ -7,7 +7,7 @@ import type { Awaitable } from '../controller'
 import { useBusy } from './useBusy'
 import { DESCRIPTION_MAX, TITLE_MAX, isActiveTask, type TaskInput } from '../operations'
 import type { Agent } from '../types'
-import { TASK_RUNTIME_LABEL, TASK_STATUS_LABEL, agentStatusText, agentTimeline, deskOptions, deskStatus, formatTime } from '../view'
+import { TASK_RUNTIME_LABEL, TASK_STATUS_LABEL, agentStatusText, agentTimeline, shortDigest, deskOptions, deskStatus, formatTime } from '../view'
 import { StatusDot } from './AgentList'
 
 export type AgentDetailProps = { workforce: Workforce; layout: OfficeLayout; agent: Agent; onBack(): void; onEdit(): void; onRemove(): void; onFocusDesk(): void }
@@ -49,7 +49,7 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
   const cancel = useBusy()
   const decide = async (value: 'approve' | 'deny') => {
     if (!task?.pendingApproval) return
-    const r = await decision.run(() => actions.decideApproval(task.id, task.pendingApproval!.id, value))
+    const r = await decision.run(() => actions.decideApproval(task.id, task.pendingApproval!.id, value, task.pendingApproval!.digest))
     if (r !== undefined) setActionError(r.ok ? null : r.error)
   }
   const cancelTask = async () => {
@@ -101,6 +101,7 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
     {task?.status === 'waiting_for_approval' && task.pendingApproval && <div className="approval-card" role="status">
       <div className="task-card-head"><strong>Approval needed</strong><span className="agent-chip">{task.pendingApproval.tool}</span></div>
       <p>{task.pendingApproval.summary}</p>
+      {shortDigest(task.pendingApproval.digest) && <small title={task.pendingApproval.digest ?? undefined}>Action {shortDigest(task.pendingApproval.digest)}</small>}
       <div className="panel-actions">
         <button className="panel-button primary" disabled={decision.busy} onClick={() => decide('approve')}><Check size={13}/> Approve</button>
         <button className="panel-button danger" disabled={decision.busy} onClick={() => decide('deny')}><X size={13}/> Deny</button>

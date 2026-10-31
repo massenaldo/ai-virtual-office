@@ -103,6 +103,9 @@ export function workforceNotice(problem: WorkforceLoadProblem, preserved: Preser
   return preserved ? `${lead} ${PRESERVED_SENTENCE[preserved]}` : lead
 }
 
+/** The first 12 hex characters of an approval's action digest, for display. */
+export const shortDigest = (digest: string | null): string | null => (digest === null ? null : digest.slice(0, 12))
+
 export const TASK_RUNTIME_LABEL: Record<TaskRuntime, string> = { mock: 'Simulated run', claude: 'Claude runtime' }
 
 export type EnvironmentBadge = { label: string; title: string; tone: 'browser' | 'backend' | 'unavailable' }

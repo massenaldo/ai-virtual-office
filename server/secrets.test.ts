@@ -46,7 +46,7 @@ describe('secrets and paths', () => {
     const get = async () => (await s!.api('GET', '/api/state')).body.state.tasks[0]
     await until(async () => (await get()).status === 'running')
     keep(await s.api('POST', `/api/demo/tasks/${id}/request-approval`))
-    keep(await s.api('POST', `/api/tasks/${id}/approval`, { approvalId: (await get()).pendingApproval.id, decision: 'approve' }))
+    keep(await s.api('POST', `/api/tasks/${id}/approval`, { approvalId: (await get()).pendingApproval.id, decision: 'approve', digest: (await get()).pendingApproval.digest }))
     await until(async () => (await get()).status === 'completed')
     keep(await s.api('GET', '/api/state'))
 

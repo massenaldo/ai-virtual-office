@@ -47,7 +47,7 @@ async function call(method: string, path: string, opts: { body?: unknown; auth?:
   try { body = text === '' ? null : JSON.parse(text) } catch { /* not JSON */ }
   return { status: res.status, body, headers: res.headers }
 }
-const state = async () => (await call('GET', '/api/state')).body.state as { agents: Array<{ id: string; status: string }>; tasks: Array<{ id: string; agentId: string; status: string; pendingApproval: { id: string; tool: string } | null }> }
+const state = async () => (await call('GET', '/api/state')).body.state as { agents: Array<{ id: string; status: string }>; tasks: Array<{ id: string; agentId: string; status: string; pendingApproval: { id: string; tool: string; digest: string | null } | null }> }
 const open = async (opts?: Parameters<typeof openEventStream>[1]) => {
   const x = await openEventStream(server.url, { token, ...opts })
   streams.push(x)
@@ -99,7 +99,11 @@ describe('the real server, end to end', () => {
     await stream.until((e) => e.type === 'task.waiting_for_approval')
     const task = (await state()).tasks.find((t) => t.id === forgeTask)!
     expect(task).toMatchObject({ status: 'waiting_for_approval', pendingApproval: { tool: 'Write' } })
-    expect((await call('POST', `/api/tasks/${forgeTask}/approval`, { body: { approvalId: task.pendingApproval!.id, decision: 'approve' } })).status).toBe(200)
+    expect(task.pendingApproval!.digest).toMatch(/^[0-9a-f]{64}$/)
+    const wrong = await call('POST', `/api/tasks/${forgeTask}/approval`, { body: { approvalId: task.pendingApproval!.id, decision: 'approve', digest: '0'.repeat(64) } })
+    expect(wrong.status).toBe(409)
+    expect((await call('POST', `/api/tasks/${forgeTask}/approval`, { body: { approvalId: task.pendingApproval!.id, decision: 'approve' } })).status).toBe(409)
+    expect((await call('POST', `/api/tasks/${forgeTask}/approval`, { body: { approvalId: task.pendingApproval!.id, decision: 'approve', digest: task.pendingApproval!.digest } })).status).toBe(200)
     await stream.until((e) => e.type === 'task.completed', 5000)
     expect((await state()).tasks.find((t) => t.id === forgeTask)!.status).toBe('completed')
     expect(readdirSync(ws.path('sandbox'))).toEqual([])

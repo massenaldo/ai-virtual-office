@@ -9,6 +9,7 @@ import { ServerMockProvider } from './runtime/mockProvider'
 import type { ServerRuntimeProvider, StartContext } from './runtime/types'
 import { openWorkforceStore, type WorkforceStore } from './store'
 import { TaskManager, type LifecycleAction, type TaskManagerOptions } from './taskManager'
+import { actionDigest } from './toolGate'
 import { DEFAULT_ALLOWED_TOOLS } from './toolPolicy'
 import { FakeProvider } from './test/fakeProvider'
 import { makeWorkspaceRoot } from './test/workspaces'
@@ -209,7 +210,7 @@ describe('approvals', () => {
     const m = make(mock(), wc())
     const id = await waiting(m)
     expect(agent().status).toBe('waiting')
-    const r = m.decideApproval(id, task(id).pendingApproval!.id, 'approve')
+    const r = m.decideApproval(id, task(id).pendingApproval!.id, 'approve', {}, task(id).pendingApproval!.digest ?? undefined)
     expect(r.ok && r.task.status).toBe('running')
     expect(agent().status).toBe('working')
     await tick()
@@ -221,7 +222,7 @@ describe('approvals', () => {
   it('deny fails with the simulated message', async () => {
     const m = make(mock(), wc())
     const id = await waiting(m)
-    const r = m.decideApproval(id, task(id).pendingApproval!.id, 'deny')
+    const r = m.decideApproval(id, task(id).pendingApproval!.id, 'deny', {}, task(id).pendingApproval!.digest ?? undefined)
     // A human deny tells the runtime "no"; the task itself carries on until the runtime decides what to do.
     expect(r.ok && r.task.status).toBe('running')
     await tick()
@@ -243,7 +244,7 @@ describe('approvals', () => {
     const m = make(mock(), wc())
     const id = await waiting(m)
     const approvalId = task(id).pendingApproval!.id
-    expect(m.decideApproval(id, approvalId, 'approve').ok).toBe(true)
+    expect(m.decideApproval(id, approvalId, 'approve', {}, task(id).pendingApproval!.digest ?? undefined).ok).toBe(true)
     expect(m.decideApproval(id, approvalId, 'deny')).toEqual({ ok: false, code: 'conflict', error: 'Task is not waiting for approval.' })
   })
 
@@ -261,7 +262,7 @@ describe('approvals', () => {
   it('deciding clears the approval timer', async () => {
     const m = make(mock(), { ...wc(), approvalTimeoutMs: 2000 })
     const id = await waiting(m)
-    m.decideApproval(id, task(id).pendingApproval!.id, 'approve')
+    m.decideApproval(id, task(id).pendingApproval!.id, 'approve', {}, task(id).pendingApproval!.digest ?? undefined)
     await vi.advanceTimersByTimeAsync(1900)
     expect(task(id).status).toBe('completed')
   })
@@ -375,7 +376,7 @@ describe('limits and housekeeping', () => {
     const m2id = started(m, 'sandbox')
     await tick()
     m.requestApproval(m2id)
-    m.decideApproval(m2id, task(m2id).pendingApproval!.id, 'approve')
+    m.decideApproval(m2id, task(m2id).pendingApproval!.id, 'approve', {}, task(m2id).pendingApproval!.digest ?? undefined)
     await vi.advanceTimersByTimeAsync(1000)
     expect(seen).toContain('approval.decided')
     tws.cleanup()
@@ -489,6 +490,41 @@ describe('tool approvals', () => {
     expect(denied.every((e) => e.detail === undefined)).toBe(true)
   })
 
+  describe('the digest travels with the approval', () => {
+    const digestOf = (id: string) => actionDigest({ taskId: id, workspaceId: 'sandbox', workspacePath: ws.path('sandbox'), tool: 'Write', input: write.input })
+
+    it('puts the action digest on the pending approval', async () => {
+      const { id, ctx } = await running()
+      void gate(ctx, write)
+      expect(task(id).pendingApproval?.digest).toBe(digestOf(id))
+    })
+
+    it('refuses a wrong or missing digest and does not perform', async () => {
+      const { m, id, ctx } = await running()
+      const perform = vi.fn(() => 'done')
+      const pending = ctx.tools.use(write, perform)
+      const approval = task(id).pendingApproval!
+      const conflict = { ok: false, code: 'conflict', error: 'That approval is no longer pending.' }
+      expect(m.decideApproval(id, approval.id, 'approve', {}, 'f'.repeat(64))).toEqual(conflict)
+      expect(m.decideApproval(id, approval.id, 'approve')).toEqual(conflict)
+      expect(m.decideApproval(id, approval.id, 'approve', {}, digestOf('other-task'))).toEqual(conflict)
+      await tick()
+      expect(perform).not.toHaveBeenCalled()
+      expect(task(id).status).toBe('waiting_for_approval')
+      expect(m.decideApproval(id, approval.id, 'approve', {}, approval.digest ?? undefined).ok).toBe(true)
+      await expect(pending).resolves.toMatchObject({ behavior: 'allow', outcome: 'approved' })
+      expect(perform).toHaveBeenCalledTimes(1)
+    })
+
+    it('lets a deny through with the right digest and still needs it', async () => {
+      const { m, id, ctx } = await running()
+      void gate(ctx, write)
+      const approval = task(id).pendingApproval!
+      expect(m.decideApproval(id, approval.id, 'deny').ok).toBe(false)
+      expect(m.decideApproval(id, approval.id, 'deny', {}, approval.digest ?? undefined).ok).toBe(true)
+    })
+  })
+
   it('asks for a write and waits for approval', async () => {
     const { m, id, ctx } = await running()
     let settled: unknown = 'pending'
@@ -497,7 +533,7 @@ describe('tool approvals', () => {
     expect(agent().status).toBe('waiting')
     await tick()
     expect(settled).toBe('pending')
-    expect(m.decideApproval(id, task(id).pendingApproval!.id, 'approve').ok).toBe(true)
+    expect(m.decideApproval(id, task(id).pendingApproval!.id, 'approve', {}, task(id).pendingApproval!.digest ?? undefined).ok).toBe(true)
     await tick()
     expect(settled).toEqual({ behavior: 'allow', outcome: 'approved' })
     expect(fake.responses).toEqual([])
@@ -508,7 +544,7 @@ describe('tool approvals', () => {
   it('a human deny resolves denied and the task keeps running', async () => {
     const { m, id, ctx } = await running()
     const p = gate(ctx, write)
-    m.decideApproval(id, task(id).pendingApproval!.id, 'deny')
+    m.decideApproval(id, task(id).pendingApproval!.id, 'deny', {}, task(id).pendingApproval!.digest ?? undefined)
     await expect(p).resolves.toEqual({ behavior: 'deny', outcome: 'denied', message: 'Denied by a human reviewer.' })
     expect(task(id).status).toBe('running')
   })

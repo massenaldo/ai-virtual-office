@@ -37,7 +37,7 @@ export function createRemoteCommands(deps: { client: ApiClient; insertAgent(agen
     assignDesk: (agentId, deskId) => result('PUT', `/api/agents/${id(agentId)}/desk`, { deskId } satisfies DeskBody),
     startTask: (agentId, input) => result('POST', `/api/agents/${id(agentId)}/tasks`, { title: input.title, description: input.description } satisfies CreateTaskBody),
     cancelTask: (taskId) => result('POST', `/api/tasks/${id(taskId)}/cancel`),
-    decideApproval: (taskId, approvalId, decision) => result('POST', `/api/tasks/${id(taskId)}/approval`, { approvalId, decision } satisfies ApprovalBody),
+    decideApproval: (taskId, approvalId, decision, digest) => result('POST', `/api/tasks/${id(taskId)}/approval`, { approvalId, decision, ...(typeof digest === 'string' ? { digest } : {}) } satisfies ApprovalBody),
     requestApproval: (taskId) => fireAndForget('POST', `/api/demo/tasks/${id(taskId)}/request-approval`),
     forceError: (taskId) => fireAndForget('POST', `/api/demo/tasks/${id(taskId)}/force-error`),
     restoreDemoAgents: () => fireAndForget('POST', '/api/demo/agents/restore'),

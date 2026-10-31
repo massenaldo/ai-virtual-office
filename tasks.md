@@ -225,7 +225,7 @@ Branch: `fix/3b12-1-info-disclosure`.
 
 Branch: `test/3b12-2-tool-gate-integration`.
 
-- [ ] **2.1 The digest travels with the approval.** (Decision 3)
+- [x] **2.1 The digest travels with the approval.** (Decision 3)
   - Files:
     - `server/taskManager.ts`: `approveTool(taskId, request, digest)`; `toolWaiter: { approvalId, tool, digest, resolve }`; `decideApproval(taskId, approvalId, decision, opts, digest?)`.
     - `server/http/inputs.ts`: `parseApproval` accepts optional `digest`, 64 lowercase hex characters.
@@ -245,7 +245,7 @@ Branch: `test/3b12-2-tool-gate-integration`.
     - A storage round trip keeps `digest`, and a v2 file without the field loads.
     - The UI test shows the 12-character prefix.
   - Verify: `npx vitest run server/taskManager.test.ts server/http src/workforce`, then `npm test`, `npx tsc -b` and `npm run build`.
-- [ ] **2.2 Stale-approval integration tests through the real `TaskManager`.**
+- [x] **2.2 Stale-approval integration tests through the real `TaskManager`.**
   - Files: new `server/toolGate.integration.test.ts` (real `TaskManager`, real store in a temp `DATA_DIR`, real workspace from `server/test/workspaces.ts`, and `server/test/fakeProvider.ts` extended with a `useTool(taskId, request, perform)` hook that records `perform` calls). Fixes go in `toolGate.ts` or `taskManager.ts` only if a test exposes a gap.
   - RED first (each must assert `perform` was **never** called, the outcome, and the audit record `tool.stale`, `tool.denied` or none):
     - **Task state:**
@@ -266,7 +266,7 @@ Branch: `test/3b12-2-tool-gate-integration`.
       - an approval decided after its task finished → 409.
   - If a case finds a real gap, the fix goes in this branch with that test as the RED.
   - Verify: `npx vitest run server/toolGate.integration.test.ts server/toolGate.test.ts server/taskManager.test.ts`, then `npm test` and `npx tsc -b`.
-- [ ] **2.3 Doc: the gated in-process Write/Edit tool.** (Decisions 11 and 12)
+- [x] **2.3 Doc: the gated in-process Write/Edit tool.** (Decisions 11 and 12)
   - Files: new `docs/gated-tools.md`, the header of `server/runtime/claudeAgent.ts` (a pointer only), and `server/runtime/claudeAgent.test.ts`.
   - The doc covers:
     - why SDK built-in `Write` and `Edit` are never used (they execute after `canUseTool` returns);

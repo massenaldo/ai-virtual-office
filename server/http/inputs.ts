@@ -52,9 +52,10 @@ export function parseCreateTask(b: Body): CreateTaskRequest {
   return { title: text(b, 'title'), description, workspaceId }
 }
 
-export function parseApproval(b: Body): { approvalId: string; decision: ApprovalDecision } {
-  allow(b, ['approvalId', 'decision'])
+export function parseApproval(b: Body): { approvalId: string; decision: ApprovalDecision; digest: string | undefined } {
+  allow(b, ['approvalId', 'decision', 'digest'])
   if (typeof b.approvalId !== 'string' || b.approvalId === '') throw bad('"approvalId" must be a non-empty string.')
   if (b.decision !== 'approve' && b.decision !== 'deny') throw bad('"decision" must be "approve" or "deny".')
-  return { approvalId: b.approvalId, decision: b.decision }
+  if (b.digest !== undefined && !(typeof b.digest === 'string' && /^[0-9a-f]{64}$/.test(b.digest))) throw bad('"digest" must be 64 lowercase hex characters.')
+  return { approvalId: b.approvalId, decision: b.decision, digest: b.digest }
 }

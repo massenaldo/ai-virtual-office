@@ -169,7 +169,7 @@ export class TaskManager {
             return r.ok ? { ok: true, workspace: r.workspace } : { ok: false }
           },
           isLive: () => { const t = this.task(taskId); return !!t && (t.status === 'running' || t.status === 'waiting_for_approval') },
-          approve: (request) => this.approveTool(taskId, request),
+          approve: (request, digest) => this.approveTool(taskId, request, digest),
           stale: (tool, detail) => { const t = this.task(taskId); if (t) this.report('tool.stale', t, { actor: 'runtime', tool, decision: 'deny', reason: 'stale_approval', detail }) },
         }),
         audit: (note) => { const t = this.task(taskId); if (t) this.report('runtime.note', t, { actor: 'runtime', detail: note }) },
@@ -294,11 +294,12 @@ export class TaskManager {
     this.report('task.force_cancelled', task)
   }
 
-  decideApproval(taskId: string, approvalId: string, decision: ApprovalDecision, opts: CallOptions = {}): ManagerResult<{ task: AgentTask }> {
+  /** An approval with a digest is for one exact action: the decision must name the same digest, or it is refused. */
+  decideApproval(taskId: string, approvalId: string, decision: ApprovalDecision, opts: CallOptions = {}, digest?: string): ManagerResult<{ task: AgentTask }> {
     const task = this.task(taskId)
     if (!task) return { ok: false, code: 'not_found', error: 'Task not found.' }
     if (task.status !== 'waiting_for_approval' || !task.pendingApproval) return { ok: false, code: 'conflict', error: 'Task is not waiting for approval.' }
-    if (task.pendingApproval.id !== approvalId) return { ok: false, code: 'conflict', error: 'That approval is no longer pending.' }
+    if (task.pendingApproval.id !== approvalId || (task.pendingApproval.digest !== null && task.pendingApproval.digest !== digest)) return { ok: false, code: 'conflict', error: 'That approval is no longer pending.' }
     this.store.commit(recordDecision(this.state, taskId, approvalId, decision, this.now(), this.source))
     const run = this.runs.get(taskId)
     if (run) this.clearApproval(run)
@@ -340,7 +341,7 @@ export class TaskManager {
    * The gate a runtime goes through before using a tool. The policy decides; an `ask` becomes the existing
    * waiting_for_approval state, approval timer and approval endpoint. Every state change happens before this returns.
    */
-  private approveTool(taskId: string, request: ToolRequest): Promise<ToolGateResult> {
+  private approveTool(taskId: string, request: ToolRequest, digest: string): Promise<ToolGateResult> {
     const run = this.runs.get(taskId)
     const task = this.task(taskId)
     if (!run || !task || (task.status !== 'running' && task.status !== 'waiting_for_approval')) return Promise.resolve(CANCELLED)
@@ -361,7 +362,7 @@ export class TaskManager {
     this.report('tool.asked', task, { actor: 'runtime', tool, decision: 'ask', reason: 'needs_approval', detail: d.summary })
     const approvalId = createId('approval')
     const promise = new Promise<ToolGateResult>((resolve) => { run.toolWaiter = { approvalId, tool, resolve } })
-    this.onEvent({ type: 'approval_requested', taskId, approvalId, tool, summary: d.summary })
+    this.onEvent({ type: 'approval_requested', taskId, approvalId, tool, summary: d.summary, digest })
     this.report('approval.requested', task, { actor: 'runtime', tool, detail: `approvalId=${approvalId}` })
     return promise
   }

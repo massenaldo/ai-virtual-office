@@ -17,7 +17,8 @@ export type TaskEndReason = 'completed' | 'failed' | 'cancelled' | 'timeout'
 export type ApprovalDecision = 'approve' | 'deny'
 
 /** A runtime's request to use a tool that needs a human decision; set exactly while the task is waiting_for_approval. */
-export type PendingApproval = { id: string; tool: string; summary: string; requestedAt: string }
+/** digest: the server's SHA-256 of the exact action (task, workspace, tool, input) the approval is for; null for a simulated approval. */
+export type PendingApproval = { id: string; tool: string; summary: string; requestedAt: string; digest: string | null }
 
 export type RuntimeMode = 'mock' | 'real'
 

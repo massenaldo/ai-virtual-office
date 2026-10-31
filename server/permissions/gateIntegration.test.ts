@@ -323,3 +323,112 @@ describe('scoped approval decisions', () => {
     expect(manager.decideApproval(id, 'inner-1', 'allow_once').ok).toBe(true)
   })
 })
+
+describe('concurrent requests in one task', () => {
+  const pendingSummary = (id: string) => task(id).pendingApproval?.summary ?? ''
+  const decide = (id: string, choice: Parameters<TaskManager['decideApproval']>[2]) => {
+    const p = task(id).pendingApproval!
+    return manager.decideApproval(id, p.id, choice, {}, p.digest ?? undefined)
+  }
+  const watch = <T,>(p: Promise<T>) => { const box = { settled: false }; void p.then(() => { box.settled = true }); return box }
+
+  it('a second write while one is pending waits and is not denied', async () => {
+    const { id, ctx } = await run()
+    void ctx.tools.use(write('sub/a.txt'), vi.fn())
+    const second = watch(ctx.tools.use(write('sub/b.txt'), vi.fn()))
+    await tick()
+    expect(second.settled).toBe(false)
+    expect(pendingSummary(id)).toContain('sub/a.txt')
+  })
+
+  it('a rejected first request does not deny the second, which then asks', async () => {
+    const { id, ctx } = await run()
+    const p1 = ctx.tools.use(write('sub/a.txt'), vi.fn())
+    const perform2 = vi.fn(() => 'b')
+    const p2 = ctx.tools.use(write('sub/b.txt'), perform2)
+    decide(id, 'reject')
+    await expect(p1).resolves.toMatchObject({ behavior: 'deny', outcome: 'denied' })
+    expect(task(id).status).toBe('waiting_for_approval')
+    expect(pendingSummary(id)).toContain('sub/b.txt')
+    decide(id, 'allow_once')
+    await expect(p2).resolves.toMatchObject({ behavior: 'allow', value: 'b' })
+  })
+
+  it('allow for this task also answers a queued write to another file, with no second prompt', async () => {
+    const { id, ctx } = await run()
+    const perform1 = vi.fn(() => 'a')
+    const perform2 = vi.fn(() => 'b')
+    const p1 = ctx.tools.use(write('sub/a.txt'), perform1)
+    const p2 = ctx.tools.use(write('sub/b.txt'), perform2)
+    decide(id, 'allow_task')
+    await expect(Promise.all([p1, p2])).resolves.toMatchObject([{ behavior: 'allow', value: 'a' }, { behavior: 'allow', value: 'b' }])
+    expect(task(id).status).toBe('running')
+  })
+
+  it('a queued identical request cannot reuse a one-time permission, and perform runs once for the pair', async () => {
+    const { id, ctx } = await run()
+    const perform = vi.fn(() => 'x')
+    const p1 = ctx.tools.use(write(), perform)
+    const p2 = ctx.tools.use(write(), perform)
+    decide(id, 'allow_once')
+    const [a, b] = await Promise.all([p1, p2])
+    expect(a).toMatchObject({ behavior: 'allow' })
+    expect(b).toMatchObject({ behavior: 'deny', outcome: 'revoked' })
+    expect(perform).toHaveBeenCalledTimes(1)
+  })
+
+  it('a queued request for another tool still gets its own prompt', async () => {
+    const { id, ctx } = await run()
+    const p1 = ctx.tools.use(write('sub/a.txt'), vi.fn())
+    const edit = watch(ctx.tools.use({ tool: 'Edit', input: { file_path: 'sub/notes.md', old_string: 'hi', new_string: 'yo' } }, vi.fn()))
+    decide(id, 'allow_task')
+    await p1
+    expect(edit.settled).toBe(false)
+    expect(task(id).status).toBe('waiting_for_approval')
+    expect(task(id).pendingApproval?.tool).toBe('Edit')
+  })
+
+  it('re-evaluates a queued request: a deny rule added while it waited stops it, and a new allow rule lets it run', async () => {
+    const { id, ctx } = await run()
+    const p1 = ctx.tools.use({ tool: 'Edit', input: { file_path: 'sub/notes.md', old_string: 'hi', new_string: 'yo' } }, vi.fn())
+    const denied = vi.fn()
+    const allowed = vi.fn(() => 'ok')
+    const p2 = ctx.tools.use(write('sub/a.txt'), denied)
+    const p3 = ctx.tools.use(write('sub/b.txt'), allowed)
+    permissions.grant({ scope: 'global', effect: 'deny', tool: 'Write', pathPattern: 'sub/a.txt' })
+    agentAllow()
+    decide(id, 'reject')
+    await expect(p1).resolves.toMatchObject({ behavior: 'deny', outcome: 'denied' })
+    await expect(p2).resolves.toMatchObject({ behavior: 'deny', outcome: 'denied_by_policy' })
+    await expect(p3).resolves.toMatchObject({ behavior: 'allow', value: 'ok' })
+    expect(denied).not.toHaveBeenCalled()
+    expect(task(id).status).toBe('running')
+  })
+
+  it('refuses the ninth waiting request', async () => {
+    const { id, ctx } = await run()
+    const pending = Array.from({ length: 9 }, (_, i) => watch(ctx.tools.use(write(`sub/f${i}.txt`), vi.fn())))
+    const tenth = await ctx.tools.use(write('sub/f9.txt'), vi.fn())
+    expect(tenth).toMatchObject({ behavior: 'deny', outcome: 'denied_by_policy', message: expect.stringContaining('already pending') })
+    await tick()
+    expect(pending.every((p) => !p.settled)).toBe(true)
+    expect(task(id).status).toBe('waiting_for_approval')
+  })
+
+  describe.each([
+    ['cancel', (id: string) => { fake.confirmCancel = true; manager.cancelTask(id) }],
+    ['approval timeout', (_id: string) => { void vi.advanceTimersByTimeAsync(CONFIG.approvalTimeoutMs) }],
+    ['agent removal', (_id: string) => { manager.removeAgent(FORGE) }],
+    ['dispose', (_id: string) => { void manager.dispose() }],
+  ] as const)('on %s', (_name, end) => {
+    it('settles the pending request and every queued one without performing', async () => {
+      const { id, ctx } = await run()
+      const perform = vi.fn()
+      const all = [ctx.tools.use(write('sub/a.txt'), perform), ctx.tools.use(write('sub/b.txt'), perform), ctx.tools.use(write('sub/c.txt'), perform)]
+      end(id)
+      const results = await Promise.all(all)
+      expect(results.every((r) => r.behavior === 'deny')).toBe(true)
+      expect(perform).not.toHaveBeenCalled()
+    })
+  })
+})

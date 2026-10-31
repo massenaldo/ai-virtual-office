@@ -593,13 +593,15 @@ describe('tool approvals', () => {
     })
   })
 
-  it('a second request while one is pending is denied', async () => {
+  it('a second request while one is pending waits instead of being denied', async () => {
     const { id, ctx } = await running()
     const first = vi.fn()
+    const second = vi.fn()
     void gate(ctx, write).then(first)
-    await expect(gate(ctx, write)).resolves.toEqual({ behavior: 'deny', outcome: 'denied_by_policy', message: 'Tool "Write" denied by policy: another tool approval is already pending for this task.' })
+    void gate(ctx, write).then(second)
     await tick()
     expect(first).not.toHaveBeenCalled()
+    expect(second).not.toHaveBeenCalled()
     expect(task(id).status).toBe('waiting_for_approval')
   })
 

@@ -55,13 +55,16 @@ export type TaskManagerOptions = {
   onLifecycle?: (e: LifecycleEvent) => void
 }
 
+/** How many tool requests may wait behind a pending approval in one task; one more is refused. */
+export const MAX_QUEUED_APPROVALS = 8
+
 export const APPROVAL_TIMEOUT_MESSAGE = (ms: number) => `No approval decision within ${Math.round(ms / 1000)} s`
 export const unavailableMessage = (kind: TaskRuntime, reason: string) => `The ${kind} runtime is not available: ${reason}.`
 
 type Timer = ReturnType<typeof setTimeout>
 
 /** Everything the manager holds for one task while it is active; deleted when the task ends. */
-type Run = { abort: AbortController; taskTimer: Timer | null; approvalTimer: Timer | null; approvalId: string | null; graceTimer: Timer | null; outputBytes: number; outputClosed: boolean; launched: boolean; workspace: ResolvedWorkspace | null; toolWaiter: { approvalId: string; tool: string; digest: string; actionHash: string; resolve: (r: ToolGateResult) => void } | null }
+type Run = { abort: AbortController; taskTimer: Timer | null; approvalTimer: Timer | null; approvalId: string | null; graceTimer: Timer | null; outputBytes: number; outputClosed: boolean; launched: boolean; workspace: ResolvedWorkspace | null; toolWaiter: { approvalId: string; tool: string; digest: string; actionHash: string; resolve: (r: ToolGateResult) => void } | null; toolQueue: Array<{ request: ToolRequest; digest: string; resolve: (r: ToolGateResult) => void }> }
 
 const CANCELLED: ToolGateResult = { behavior: 'deny', outcome: 'cancelled', message: 'The task is no longer running.' }
 
@@ -146,7 +149,7 @@ export class TaskManager {
     this.store.commit(assigned.state)
     this.store.commit(markStarting(this.state, assigned.taskId, this.now()))
 
-    const run: Run = { abort: new AbortController(), taskTimer: null, approvalTimer: null, approvalId: null, graceTimer: null, outputBytes: 0, outputClosed: false, launched: false, workspace, toolWaiter: null }
+    const run: Run = { abort: new AbortController(), taskTimer: null, approvalTimer: null, approvalId: null, graceTimer: null, outputBytes: 0, outputClosed: false, launched: false, workspace, toolWaiter: null, toolQueue: [] }
     this.runs.set(assigned.taskId, run)
     run.taskTimer = setTimeout(() => this.onTaskTimeout(assigned.taskId), this.config.taskTimeoutMs)
     const task = this.task(assigned.taskId)!
@@ -236,7 +239,7 @@ export class TaskManager {
     if (!run) return
     for (const timer of [run.taskTimer, run.approvalTimer, run.graceTimer]) if (timer) clearTimeout(timer)
     // A runtime still waiting on a tool answer must be released when its task ends, however it ends.
-    this.settleTool(run, CANCELLED)
+    this.settleAll(run, CANCELLED)
     // Task and once permissions end with their task.
     this.permissions.endTask(taskId)
     this.runs.delete(taskId)
@@ -262,7 +265,7 @@ export class TaskManager {
     this.store.commit(applyRuntimeEvent(this.state, { type: 'failed', taskId, error: APPROVAL_TIMEOUT_MESSAGE(this.config.approvalTimeoutMs) }, this.now(), this.source))
     this.provider.cancel(taskId)
     run.abort.abort()
-    this.settleTool(run, { behavior: 'deny', outcome: 'expired', message: APPROVAL_TIMEOUT_MESSAGE(this.config.approvalTimeoutMs) })
+    this.settleAll(run, { behavior: 'deny', outcome: 'expired', message: APPROVAL_TIMEOUT_MESSAGE(this.config.approvalTimeoutMs) })
     this.finalize(taskId)
     this.report('approval.timeout', task)
   }
@@ -276,7 +279,7 @@ export class TaskManager {
     const run = this.runs.get(taskId)
     this.store.commit(requestCancel(this.state, taskId, this.now(), this.source))
     if (run?.taskTimer) clearTimeout(run.taskTimer)
-    if (run) { run.taskTimer = null; this.settleTool(run, CANCELLED) }
+    if (run) { run.taskTimer = null; this.settleAll(run, CANCELLED) }
     this.report('task.cancel', task, { actor: actorFor(opts), requestId: opts.requestId })
 
     if (this.task(taskId)?.status === 'cancelled') {
@@ -335,6 +338,7 @@ export class TaskManager {
       // An approval the (mock) provider raised itself: its reaction arrives as events.
       if (this.provider.kind === 'mock') this.provider.respondToApproval(taskId, approvalId, decision)
     }
+    if (run) this.promote(taskId, run)
     return { ok: true, task: this.task(taskId) ?? task }
   }
 
@@ -352,6 +356,25 @@ export class TaskManager {
       this.finalize(cancelledTaskId)
     }
     return { ok: true, cancelledTaskId }
+  }
+
+  /** Ends every tool request of a run that is waiting: the pending one and the queued ones. For a task that is over. */
+  private settleAll(run: Run, result: ToolGateResult): void {
+    this.settleTool(run, result)
+    for (const waiting of run.toolQueue.splice(0)) waiting.resolve(result)
+  }
+
+  /**
+   * After a decision, the next waiting requests are authorized again from scratch: a new rule may allow them, a deny rule or
+   * a revoke may stop them, and one that still needs a person becomes the pending approval. Stops at the first prompt.
+   */
+  private promote(taskId: string, run: Run): void {
+    while (run.toolQueue.length > 0 && run.toolWaiter === null && this.runs.get(taskId) === run) {
+      const task = this.task(taskId)
+      if (!task || task.status !== 'running') return
+      const next = run.toolQueue.shift()!
+      void this.approveTool(taskId, next.request, next.digest).then(next.resolve)
+    }
   }
 
   /** Resolves the runtime's pending tool request once; later calls do nothing. */
@@ -391,7 +414,11 @@ export class TaskManager {
       this.report('tool.allowed', task, { actor: 'runtime', tool, decision: 'allow', reason: d.decision === 'allow' ? d.reason : `permission:${p.source}`, detail: d.summary, ...ruleId, ...ids })
       return Promise.resolve({ behavior: 'allow', outcome: 'allowed' })
     }
-    if (task.status === 'waiting_for_approval' || run.toolWaiter) return refuse('approval_pending')
+    if (task.status === 'waiting_for_approval' || run.toolWaiter) {
+      // One person decision at a time per task; the others wait their turn, up to a limit.
+      if (run.toolQueue.length >= MAX_QUEUED_APPROVALS) return refuse('approval_pending')
+      return new Promise<ToolGateResult>((resolve) => { run.toolQueue.push({ request, digest, resolve }) })
+    }
 
     this.report('tool.asked', task, { actor: 'runtime', tool, decision: 'ask', reason: 'needs_approval', detail: d.summary, ...ids })
     const approvalId = createId('approval')
@@ -498,7 +525,7 @@ export class TaskManager {
     this.unsubscribe()
     for (const run of this.runs.values()) {
       for (const timer of [run.taskTimer, run.approvalTimer, run.graceTimer]) if (timer) clearTimeout(timer)
-      this.settleTool(run, CANCELLED)
+      this.settleAll(run, CANCELLED)
       run.abort.abort()
     }
     this.runs.clear()

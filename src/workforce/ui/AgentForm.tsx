@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { DEPARTMENTS } from '../../layout/catalog'
 import type { Awaitable } from '../controller'
+import { useBusy } from './useBusy'
 import { NAME_MAX, ROLE_MAX, type AgentInput } from '../operations'
 import type { Agent } from '../types'
 import { AGENT_DEPARTMENTS } from '../view'
@@ -11,9 +12,12 @@ export type AgentFormProps = { agent?: Agent; onSubmit(input: AgentInput): Await
 export default function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps) {
   const [input, setInput] = useState<AgentInput>({ name: agent?.name ?? '', role: agent?.role ?? '', department: agent?.department ?? 'backend' })
   const [error, setError] = useState<string | null>(null)
+  const { busy, run } = useBusy()
   const submit = async (e: FormEvent) => {
     e.preventDefault()
-    setError(await onSubmit(input))
+    if (busy) return
+    const result = await run(() => onSubmit(input))
+    if (result !== undefined) setError(result)
   }
   return <form onSubmit={submit} noValidate>
     <label className="field"><span>Name</span><input className="field-input" value={input.name} maxLength={NAME_MAX} autoFocus onChange={(e) => setInput({ ...input, name: e.target.value })}/></label>
@@ -25,7 +29,7 @@ export default function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps)
     </label>
     {error && <p className="form-error" role="alert">{error}</p>}
     <div className="panel-actions">
-      <button type="submit" className="panel-button primary">{agent ? 'Save changes' : 'Create agent'}</button>
+      <button type="submit" className="panel-button primary" disabled={busy}>{agent ? 'Save changes' : 'Create agent'}</button>
       <button type="button" className="panel-button" onClick={onCancel}>Cancel</button>
     </div>
   </form>

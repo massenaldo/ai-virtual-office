@@ -1,7 +1,7 @@
 import type { DialogRequest } from '../../editor/useEditorActions'
 import type { OfficeLayout } from '../../layout/types'
 import type { Workforce } from '../useWorkforce'
-import { deskLabel, removalPrompt } from '../view'
+import { connectionLabel, deskLabel, environmentBadge, environmentNote, removalPrompt } from '../view'
 import AgentDetail from './AgentDetail'
 import AgentForm from './AgentForm'
 import AgentList from './AgentList'
@@ -17,10 +17,18 @@ export function selectedAgentId(view: WorkforceView): string | null {
 }
 
 export default function WorkforcePanel({ workforce, layout, view, onViewChange: setView, onFocusDesk, openDialog }: WorkforcePanelProps) {
-  const header = <div className="panel-title">AI agents <span className="mock-badge" title="Tasks are simulated in the browser. No AI is run.">Mock mode</span></div>
-  if (!workforce) return <aside className="editor-panel workforce" aria-label="AI agents">{header}<p className="panel-hint">Loading agents…</p></aside>
+  if (!workforce) return <aside className="editor-panel workforce" aria-label="AI agents"><div className="panel-title">AI agents</div><p className="panel-hint">Loading agents…</p></aside>
 
   const { state, actions } = workforce
+  const badge = environmentBadge(workforce.environment)
+  const connection = connectionLabel(workforce)
+  const note = environmentNote(workforce.environment)
+  const header = <>
+    <div className="panel-title">AI agents <span className={`mock-badge ${badge.tone}`} title={badge.title}>{badge.label}</span>{connection && <span className={`connection-pill ${workforce.connection}`} role="status">{connection}</span>}</div>
+    {note && <p className="panel-hint">{note}</p>}
+  </>
+  // Before the first snapshot an empty list would offer "Restore demo agents" for a backend that simply hasn't answered yet.
+  const waiting = workforce.connection !== 'local' && workforce.lastSyncedAt === null
   const agentId = selectedAgentId(view)
   const agent = agentId ? state.agents.find((a) => a.id === agentId) : undefined
   const assignDesk = view.kind === 'assign' ? layout.furniture.find((f) => f.id === view.deskId && f.type === 'desk') : undefined
@@ -37,7 +45,8 @@ export default function WorkforcePanel({ workforce, layout, view, onViewChange: 
 
   return <aside className="editor-panel workforce" aria-label="AI agents">
     {header}
-    {shown.kind === 'list' && <AgentList state={state} layout={layout} onOpen={(id) => setView({ kind: 'detail', agentId: id })} onCreate={() => setView({ kind: 'create' })} onRestoreDemo={actions.restoreDemoAgents}/>}
+    {waiting && <p className="panel-hint">{workforce.connection === 'misconfigured' ? 'The backend address is not configured.' : 'Waiting for the local backend…'}</p>}
+    {!waiting && shown.kind === 'list' && <AgentList state={state} layout={layout} onOpen={(id) => setView({ kind: 'detail', agentId: id })} onCreate={() => setView({ kind: 'create' })} onRestoreDemo={actions.restoreDemoAgents}/>}
     {shown.kind === 'create' && <>
       <div className="field-group-label">New agent</div>
       <AgentForm onCancel={list} onSubmit={async (input) => {

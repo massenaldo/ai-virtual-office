@@ -13,12 +13,21 @@ import type { ExecutionResult, ExecutionStatus, ServerRuntimeProvider, StartCont
  * 2. Workspace. `start` refuses a task with a null workspace (the manager already answers "The claude runtime needs a
  *    workspace."). The SDK's working directory is `ctx.workspace.path`, set by the server and never by the browser or the
  *    model. No additional directories are ever added.
- * 3. Permissions. Every tool call goes through the SDK's permission callback (`canUseTool`), which calls
- *    `ctx.requestToolApproval({ tool, input })`. An `allow` result maps to the SDK's allow result with the input unchanged (paths in it are policy-checked as text and never contain `..`, but the SDK must still not follow a symlink out of the workspace at use time);
- *    a `deny` maps to its deny result with `message`. Never pass an auto-approve tool list for write, execute or network
- *    tools, because SDK auto-approved tools skip the callback; pass every tool outside the catalogue as disallowed. The
- *    permission mode is `default`, never any other mode. Load no user, project or local settings files (no inherited
- *    allow rules), no MCP servers, and no hooks that could approve.
+ * 3. Permissions: how the SDK connects to the tool gate. The provider never touches the policy, the workspace path or an
+ *    approval id; its only way to use a tool is `ctx.tools.use(request, perform)`.
+ *    - `canUseTool(toolName, input)` calls `ctx.tools.use({ tool: toolName, input }, perform)`. The gate decides with the
+ *      server's policy, asks a human for write, execute and network tools (the whole action is shown, and the approval is
+ *      bound to a digest of task, workspace, tool and input), and re-checks the path and workspace just before `perform`.
+ *    - `perform` returns the SDK's allow result with `updatedInput` set to the frozen input the gate gives it. A `deny`
+ *      or `stale_approval` outcome maps to the SDK's deny result with `message`; never retry with a changed input.
+ *    - Options: `permissionMode: 'default'` and no other mode; an empty auto-approve list, because auto-approved tools skip
+ *      `canUseTool`; `disallowedTools` is every tool outside the catalogue plus Bash, WebFetch and WebSearch until the
+ *      sandbox exists; `settingSources: []` (no user, project or local settings and no inherited allow rules); no MCP
+ *      servers except the in-process ones below; no hooks that could approve; no additional directories.
+ *    - KNOWN GAP, to close in 3B.2 before any real write: the SDK's built-in tools (Write, Edit, Read) run after
+ *      `canUseTool` returns, so the gate's use-time check and the actual file access are still two steps. The fix is to
+ *      disallow the built-in Write and Edit and offer in-process SDK MCP tools whose handler IS `perform`, so the change
+ *      happens inside the gate, and to run the session inside the sandbox (docs/sandbox-architecture.md).
  * 4. Limits. Stream output only as RuntimeEvents, so the manager's caps, redaction, timeouts and approval timer apply.
  *    Never write files or logs directly.
  * 5. Termination. Pass an AbortController linked to `ctx.signal` to the SDK. On `cancel(taskId)`, abort and emit

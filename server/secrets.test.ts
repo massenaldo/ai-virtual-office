@@ -68,7 +68,7 @@ describe('secrets and paths', () => {
     await new Promise((r) => setTimeout(r, 10))
     fake.rejectStart(new Error('auth failed for sk-ant-api03-abcdefghijk'))
     await until(async () => (await s!.api('GET', '/api/state')).body.state.tasks[0].status === 'failed')
-    expect((await s.api('GET', '/api/state')).body.state.tasks[0].errorMessage).toBe('Runtime failed to start: auth failed for [REDACTED]')
+    expect((await s.api('GET', '/api/state')).body.state.tasks[0].errorMessage).toBe('Runtime failed to start.')
     const text = rec.lines.join('\n')
     expect(text).toContain('[REDACTED]')
     expect(text).not.toContain('sk-ant-api03-abcdefghijk')

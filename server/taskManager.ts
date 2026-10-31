@@ -1,4 +1,5 @@
 import { realpathSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { activeTaskFor, applyRuntimeEvent, assignTask, cancelTask as forceCancel, decideApproval as recordDecision, isActiveTask, markStarting, removeAgent as dropAgent, requestCancel, timeOutTask, validateTaskInput, type TaskInput } from '../src/workforce/operations'
 import { createId } from '../src/layout/operations'
 import type { RuntimeEvent } from '../src/workforce/runtime/types'
@@ -41,7 +42,7 @@ export type TaskManagerOptions = {
   store: WorkforceStore
   provider: ServerRuntimeProvider
   policy: ToolPolicy
-  config: Pick<ServerConfig, 'taskTimeoutMs' | 'cancelGraceMs' | 'approvalTimeoutMs' | 'maxMessageBytes' | 'maxTaskOutputBytes' | 'workspaceRoot' | 'workspaces'>
+  config: Pick<ServerConfig, 'taskTimeoutMs' | 'cancelGraceMs' | 'approvalTimeoutMs' | 'maxMessageBytes' | 'maxTaskOutputBytes' | 'workspaceRoot' | 'workspaces'> & { dataDir?: string }
   now: () => string
   log: Logger
   /** Audit seam: called for each lifecycle step the manager takes. */
@@ -175,7 +176,8 @@ export class TaskManager {
       })
     } catch (error) {
       this.log.error(`Runtime failed to start task ${taskId}`, error)
-      outcome = { ok: false as const, error: `Runtime failed to start: ${error instanceof Error ? error.message : String(error)}` }
+      // The message can name files and folders; the real one is in the server log above, state gets a fixed sentence.
+      outcome = { ok: false as const, error: 'Runtime failed to start.' }
     }
     if (!outcome.ok) {
       this.onEvent({ type: 'failed', taskId, error: outcome.error })
@@ -394,7 +396,9 @@ export class TaskManager {
       roots.add(workspaceRoot)
       try { roots.add(realpathSync(workspaceRoot)) } catch { /* the root vanished: the configured spelling still gets replaced */ }
     }
-    const pairs: Array<[string, string]> = [...(run.workspace ? [[run.workspace.path, '<workspace>'] as [string, string]] : []), ...[...roots].map((r): [string, string] => [r, '<workspace-root>'])]
+    // Backstop labels for the other folders a message could name: the data folder, the working folder, the home folder.
+    const others: Array<[string, string]> = [[this.config.dataDir ?? '', '<data-dir>'], [process.cwd(), '<cwd>'], [homedir(), '<home>']]
+    const pairs: Array<[string, string]> = [...(run.workspace ? [[run.workspace.path, '<workspace>'] as [string, string]] : []), ...[...roots].map((r): [string, string] => [r, '<workspace-root>']), ...others.filter(([p]) => p.length > 1)]
     return pairs.sort((x, y) => y[0].length - x[0].length).reduce((t, [path, label]) => (path === '' ? t : t.split(path).join(label)), text)
   }
 

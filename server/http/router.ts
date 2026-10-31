@@ -123,7 +123,7 @@ export function createRouter({ routes, guards = [], responseHeaders, log, onReje
         // An oversized upload may still be streaming in; close the connection instead of draining it.
         return reply(error.status, { error: error.message }, error.status === 413 ? { connection: 'close' } : {})
       }
-      log.error(`Unhandled error on ${req.method} ${req.url}`, error)
+      log.error(`Unhandled error on ${req.method} ${pathOf(req)}`, error)
       reply(500, { error: 'Internal server error.' })
     })
   }

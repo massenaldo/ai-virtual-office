@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { REVIEW_MAX_BYTES } from '../src/workforce/types'
-import { FILE_READ_MAX_BYTES, FileOpFailure, GLOB_MAX_RESULTS, GREP_MAX_FILE_BYTES, GREP_MAX_MATCHES, TRAVERSAL_MAX_ENTRIES, editTextFile, globFiles, grepFiles, openInside, readTextFile, writeTextFile, type FileOpError } from './fileOps'
+import { FILE_READ_MAX_BYTES, FileOpFailure, GLOB_MAX_RESULTS, GREP_MAX_FILE_BYTES, GREP_MAX_MATCHES, GREP_MAX_TOTAL_BYTES, TRAVERSAL_MAX_ENTRIES, editTextFile, globFiles, grepFiles, openInside, readTextFile, writeTextFile, type FileOpError } from './fileOps'
 
 let base: string
 let ws: string
@@ -508,6 +508,59 @@ describe('globFiles and grepFiles', () => {
     put('a.txt', 'a'.repeat(1024 * 1024))
     const t = Date.now()
     expect(gr('(a+)+$').matches).toEqual([])
-    expect(Date.now() - t).toBeLessThan(1000)
+    expect(Date.now() - t).toBeLessThan(250)
+  })
+  it('a directory swapped for a symlink before it is listed leaks nothing', () => {
+    put('d/a.txt', 'needle'); writeFileSync(join(outside, 'secret-name.txt'), 'needle')
+    const swap = (rel: string) => {
+      if (rel !== 'd') return
+      renameSync(join(ws, 'd'), join(base, 'moved'))
+      symlinkSync(outside, join(ws, 'd'))
+    }
+    expect(globFiles(ws, '', '**', live, [], { beforeReaddir: swap }).paths).toEqual([])
+    rmSync(join(ws, 'd')); renameSync(join(base, 'moved'), join(ws, 'd'))
+    const r = grepFiles(ws, '', 'needle', { ignoreCase: false, mode: 'content' }, live, [], { beforeReaddir: swap })
+    expect(r.matches).toEqual([])
+  })
+  it('a base directory swapped before listing is skipped', () => {
+    put('d/a.txt'); writeFileSync(join(outside, 'o.txt'), 'x')
+    const swap = (rel: string) => { if (rel === 'd') { renameSync(join(ws, 'd'), join(base, 'moved')); symlinkSync(outside, join(ws, 'd')) } }
+    expect(globFiles(ws, 'd', '**', live, [], { beforeReaddir: swap }).paths).toEqual([])
+  })
+  it('aborts part-way through a walk', () => {
+    put('a/x.txt'); put('b/y.txt')
+    const ac = new AbortController()
+    expect(code(() => globFiles(ws, '', '**', ac.signal, [], { beforeReaddir: (rel) => { if (rel === 'b') ac.abort() } }))).toBe('aborted')
+  })
+  it('grep stops at the total byte budget', () => {
+    for (const n of ['a', 'b', 'c', 'd']) put(`${n}.txt`, 'needle' + 'z'.repeat(994))
+    const r = grepFiles(ws, '', 'needle', { ignoreCase: false, mode: 'files_with_matches' }, live, [], { limits: { maxTotalBytes: 2500 } })
+    expect(r.matches.map((m) => m.path)).toEqual(['a.txt', 'b.txt'])
+    expect(r.truncated).toBe(true)
+    expect(GREP_MAX_TOTAL_BYTES).toBe(33554432)
+  })
+  it('catches case variants and nested repositories', () => {
+    put('.ENV', 'SECRET'); put('.Git/config', 'SECRET'); put('pkg/.git/config', 'SECRET'); put('ok.txt', 'SECRET')
+    expect(gl('**').paths).toEqual(['ok.txt'])
+    expect(gr('SECRET').matches.map((m) => m.path)).toEqual(['ok.txt'])
+  })
+  it('grep ignores sensitive globs and sensitive or protected bases with a fixed empty result', () => {
+    put('.env', 'SECRET'); put('.git/config', 'SECRET'); put('data/s.txt', 'SECRET')
+    expect(gr('SECRET', { glob: '.env' }).matches).toEqual([])
+    expect(gr('SECRET', { glob: '**/.git/**' }).matches).toEqual([])
+    expect(gr('SECRET', {}, '.git')).toEqual({ matches: [], truncated: false })
+    expect(gr('SECRET', {}, 'missing/.git')).toEqual({ matches: [], truncated: false })
+    expect(gl('**', '.git/x')).toEqual({ paths: [], truncated: false })
+    expect(gr('SECRET', {}, 'data', [join(ws, 'data')])).toEqual({ matches: [], truncated: false })
+  })
+  it('is not truncated when the result count equals the cap exactly', () => {
+    for (let i = 0; i < GLOB_MAX_RESULTS; i++) put(`d/f${i}.txt`, '')
+    expect(gl('**/*.txt')).toMatchObject({ truncated: false })
+    expect(gl('**/*.txt').paths).toHaveLength(GLOB_MAX_RESULTS)
+  })
+  it('cuts a long line without splitting a surrogate pair', () => {
+    put('a.txt', 'x'.repeat(199) + '\u{1F600}tail')
+    const text = gr('tail').matches[0]!.text
+    expect(text).toBe('x'.repeat(199))
   })
 })

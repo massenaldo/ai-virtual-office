@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { closeSync, constants, fchmodSync, fstatSync, fsyncSync, lstatSync, openSync, readdirSync, readSync, realpathSync, renameSync, unlinkSync, writeSync, type Stats } from 'node:fs'
+import { closeSync, constants, fchmodSync, fstatSync, fsyncSync, lstatSync, openSync, readdirSync, readSync, realpathSync, renameSync, unlinkSync, writeSync, type Dirent, type Stats } from 'node:fs'
 import { join } from 'node:path'
 import { REVIEW_MAX_BYTES } from '../src/workforce/types'
 import { isValidPathPattern, matchesPathPattern } from './permissions/pathPattern'
@@ -273,35 +273,61 @@ export function editTextFile(workspacePath: string, relative: string, oldString:
 export const GLOB_MAX_RESULTS = 500
 export const GREP_MAX_MATCHES = 200
 export const GREP_MAX_FILE_BYTES = 1048576
+export const GREP_MAX_TOTAL_BYTES = 33554432
 export const TRAVERSAL_MAX_ENTRIES = 10000
 const GREP_LINE_MAX_CHARS = 200
 const BINARY_SNIFF_BYTES = 8192
 
+/** Test injection point: called after a directory is opened and verified, immediately before it is listed. */
+export type WalkHooks = { beforeReaddir?: (relative: string) => void }
+
 /**
- * Walks the files under a verified base directory in name order. This is the real enforcement that sensitive files
- * never show up: every entry's workspace-relative path goes through isSensitiveRelative and its absolute path through
- * isProtectedAbsolute, whatever the pattern says, and sensitive directories are pruned whole. Symlinks (file or
- * directory) are skipped, never followed. `visit` returns false to stop. Returns true when the entry cap cut the walk short.
+ * Lists one directory through a verified descriptor: openInside (identity plus strict parent real path), then the
+ * listing, then a fresh lstat that must still be the same directory (dev + ino, not a symlink). Any mismatch gives
+ * null and the caller skips the directory, so a directory swapped for a symlink never leaks outside names.
+ * A directory is read whole before the entry cap applies.
  */
-function walkFiles(workspacePath: string, baseRelative: string, signal: AbortSignal, protectedRoots: readonly string[], visit: (relative: string, baseRel: string) => boolean): boolean {
+function listDirectory(workspacePath: string, relative: string, signal: AbortSignal, hooks: WalkHooks | undefined, top: boolean): Dirent[] | null {
+  let fd: number | undefined
+  try {
+    fd = openInside(workspacePath, relative, constants.O_RDONLY | constants.O_DIRECTORY, signal)
+    const opened = fstatSync(fd)
+    hooks?.beforeReaddir?.(relative)
+    const path = relative === '' ? workspacePath : join(workspacePath, relative)
+    const entries = readdirSync(path, { withFileTypes: true })
+    const now = lstatSync(path)
+    if (now.isSymbolicLink() || !now.isDirectory() || now.dev !== opened.dev || now.ino !== opened.ino) return null
+    return entries
+  } catch (error) {
+    if (error instanceof FileOpFailure && error.code === 'aborted') throw error
+    if (signal.aborted) throw new FileOpFailure('aborted')
+    if (top) throw mapErrno(error)
+    return null
+  } finally {
+    if (fd !== undefined) { try { closeSync(fd) } catch { /* nothing more to do */ } }
+  }
+}
+
+/**
+ * Walks the files under a base directory in name order (a directory's files before its subdirectories, so a cut
+ * walk yields the first entries in that order, not the lowest paths). This is the real enforcement that sensitive
+ * files never show up: every entry's workspace-relative path goes through isSensitiveRelative and its absolute path
+ * through isProtectedAbsolute (protectedRoots must be real paths), whatever the pattern says, and sensitive directories
+ * are pruned whole. A sensitive or protected base gives an empty walk, whether or not it exists. Symlinks are skipped,
+ * never followed. `visit` returns false to stop. Returns true when the entry cap cut the walk short.
+ */
+function walkFiles(workspacePath: string, baseRelative: string, signal: AbortSignal, protectedRoots: readonly string[], visit: (relative: string, baseRel: string) => boolean, hooks?: WalkHooks): boolean {
   const parts = splitRelative(baseRelative)
-  const baseFd = openInside(workspacePath, parts.join('/'), constants.O_RDONLY | constants.O_DIRECTORY, signal)
-  try { closeSync(baseFd) } catch { /* nothing more to do */ }
-  const baseAbs = join(workspacePath, ...parts)
   const baseRel = parts.join('/')
-  if ((baseRel !== '' && isSensitiveRelative(baseRel)) || isProtectedAbsolute(baseAbs, protectedRoots)) return false
+  if ((baseRel !== '' && isSensitiveRelative(baseRel)) || isProtectedAbsolute(join(workspacePath, ...parts), protectedRoots)) return false
   let seen = 0
   const stack: Array<{ rel: string; top: boolean }> = [{ rel: baseRel, top: true }]
   while (stack.length > 0) {
     checkAborted(signal)
     const { rel, top } = stack.pop()!
-    let entries
-    try {
-      entries = readdirSync(rel === '' ? workspacePath : join(workspacePath, rel), { withFileTypes: true })
-    } catch (error) {
-      if (top) throw mapErrno(error)
-      continue
-    }
+    const entries = listDirectory(workspacePath, rel, signal, hooks, top)
+    if (entries === null) continue
+    checkAborted(signal)
     entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
     const dirs: string[] = []
     for (const entry of entries) {
@@ -320,8 +346,8 @@ function walkFiles(workspacePath: string, baseRelative: string, signal: AbortSig
   return false
 }
 
-/** Files under `baseRelative` whose path (relative to the base) matches `pattern`; workspace-relative, sorted, capped. */
-export function globFiles(workspacePath: string, baseRelative: string, pattern: string, signal: AbortSignal, protectedRoots: readonly string[]): { paths: string[]; truncated: boolean } {
+/** Files under `baseRelative` whose path (relative to the base) matches `pattern`; workspace-relative, sorted, capped (a truncated list is the first N in traversal order). protectedRoots must be real paths. */
+export function globFiles(workspacePath: string, baseRelative: string, pattern: string, signal: AbortSignal, protectedRoots: readonly string[], hooks?: WalkHooks): { paths: string[]; truncated: boolean } {
   checkAborted(signal)
   if (!isValidPathPattern(pattern)) throw new FileOpFailure('unsafe_path')
   const paths: string[] = []
@@ -331,13 +357,20 @@ export function globFiles(workspacePath: string, baseRelative: string, pattern: 
     if (paths.length >= GLOB_MAX_RESULTS) { truncated = true; return false }
     paths.push(relative)
     return true
-  })
+  }, hooks)
   paths.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
   return { paths, truncated: truncated || cut }
 }
 
+/** At most GREP_LINE_MAX_CHARS characters, never ending in half of a surrogate pair. */
+function cutLine(line: string): string {
+  let end = Math.min(line.length, GREP_LINE_MAX_CHARS)
+  if (end < line.length && (line.charCodeAt(end - 1) & 0xfc00) === 0xd800) end--
+  return line.slice(0, end)
+}
+
 /** Reads a file for grep through the safe open; null when it is unsafe, too large, binary or not UTF-8 (skipped, not an error). */
-function readForGrep(workspacePath: string, relative: string, signal: AbortSignal): string | null {
+function readForGrep(workspacePath: string, relative: string, signal: AbortSignal, budget: { left: number; exhausted: boolean }): string | null {
   let fd: number
   try {
     fd = openInside(workspacePath, relative, constants.O_RDONLY, signal)
@@ -348,6 +381,8 @@ function readForGrep(workspacePath: string, relative: string, signal: AbortSigna
   try {
     const st = fstatSync(fd)
     if (!st.isFile() || st.nlink !== 1 || st.size > GREP_MAX_FILE_BYTES) return null
+    if (st.size > budget.left) { budget.exhausted = true; return null }
+    budget.left -= st.size
     const buf = Buffer.alloc(st.size)
     let got = 0
     while (got < buf.length) {
@@ -369,6 +404,7 @@ function readForGrep(workspacePath: string, relative: string, signal: AbortSigna
 
 /**
  * Fixed-string search (never a regular expression: a model-supplied one cannot be made safe in Node without a worker).
+ * protectedRoots must be real paths. The total bytes read are capped at GREP_MAX_TOTAL_BYTES (counted from fstat before reading).
  * Matches are sorted by path then line; `files_with_matches` gives one entry per file with line 0 and empty text.
  */
 export function grepFiles(
@@ -378,6 +414,7 @@ export function grepFiles(
   opts: { glob?: string; ignoreCase: boolean; mode: 'content' | 'files_with_matches' },
   signal: AbortSignal,
   protectedRoots: readonly string[],
+  extra?: WalkHooks & { limits?: { maxTotalBytes?: number } },
 ): { matches: Array<{ path: string; line: number; text: string }>; truncated: boolean } {
   checkAborted(signal)
   if (opts.glob !== undefined && !isValidPathPattern(opts.glob)) throw new FileOpFailure('unsafe_path')
@@ -385,9 +422,11 @@ export function grepFiles(
   const needle = opts.ignoreCase ? pattern.toLowerCase() : pattern
   const matches: Array<{ path: string; line: number; text: string }> = []
   let truncated = false
+  const budget = { left: extra?.limits?.maxTotalBytes ?? GREP_MAX_TOTAL_BYTES, exhausted: false }
   const cut = walkFiles(workspacePath, baseRelative, signal, protectedRoots, (relative) => {
     if (opts.glob !== undefined && !matchesPathPattern(opts.glob, relative, true)) return true
-    const text = readForGrep(workspacePath, relative, signal)
+    const text = readForGrep(workspacePath, relative, signal, budget)
+    if (budget.exhausted) { truncated = true; return false }
     if (text === null) return true
     const lines = text.split(/\r?\n/)
     for (let i = 0; i < lines.length; i++) {
@@ -395,10 +434,10 @@ export function grepFiles(
       if (!hay.includes(needle)) continue
       if (matches.length >= GREP_MAX_MATCHES) { truncated = true; return false }
       if (opts.mode === 'files_with_matches') { matches.push({ path: relative, line: 0, text: '' }); break }
-      matches.push({ path: relative, line: i + 1, text: lines[i]!.slice(0, GREP_LINE_MAX_CHARS) })
+      matches.push({ path: relative, line: i + 1, text: cutLine(lines[i]!) })
     }
     return true
-  })
+  }, extra)
   matches.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : a.line - b.line))
   return { matches, truncated: truncated || cut }
 }

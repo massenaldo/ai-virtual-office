@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net'
 import type { MOCK_TIMINGS } from '../src/workforce/runtime/mockRuntime'
 import { resolveApiToken, type ApiToken } from './auth'
 import { acquireDataDirLock } from './dataDirLock'
+import { createSessionStore, type SessionStore } from './session'
 import { openAuditLog, type AuditInput, type AuditLog } from './audit'
 import type { ServerConfig } from './config'
 import { deriveEvents } from './deriveEvents'
@@ -38,7 +39,7 @@ export type AppDeps = {
   responseHeaders?: (req: IncomingMessage) => Record<string, string>
 }
 
-export type App = { config: ServerConfig; apiToken: ApiToken; store: WorkforceStore; permissions: PermissionStore; audit: AuditLog; events: EventLog; provider: ServerRuntimeProvider; manager: TaskManager; startedAt: string; streams: Set<ServerResponse>; handler: (req: IncomingMessage, res: ServerResponse) => void; closeStreams(): void; releaseLock(): void }
+export type App = { config: ServerConfig; apiToken: ApiToken; sessions: SessionStore; store: WorkforceStore; permissions: PermissionStore; audit: AuditLog; events: EventLog; provider: ServerRuntimeProvider; manager: TaskManager; startedAt: string; streams: Set<ServerResponse>; handler: (req: IncomingMessage, res: ServerResponse) => void; closeStreams(): void; releaseLock(): void }
 
 export type RunningServer = { url: string; port: number; app: App; close(): Promise<void> }
 
@@ -91,13 +92,14 @@ export function createApp(config: ServerConfig, deps: AppDeps = {}): App {
     const manager = new TaskManager({ store, provider, permissions, config, policy: toolPolicyFrom(config), now, log, onLifecycle: (e) => audit.write(toAuditInput(e)) })
     const streams = new Set<ServerResponse>()
     const startedAt = now()
-    const routes = createRoutes({ config, store, events, provider, manager, permissions, now, startedAt, heartbeatMs: deps.heartbeatMs ?? HEARTBEAT_MS, streams, log, maxStreams: deps.maxStreams, audit })
+    const sessions = createSessionStore({ now: () => Date.parse(now()) })
+    const routes = createRoutes({ config, store, events, provider, manager, permissions, now, startedAt, heartbeatMs: deps.heartbeatMs ?? HEARTBEAT_MS, streams, log, maxStreams: deps.maxStreams, audit, sessions, apiToken: apiToken.value })
     const onReject = (r: { requestId: string; code: string; method: string; path: string }) => audit.write({ action: 'request.rejected', actor: 'api', requestId: r.requestId, reason: r.code, detail: `${r.method} ${r.path}` })
-    const guards = [...createSecurityGuards({ allowedOrigins: config.allowedOrigins, apiToken: apiToken.value, onReject }), ...(deps.guards ?? [])]
+    const guards = [...createSecurityGuards({ allowedOrigins: config.allowedOrigins, apiToken: apiToken.value, sessions, onReject }), ...(deps.guards ?? [])]
     const responseHeaders = (req: IncomingMessage) => ({ ...securityHeaders(req, config.allowedOrigins), ...(deps.responseHeaders?.(req) ?? {}) })
     const handler = createRouter({ routes, guards, responseHeaders, log, onRejected: onReject })
     return {
-        config, apiToken, store, permissions, audit, events, provider, manager, startedAt, streams, handler, releaseLock: lock.release,
+        config, apiToken, sessions, store, permissions, audit, events, provider, manager, startedAt, streams, handler, releaseLock: lock.release,
       closeStreams: () => { for (const res of streams) res.end(); streams.clear() },
     }
   } catch (error) {

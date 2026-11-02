@@ -26,7 +26,9 @@ Open http://localhost:5173.
 | `npm run dev:full` | The backend and the frontend, with the UI reaching it through the same-origin dev proxy (no setup, no token to copy) |
 | `npm run server:build` then `npm run server:start` | The production backend bundle (`dist-server/index.js`, only `node:` imports) |
 
-To use the backend with a separately started frontend, run `npm run server`, then `VITE_WORKFORCE_API_URL=/ npm run dev`. The value `/` means "this page's own origin": the Vite dev server adds the API token on the server side and forwards `/api/*` to the backend (see "API token" below). An invalid value shows "Not configured" instead of falling back to the browser mock, and a direct `http://127.0.0.1:8787` is accepted but gets "Not authorized", because the browser has no token.
+To use the backend with a separately started frontend, run `npm run server`, then `VITE_WORKFORCE_API_URL=/ npm run dev`. The value `/` means "this page's own origin": the Vite dev server adds the API token on the server side and forwards `/api/*` to the backend (see "API token" below). An invalid value shows "Not configured" instead of falling back to the browser mock, and a direct `http://127.0.0.1:8787` works too once you pair (below).
+
+**Pairing (no proxy).** Start the backend (`npm run server`), then the frontend with `VITE_WORKFORCE_API_URL=http://127.0.0.1:8787 npm run dev` and open the app at the matching address (`http://localhost:5173` or `http://127.0.0.1:5173`, one of the backend's allowed origins). The AI agents panel asks for the API token: paste the contents of `data/api-token` (or your `API_TOKEN`). The server answers with an HttpOnly session cookie, valid 8 hours and lost on a backend restart; the page never keeps the token. Use the same host name you started the backend with (`127.0.0.1` or `localhost`): a session made on one is not valid on the other. The proxy flow (`dev:full`, or `VITE_WORKFORCE_API_URL=/`) is unchanged and never asks. Details: `docs/browser-auth.md`.
 
 ## Open with Claude Code `/vo`
 

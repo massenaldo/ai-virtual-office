@@ -1,6 +1,6 @@
 import type { IncomingMessage } from 'node:http'
 import { tokenMatches } from '../auth'
-import { sessionClearCookie, sessionIdFromCookie, type SessionStore } from '../session'
+import { authenticatedSession, sessionClearCookie, sessionIdsFromCookie, type SessionStore } from '../session'
 import type { Guard, RejectInfo, Reply } from './router'
 
 // The browser-facing guards. Order matters: Host first (it stops DNS rebinding, where a hostile page reaches the API under
@@ -57,9 +57,9 @@ export function createSecurityGuards({ allowedOrigins, apiToken, sessions, onRej
     if (req.method === 'POST' && url.pathname === '/api/session') return null
     // A valid bearer wins even when a cookie is sent too.
     if (tokenMatches(apiToken, req.headers.authorization)) { authenticatedBy.set(req, 'bearer'); return null }
-    if (sessions.valid(sessionIdFromCookie(req.headers.cookie))) { authenticatedBy.set(req, 'cookie'); return null }
+    if (authenticatedSession(req, sessions) !== undefined) { authenticatedBy.set(req, 'cookie'); return null }
     // A logout with a stale or expired cookie still clears it in the browser; the 401 body is unchanged.
-    const clears = req.method === 'DELETE' && url.pathname === '/api/session' && sessionIdFromCookie(req.headers.cookie) !== undefined
+    const clears = req.method === 'DELETE' && url.pathname === '/api/session' && sessionIdsFromCookie(req.headers.cookie).length > 0
     return refuse(req, url, requestId, 401, 'auth', 'Unauthorized.', { 'www-authenticate': 'Bearer', ...(clears ? { 'set-cookie': sessionClearCookie(req.headers.origin) } : {}) })
   }
 

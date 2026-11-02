@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
-import { MAX_SESSIONS, SESSION_COOKIE, SESSION_TTL_MS, createSessionStore, sessionIdFromCookie } from './session.js'
+import { MAX_SESSIONS, SESSION_COOKIE, SESSION_TTL_MS, authenticatedSession, createSessionStore, sessionIdsFromCookie, sessionKey } from './session.js'
 
 function setup(start = 1_000_000) {
   let t = start
@@ -85,18 +85,85 @@ describe('createSessionStore', () => {
   })
 })
 
-describe('sessionIdFromCookie', () => {
+describe('sessionIdsFromCookie', () => {
   it('parses among other cookies', () => {
-    expect(sessionIdFromCookie('a=1; vo_session=abc; b=2')).toBe('abc')
-    expect(sessionIdFromCookie('  vo_session=abc  ')).toBe('abc')
+    expect(sessionIdsFromCookie('a=1; vo_session=abc; b=2')).toEqual(['abc'])
+    expect(sessionIdsFromCookie('  vo_session=abc  ')).toEqual(['abc'])
   })
-  it('first duplicate wins', () => {
-    expect(sessionIdFromCookie('vo_session=x; vo_session=y')).toBe('x')
+  it('returns every duplicate in order', () => {
+    expect(sessionIdsFromCookie('vo_session=x; vo_session=y')).toEqual(['x', 'y'])
   })
-  it('returns undefined when missing or too long', () => {
-    expect(sessionIdFromCookie(undefined)).toBeUndefined()
-    expect(sessionIdFromCookie('a=1')).toBeUndefined()
-    expect(sessionIdFromCookie(`vo_session=${'a'.repeat(129)}`)).toBeUndefined()
-    expect(sessionIdFromCookie(`vo_session=${'a'.repeat(128)}`)).toBe('a'.repeat(128))
+  it('returns [] when missing, empty or too long, and skips over-long values only', () => {
+    expect(sessionIdsFromCookie(undefined)).toEqual([])
+    expect(sessionIdsFromCookie('a=1')).toEqual([])
+    expect(sessionIdsFromCookie('vo_session=')).toEqual([])
+    expect(sessionIdsFromCookie(`vo_session=${'a'.repeat(129)}`)).toEqual([])
+    expect(sessionIdsFromCookie(`vo_session=${'a'.repeat(129)}; vo_session=ok`)).toEqual(['ok'])
+    expect(sessionIdsFromCookie(`vo_session=${'a'.repeat(128)}`)).toEqual(['a'.repeat(128)])
+  })
+  it('keeps at most 8 values', () => {
+    const header = Array.from({ length: 12 }, (_, i) => `vo_session=v${i}`).join('; ')
+    expect(sessionIdsFromCookie(header)).toEqual(Array.from({ length: 8 }, (_, i) => `v${i}`))
+  })
+})
+
+describe('authenticatedSession', () => {
+  it('returns the first VALID id, skipping garbage set by another page', () => {
+    const { store } = setup()
+    const { id } = store.create()
+    expect(authenticatedSession({ headers: { cookie: `vo_session=garbage; vo_session=${id}` } }, store)).toBe(id)
+    expect(authenticatedSession({ headers: { cookie: `vo_session=${id}; vo_session=garbage` } }, store)).toBe(id)
+  })
+  it('returns undefined with no valid id or no cookie', () => {
+    const { store } = setup()
+    store.create()
+    expect(authenticatedSession({ headers: { cookie: 'vo_session=garbage' } }, store)).toBeUndefined()
+    expect(authenticatedSession({ headers: {} }, store)).toBeUndefined()
+  })
+})
+
+describe('onEnd', () => {
+  it('fires once with the hashed key on destroy, never for an unknown id', () => {
+    const { store } = setup()
+    const keys: string[] = []
+    store.onEnd((k) => keys.push(k))
+    const { id } = store.create()
+    store.destroy('unknown')
+    expect(keys).toEqual([])
+    store.destroy(id)
+    store.destroy(id)
+    expect(keys).toEqual([sessionKey(id)])
+    expect(keys[0]).toMatch(/^[0-9a-f]{64}$/)
+    expect(keys[0]).not.toBe(id)
+  })
+  it('fires on eviction of the oldest', () => {
+    const { store } = setup()
+    const keys: string[] = []
+    store.onEnd((k) => keys.push(k))
+    const first = store.create()
+    for (let i = 0; i < MAX_SESSIONS; i++) store.create()
+    expect(keys).toEqual([sessionKey(first.id)])
+  })
+  it('fires on expiry purge', () => {
+    const { store, advance } = setup()
+    const keys: string[] = []
+    store.onEnd((k) => keys.push(k))
+    const a = store.create()
+    advance(SESSION_TTL_MS)
+    expect(store.valid(a.id)).toBe(false)
+    expect(keys).toEqual([sessionKey(a.id)])
+  })
+  it('a throwing listener breaks neither the others nor create/destroy/purge', () => {
+    const { store, advance } = setup()
+    const keys: string[] = []
+    store.onEnd(() => { throw new Error('boom') })
+    store.onEnd((k) => keys.push(k))
+    const a = store.create()
+    expect(store.destroy(a.id)).toBe(true)
+    const b = store.create()
+    advance(SESSION_TTL_MS)
+    expect(() => store.create()).not.toThrow()
+    expect(keys).toEqual([sessionKey(a.id), sessionKey(b.id)])
+    expect(store.size).toBe(1)
   })
 })

@@ -44,6 +44,15 @@ describe('event streams tied to a session', () => {
     expect(s.app.streams.size).toBe(0)
   })
 
+  it('binds a stream to the valid session when a garbage vo_session comes first', async () => {
+    await start()
+    const cookie = await pairCookie()
+    await cookieStream(`vo_session=garbage; ${cookie}`)
+    expect(s.app.streams.size).toBe(1)
+    await logout(cookie)
+    expect(s.app.streams.size).toBe(0)
+  })
+
   it('a bearer stream and another session stream survive a logout', async () => {
     await start()
     const a = await pairCookie()

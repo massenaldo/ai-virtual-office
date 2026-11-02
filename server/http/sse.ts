@@ -3,7 +3,7 @@ import type { WorkforceEvent } from '../../src/workforce/api'
 import type { EventLog } from '../eventLog'
 import { tokenMatches } from '../auth'
 import type { Logger } from '../log'
-import { sessionIdFromCookie, sessionKey, type SessionStore } from '../session'
+import { authenticatedSession, sessionKey, type SessionStore } from '../session'
 import { HttpError, type Route } from './router'
 
 /**
@@ -42,7 +42,7 @@ export function eventsRoute(deps: { events: EventLog; heartbeatMs: number; strea
       const resume = (typeof header === 'string' && header !== '' ? header : null) ?? (url.searchParams.get('lastEventId') || null)
 
       // The auth guard already let this request in; a valid bearer wins over a cookie, as it does there.
-      const sessionId = tokenMatches(apiToken, req.headers.authorization) ? undefined : sessionIdFromCookie(req.headers.cookie)
+      const sessionId = tokenMatches(apiToken, req.headers.authorization) ? undefined : authenticatedSession(req, sessions)
       const key = sessionId === undefined ? undefined : sessionKey(sessionId)
       let cleaned = false
       let off = () => {}
@@ -59,7 +59,7 @@ export function eventsRoute(deps: { events: EventLog; heartbeatMs: number; strea
           if (set?.size === 0) bySession.delete(key)
         }
       }
-      const end = () => { res.end(); cleanup() }
+      const end = () => { if (cleaned) return; res.end(); cleanup() }
       // A client that stops reading must not make the server buffer without bound: it is cut off and can reconnect.
       const send = (text: string) => {
         if (cleaned) return

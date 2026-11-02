@@ -26,7 +26,8 @@ export function createSessionStore(opts: { now: () => number }): SessionStore {
   // Map preserves insertion order, so the first key is the oldest session.
   const sessions = new Map<string, number>()
   const listeners: Array<(key: string) => void> = []
-  const ended = (key: string): void => { for (const l of listeners) l(key) }
+  // A throwing listener must never break create, destroy or purge (or the listeners after it).
+  const ended = (key: string): void => { for (const l of listeners) { try { l(key) } catch { /* ignored on purpose */ } } }
 
   const purge = (): void => {
     const t = opts.now()
@@ -66,17 +67,29 @@ export function createSessionStore(opts: { now: () => number }): SessionStore {
   }
 }
 
-/** Returns the first vo_session value of a Cookie header, or undefined if absent or over 128 characters. */
-export function sessionIdFromCookie(header: string | undefined): string | undefined {
-  if (!header) return undefined
+const MAX_COOKIE_VALUES = 8
+
+/**
+ * Every vo_session value of a Cookie header (at most 8; values over 128 characters or empty are skipped). More than one can
+ * arrive when another page on the same host name sets its own, more specific cookie; the caller accepts any valid one.
+ */
+export function sessionIdsFromCookie(header: string | undefined): string[] {
+  const ids: string[] = []
+  if (!header) return ids
   for (const part of header.split(';')) {
     const eq = part.indexOf('=')
-    if (eq < 0) continue
-    if (part.slice(0, eq).trim() !== SESSION_COOKIE) continue
+    if (eq < 0 || part.slice(0, eq).trim() !== SESSION_COOKIE) continue
     const value = part.slice(eq + 1).trim()
-    return value.length > 0 && value.length <= MAX_ID_LENGTH ? value : undefined
+    if (value.length === 0 || value.length > MAX_ID_LENGTH) continue
+    ids.push(value)
+    if (ids.length >= MAX_COOKIE_VALUES) break
   }
-  return undefined
+  return ids
+}
+
+/** The one place a request's session is decided: the first vo_session value that is a valid session, or undefined. Used by the auth guard, logout and the event stream so they cannot disagree. */
+export function authenticatedSession(req: { headers: { cookie?: string } }, sessions: Pick<SessionStore, 'valid'>): string | undefined {
+  return sessionIdsFromCookie(req.headers.cookie).find((id) => sessions.valid(id))
 }
 
 const COOKIE_ATTRS = 'HttpOnly; SameSite=Strict; Path=/api'

@@ -1,6 +1,6 @@
 import { tokenEquals } from '../auth'
 import type { AuditLog } from '../audit'
-import { sessionClearCookie, sessionIdFromCookie, sessionSetCookie, type SessionStore } from '../session'
+import { authenticatedSession, sessionClearCookie, sessionSetCookie, type SessionStore } from '../session'
 import { HttpError, type Reply, type Route } from './router'
 
 export const PAIRING_FAILURES_PER_MINUTE = 10
@@ -54,7 +54,7 @@ export function createSessionRoutes({ sessions, apiToken, audit, now }: SessionR
       method: 'DELETE',
       path: '/api/session',
       handler: ({ req, requestId }): Reply => {
-        if (sessions.destroy(sessionIdFromCookie(req.headers.cookie))) audit.write({ action: 'session.ended', actor: 'api', requestId })
+        if (sessions.destroy(authenticatedSession(req, sessions))) audit.write({ action: 'session.ended', actor: 'api', requestId })
         return { status: 204, body: null, headers: { 'set-cookie': sessionClearCookie(req.headers.origin) } }
       },
     },

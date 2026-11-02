@@ -124,6 +124,23 @@ describe('cookie authentication', () => {
     expect(JSON.parse(expired.body)).toEqual({ error: 'Unauthorized.' })
   })
 
+  it('accepts the request when ANY vo_session value is valid (cookie tossing), refuses garbage only', async () => {
+    await start()
+    const { cookie } = await paired()
+    expect((await withCookie(`vo_session=garbage; ${cookie}`, '/api/state')).status).toBe(200)
+    expect((await withCookie(`${cookie}; vo_session=garbage`, '/api/state')).status).toBe(200)
+    expect((await withCookie('vo_session=garbage', '/api/state')).status).toBe(401)
+    expect((await withCookie('vo_session=garbage; vo_session=garbage2', '/api/state')).status).toBe(401)
+  })
+
+  it('logout destroys the valid session even when a garbage value comes first', async () => {
+    await start()
+    const { cookie } = await paired()
+    const out = await withCookie(`vo_session=garbage; ${cookie}`, '/api/session', { method: 'DELETE', headers: { ...JSON_TYPE, origin: 'http://localhost:5173' } })
+    expect(out.status).toBe(204)
+    expect((await withCookie(cookie, '/api/state')).status).toBe(401)
+  })
+
   it('refuses a cookie-only mutation without an allowed Origin, allows it with one', async () => {
     await start()
     const { cookie } = await paired()

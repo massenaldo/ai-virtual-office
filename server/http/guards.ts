@@ -1,11 +1,12 @@
 import type { IncomingMessage } from 'node:http'
 import { tokenMatches } from '../auth'
-import { sessionIdFromCookie, type SessionStore } from '../session'
+import { sessionClearCookie, sessionIdFromCookie, type SessionStore } from '../session'
 import type { Guard, RejectInfo, Reply } from './router'
 
 // The browser-facing guards. Order matters: Host first (it stops DNS rebinding, where a hostile page reaches the API under
-// its own name), then Origin (it stops other web pages), then preflight, then the bearer token (it stops programs that talk to the backend directly; a program that can reach the dev
-// proxy can still send a request that looks same-origin, see the README), then the JSON-only rule (it turns a cross-origin
+// its own name), then Origin (it stops other web pages), then preflight, then auth (bearer token or session cookie; it stops programs that talk to the backend directly; a program that can reach the dev
+// proxy can still send a request that looks same-origin, see the README), then the cookie-Origin rule (a state change authenticated only by cookie must carry an allowed
+// Origin, which stops CSRF), then the JSON-only rule (it turns a cross-origin
 // "simple request" into one that needs a preflight, which the Origin guard denies).
 
 export const ALLOWED_HOST_NAMES = ['127.0.0.1', 'localhost', '[::1]'] as const
@@ -47,8 +48,9 @@ export function createSecurityGuards({ allowedOrigins, apiToken, sessions, onRej
     return { status: 204, body: null, headers: { 'access-control-allow-origin': value, 'access-control-allow-methods': CORS_METHODS, 'access-control-allow-headers': CORS_HEADERS, 'access-control-allow-credentials': 'true', 'access-control-max-age': String(PREFLIGHT_MAX_AGE_S) } }
   }
 
-  // Every route needs the bearer token, including the event stream and requests with no Origin header (curl, another local
-  // program). Only the health check (it carries no state) and preflight are open. The token is read from the header only.
+  // Every route needs the bearer token or a valid session cookie, including the event stream and requests with no Origin header
+  // (curl, another local program). Only the health check (it carries no state), pairing (POST /api/session, which checks the
+  // token itself) and preflight are open. The token is read from the header or the pairing body only, never a URL.
   const auth: Guard = (req, url, { requestId }) => {
     if (req.method === 'GET' && url.pathname === '/api/health') return null
     // Pairing is how a browser gets a session; it still passes Host, Origin, preflight and JSON-only, and the route checks the token itself.
@@ -56,7 +58,9 @@ export function createSecurityGuards({ allowedOrigins, apiToken, sessions, onRej
     // A valid bearer wins even when a cookie is sent too.
     if (tokenMatches(apiToken, req.headers.authorization)) { authenticatedBy.set(req, 'bearer'); return null }
     if (sessions.valid(sessionIdFromCookie(req.headers.cookie))) { authenticatedBy.set(req, 'cookie'); return null }
-    return refuse(req, url, requestId, 401, 'auth', 'Unauthorized.', { 'www-authenticate': 'Bearer' })
+    // A logout with a stale or expired cookie still clears it in the browser; the 401 body is unchanged.
+    const clears = req.method === 'DELETE' && url.pathname === '/api/session' && sessionIdFromCookie(req.headers.cookie) !== undefined
+    return refuse(req, url, requestId, 401, 'auth', 'Unauthorized.', { 'www-authenticate': 'Bearer', ...(clears ? { 'set-cookie': sessionClearCookie(req.headers.origin) } : {}) })
   }
 
   // The browser sends a cookie on its own, so a cookie-authenticated state change must prove where it came from: an allowed

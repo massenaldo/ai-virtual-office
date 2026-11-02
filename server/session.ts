@@ -66,3 +66,12 @@ export function sessionIdFromCookie(header: string | undefined): string | undefi
   }
   return undefined
 }
+
+const COOKIE_ATTRS = 'HttpOnly; SameSite=Strict; Path=/api'
+const secureFor = (origin: string | undefined): string => ((origin ?? '').startsWith('https:') ? '; Secure' : '')
+
+/** Set-Cookie value for a new session; Secure only when the request Origin is https. */
+export const sessionSetCookie = (id: string, origin: string | undefined): string => `${SESSION_COOKIE}=${id}; ${COOKIE_ATTRS}; Max-Age=${SESSION_TTL_MS / 1000}${secureFor(origin)}`
+
+/** Set-Cookie value that clears the cookie, with the same attributes (and Secure rule) as the one that set it. */
+export const sessionClearCookie = (origin: string | undefined): string => `${SESSION_COOKIE}=; ${COOKIE_ATTRS}; Max-Age=0${secureFor(origin)}`

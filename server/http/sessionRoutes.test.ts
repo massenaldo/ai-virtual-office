@@ -217,6 +217,7 @@ describe('CORS credentials', () => {
   })
 })
 
+// Note: the recording logger sees post-redaction lines, so the raw audit file text is the strong no-leak check.
 describe('audit and logs', () => {
   it('audits created, ended and rejected sessions without the token or the id', async () => {
     await start()
@@ -244,5 +245,60 @@ describe('audit and logs', () => {
       expect(text).not.toContain(secret)
       expect(logger.lines.join('\n')).not.toContain(secret)
     }
+  })
+
+  it('throttles session.rejected like request.rejected and keeps earlier records', async () => {
+    await start()
+    await pair({ token: TEST_TOKEN })
+    for (let i = 0; i < 10; i++) await pair({ token: `x${i}` })
+    for (let i = 0; i < 200; i++) await pair({ token: TEST_TOKEN })
+    s.app.audit.close()
+    const records = auditText().trim().split('\n').map((l) => JSON.parse(l))
+    expect(records.filter((x: { action: string }) => x.action === 'session.created')).toHaveLength(1)
+    expect(records.filter((x: { action: string }) => x.action === 'session.rejected').length).toBeLessThanOrEqual(30)
+    expect(records.some((x: { reason?: string }) => x.reason === 'suppressed')).toBe(true)
+  })
+})
+
+describe('review fixes', () => {
+  it('clears a stale cookie on DELETE /api/session even though auth fails, with the same 401 body', async () => {
+    await start({ ALLOWED_ORIGINS: `${HTTPS_ORIGIN},${ORIGIN}` })
+    const r = await withCookie('vo_session=stale', '/api/session', { method: 'DELETE', headers: JSON_TYPE })
+    expect(r.status).toBe(401)
+    expect(JSON.parse(r.body)).toEqual({ error: 'Unauthorized.' })
+    expect(String(r.headers['set-cookie'])).toBe('vo_session=; HttpOnly; SameSite=Strict; Path=/api; Max-Age=0')
+    const none = await rawRequest(s.url, { method: 'DELETE', path: '/api/session', noAuth: true, headers: JSON_TYPE })
+    expect(none.status).toBe(401)
+    expect(none.headers['set-cookie']).toBeUndefined()
+    const other = await withCookie('vo_session=stale', '/api/agents/x', { method: 'DELETE', headers: JSON_TYPE })
+    expect(other.headers['set-cookie']).toBeUndefined()
+    const https = await withCookie('vo_session=stale', '/api/session', { method: 'DELETE', headers: { ...JSON_TYPE, origin: HTTPS_ORIGIN } })
+    expect(String(https.headers['set-cookie'])).toBe('vo_session=; HttpOnly; SameSite=Strict; Path=/api; Max-Age=0; Secure')
+  })
+
+  it('adds Secure to the clearing cookie for an https Origin', async () => {
+    await start({ ALLOWED_ORIGINS: `${HTTPS_ORIGIN},${ORIGIN}` })
+    const r = await s.api('DELETE', '/api/session', undefined, { origin: HTTPS_ORIGIN })
+    expect(r.status).toBe(204)
+    expect(r.headers.get('set-cookie')).toBe('vo_session=; HttpOnly; SameSite=Strict; Path=/api; Max-Age=0; Secure')
+  })
+
+  it('refuses cookie-only mutations with a multi-value or trailing-slash Origin', async () => {
+    await start()
+    const r = await pair({ token: TEST_TOKEN })
+    const cookie = cookieOf(r.headers['set-cookie'])
+    for (const origin of [`${ORIGIN}, http://evil.example`, `${ORIGIN}/`]) {
+      expect((await withCookie(cookie, '/api/agents', { method: 'POST', headers: { ...JSON_TYPE, origin }, body: newAgent })).status).toBe(403)
+    }
+    expect(await agentNames()).not.toContain('Cookie Agent')
+  })
+
+  it('counts non-string tokens toward the limit and sends Retry-After on 429', async () => {
+    await start()
+    for (let i = 0; i < 10; i++) expect((await pair({ token: i })).status).toBe(401)
+    clock += 20_000
+    const r = await pair({ token: TEST_TOKEN })
+    expect(r.status).toBe(429)
+    expect(r.headers['retry-after']).toBe('40')
   })
 })

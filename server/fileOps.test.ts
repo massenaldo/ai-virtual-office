@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { REVIEW_MAX_BYTES } from '../src/workforce/types'
-import { FILE_READ_MAX_BYTES, FileOpFailure, editTextFile, openInside, readTextFile, writeTextFile, type FileOpError } from './fileOps'
+import { FILE_READ_MAX_BYTES, FileOpFailure, GLOB_MAX_RESULTS, GREP_MAX_FILE_BYTES, GREP_MAX_MATCHES, TRAVERSAL_MAX_ENTRIES, editTextFile, globFiles, grepFiles, openInside, readTextFile, writeTextFile, type FileOpError } from './fileOps'
 
 let base: string
 let ws: string
@@ -410,5 +410,104 @@ describe('writeTextFile hardening', () => {
     const c = code(() => writeTextFile(ws, 'a'.repeat(300), 'x', live))
     expect(['unsafe_path', 'no error']).toContain(c)
     expect(tmps(ws)).toEqual([])
+  })
+})
+
+describe('globFiles and grepFiles', () => {
+  const put = (rel: string, content = 'x') => {
+    const abs = join(ws, rel)
+    mkdirSync(join(abs, '..'), { recursive: true })
+    writeFileSync(abs, content)
+  }
+  const gl = (pattern: string, baseRel = '', roots: string[] = []) => globFiles(ws, baseRel, pattern, live, roots)
+  const gr = (pattern: string, o: { glob?: string; ignoreCase?: boolean; mode?: 'content' | 'files_with_matches' } = {}, baseRel = '', roots: string[] = []) =>
+    grepFiles(ws, baseRel, pattern, { ignoreCase: false, mode: 'content', ...o }, live, roots)
+
+  it('glob returns sorted workspace-relative files, relative to the base', () => {
+    put('b.ts'); put('a.ts'); put('src/z.ts'); put('src/deep/y.ts'); put('src/n.md')
+    expect(gl('**/*.ts').paths).toEqual(['a.ts', 'b.ts', 'src/deep/y.ts', 'src/z.ts'])
+    expect(gl('**/*.ts', 'src')).toEqual({ paths: ['src/deep/y.ts', 'src/z.ts'], truncated: false })
+    expect(gl('*.ts', '.').paths).toEqual(['a.ts', 'b.ts'])
+  })
+  it('never returns sensitive files or protected roots, even when named, for glob and grep', () => {
+    put('.env', 'SECRET'); put('.git/config', 'SECRET'); put('k/id_rsa', 'SECRET'); put('c.pem', 'SECRET'); put('ok.txt', 'SECRET')
+    put('data/store.json', 'SECRET')
+    const roots = [join(ws, 'data')]
+    expect(gl('**', '', roots).paths).toEqual(['ok.txt'])
+    expect(gl('.env', '', roots).paths).toEqual([])
+    expect(gl('.git/**', '', roots).paths).toEqual([])
+    expect(gr('SECRET', {}, '', roots).matches.map((m) => m.path)).toEqual(['ok.txt'])
+    expect(gl('**', '.git').paths).toEqual([])
+  })
+  it('skips symlinked files and directories', () => {
+    put('real/a.txt', 'needle'); writeFileSync(join(outside, 'o.txt'), 'needle')
+    symlinkSync(join(outside, 'o.txt'), join(ws, 'link.txt'))
+    symlinkSync(outside, join(ws, 'linkdir'))
+    expect(gl('**').paths).toEqual(['real/a.txt'])
+    expect(gr('needle').matches.map((m) => m.path)).toEqual(['real/a.txt'])
+  })
+  it('refuses a base that is a symlink, outside, missing or a file', () => {
+    put('f.txt'); symlinkSync(outside, join(ws, 'ln'))
+    expect(code(() => gl('**', 'ln'))).toBe('unsafe_path')
+    expect(code(() => gl('**', '../outside'))).toBe('unsafe_path')
+    expect(code(() => gl('**', 'nope'))).toBe('not_found')
+    expect(code(() => gl('**', 'f.txt'))).toBe('not_a_directory')
+  })
+  it('rejects invalid patterns', () => {
+    expect(code(() => gl('../*'))).toBe('unsafe_path')
+    expect(code(() => gl('{a,b}'))).toBe('unsafe_path')
+    expect(code(() => gr('x', { glob: '/abs' }))).toBe('unsafe_path')
+  })
+  it('caps glob results', () => {
+    for (let i = 0; i < GLOB_MAX_RESULTS + 5; i++) put(`d/f${String(i).padStart(4, '0')}.txt`, '')
+    const r = gl('**/*.txt')
+    expect(r.paths).toHaveLength(GLOB_MAX_RESULTS)
+    expect(r.truncated).toBe(true)
+  })
+  it('stops the traversal at the entry cap', () => {
+    for (let i = 0; i < TRAVERSAL_MAX_ENTRIES + 20; i++) put(`m/f${i}.log`, '')
+    const r = gl('**/*.log')
+    expect(r.truncated).toBe(true)
+    expect(r.paths.length).toBeLessThanOrEqual(GLOB_MAX_RESULTS)
+  })
+  it('aborts', () => {
+    put('a.txt')
+    const ac = new AbortController(); ac.abort()
+    expect(code(() => globFiles(ws, '', '**', ac.signal, []))).toBe('aborted')
+    expect(code(() => grepFiles(ws, '', 'x', { ignoreCase: false, mode: 'content' }, ac.signal, []))).toBe('aborted')
+  })
+  it('grep matches a fixed string and numbers lines', () => {
+    put('a.txt', 'one\ntwo (a+)+$\nthree'); put('b.txt', 'none')
+    expect(gr('(a+)+$').matches).toEqual([{ path: 'a.txt', line: 2, text: 'two (a+)+$' }])
+    expect(gr('o').matches.map((m) => `${m.path}:${m.line}`)).toEqual(['a.txt:1', 'a.txt:2', 'b.txt:1'])
+  })
+  it('grep ignoreCase, files_with_matches and glob filter', () => {
+    put('a.txt', 'Hello\nhello'); put('b.md', 'HELLO')
+    expect(gr('hello').matches).toHaveLength(1)
+    expect(gr('hello', { ignoreCase: true }).matches).toHaveLength(3)
+    expect(gr('hello', { ignoreCase: true, mode: 'files_with_matches' }).matches).toEqual([{ path: 'a.txt', line: 0, text: '' }, { path: 'b.md', line: 0, text: '' }])
+    expect(gr('hello', { ignoreCase: true, glob: '**/*.md' }).matches.map((m) => m.path)).toEqual(['b.md'])
+  })
+  it('grep skips binary, oversized and invalid UTF-8 files', () => {
+    put('bin.dat', 'needle\0x'); put('big.txt', 'needle' + 'a'.repeat(GREP_MAX_FILE_BYTES)); writeFileSync(join(ws, 'bad.txt'), Buffer.from([0x6e, 0xff, 0xfe]))
+    put('good.txt', 'needle')
+    expect(gr('needle').matches.map((m) => m.path)).toEqual(['good.txt'])
+  })
+  it('grep skips hard-linked files', () => {
+    put('a.txt', 'needle'); linkSync(join(ws, 'a.txt'), join(ws, 'b.txt'))
+    expect(gr('needle').matches).toEqual([])
+  })
+  it('grep caps matches and cuts long lines', () => {
+    put('a.txt', ('x'.repeat(300) + '\n').repeat(GREP_MAX_MATCHES + 10))
+    const r = gr('x')
+    expect(r.matches).toHaveLength(GREP_MAX_MATCHES)
+    expect(r.truncated).toBe(true)
+    expect(r.matches[0]!.text).toHaveLength(200)
+  })
+  it('grep is not vulnerable to catastrophic patterns', () => {
+    put('a.txt', 'a'.repeat(1024 * 1024))
+    const t = Date.now()
+    expect(gr('(a+)+$').matches).toEqual([])
+    expect(Date.now() - t).toBeLessThan(1000)
   })
 })

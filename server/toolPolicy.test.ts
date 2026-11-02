@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { REVIEW_MAX_BYTES } from '../src/workforce/types'
 import { MOCK_DEMO_WRITE } from './runtime/mockProvider'
-import { decideToolUse, DEFAULT_ALLOWED_TOOLS, sanitizeSummary, TOOL_CATALOGUE, toolDeniedMessage, type ToolDecision } from './toolPolicy'
+import { decideToolUse, DEFAULT_ALLOWED_TOOLS, sanitizeSummary, TOOL_CATALOGUE, toolDeniedMessage, toolPolicyFrom, type ToolDecision } from './toolPolicy'
 import { makeWorkspaceRoot } from './test/workspaces'
 
 let ws: ReturnType<typeof makeWorkspaceRoot>
@@ -307,5 +307,45 @@ describe('sensitive paths', () => {
   })
   it('words the denial without a path', () => {
     expect(toolDeniedMessage('Read', 'sensitive_path')).toBe('Tool "Read" denied by policy: the path is protected.')
+  })
+})
+
+describe('sensitive paths through links and case', () => {
+  const input = (tool: string, p: string) => ({ file_path: p, ...(tool === 'Write' ? { content: 'x' } : {}), ...(tool === 'Edit' ? { old_string: 'a', new_string: 'b' } : {}) })
+  const sensitive = expect.objectContaining({ decision: 'deny', reason: 'sensitive_path' })
+  beforeEach(() => {
+    writeFileSync(join(W.path, '.env'), 'S=1')
+    mkdirSync(join(W.path, '.git'))
+    mkdirSync(join(W.path, 'vault'))
+    writeFileSync(join(W.path, 'vault', 'tok.txt'), 't')
+    symlinkSync(join(W.path, '.env'), join(W.path, 'notes-link'))
+    symlinkSync(join(W.path, '.git'), join(W.path, 'repo'))
+    symlinkSync(join(W.path, 'vault', 'tok.txt'), join(W.path, 'tok-link'))
+  })
+  it.each(['Read', 'Write', 'Edit'])('%s refuses a symlink to .env, .git or a protected root', (tool) => {
+    expect(decide(tool, input(tool, 'notes-link'))).toEqual(sensitive)
+    expect(decide(tool, input(tool, 'repo/HEAD'))).toEqual(sensitive)
+    expect(decide(tool, input(tool, 'repo'))).toEqual(sensitive)
+    expect(decide(tool, input(tool, 'tok-link'), W, { ...ALL, protectedRoots: [join(W.path, 'vault')] })).toEqual(sensitive)
+  })
+  it('refuses spellings of .env and .git', () => {
+    for (const p of ['./.env', '.ENV', '.GIT/HEAD', '.env/']) expect(decide('Read', { file_path: p })).toEqual(sensitive)
+  })
+  it('matches a protected root in any case', () => {
+    const policy = { ...ALL, protectedRoots: [join(W.path, 'VAULT')] }
+    expect(decide('Read', { file_path: 'vault/tok.txt' }, W, policy)).toEqual(sensitive)
+  })
+  it('still reports a link out of the workspace as outside_workspace', () => {
+    expect(decide('Read', { file_path: 'link/secret.txt' })).toMatchObject({ decision: 'deny', reason: 'outside_workspace' })
+  })
+})
+
+describe('toolPolicyFrom', () => {
+  it('protects the real path of dataDir, and survives a missing one', () => {
+    const real = realpathSync(outside)
+    const alias = join(outside, 'alias')
+    symlinkSync(real, alias)
+    expect(toolPolicyFrom({ allowedTools: ['Read'], dataDir: alias }).protectedRoots).toEqual([real])
+    expect(toolPolicyFrom({ allowedTools: ['Read'], dataDir: join(outside, 'missing') }).protectedRoots).toEqual([join(outside, 'missing')])
   })
 })

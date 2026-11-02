@@ -1,9 +1,9 @@
+import { realpathSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import type { ServerConfig } from './config'
 import { REVIEW_MAX_BYTES, type ToolReviewBody } from '../src/workforce/types'
 import { formatBytes } from './limits'
 import { redactSecrets, scrub } from './redact'
-import { realpathSync } from 'node:fs'
-import { join, resolve } from 'node:path'
 import { globReachesSensitive, isProtectedAbsolute, isSensitiveRelative } from './sensitivePaths'
 import { checkPathInWorkspace, type ResolvedWorkspace } from './workspaces'
 
@@ -179,7 +179,8 @@ export function decideToolUse(policy: ToolPolicy, toolName: string, input: unkno
     const checked = checkPathInWorkspace(workspace!.path, input[arg])
     if (!checked.ok) return denied(checked.reason)
     rel = checked.relative
-    if (isSensitiveRelative(checked.relative) || isProtectedAbsolute(join(workspace!.path, checked.relative), policy.protectedRoots)) return denied('sensitive_path')
+    // Both the name as given and where it really lands: a symlink `notes -> .env` must not hide the target.
+    if ([checked.relative, checked.real].some((r) => isSensitiveRelative(r) || isProtectedAbsolute(join(workspace!.path, r), policy.protectedRoots))) return denied('sensitive_path')
     paths.push({ arg, relative: checked.relative })
   }
   if (globs.some((g) => typeof g === 'string' && globReachesSensitive(g))) return denied('sensitive_path')

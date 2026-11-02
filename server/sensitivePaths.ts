@@ -25,5 +25,6 @@ export function globReachesSensitive(pattern: string): boolean {
 
 /** True when an absolute path is one of the protected roots or inside one (for example the server's data directory). */
 export function isProtectedAbsolute(absolute: string, roots: readonly string[]): boolean {
-  return roots.some((r) => isInside(r, absolute))
+  const fold = (p: string) => p.normalize('NFC').toLowerCase()
+  return roots.some((r) => isInside(fold(r), fold(absolute)))
 }

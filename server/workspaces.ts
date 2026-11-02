@@ -122,7 +122,7 @@ export function resolveWorkspace(config: WorkspaceConfig, workspaceId: unknown):
 }
 
 /** Is `candidate` (relative to the workspace, or absolute) inside it once symlinks are resolved? workspacePath must be a real path. */
-export function checkPathInWorkspace(workspacePath: string, candidate: unknown): { ok: true; relative: string } | { ok: false; reason: PathReason } {
+export function checkPathInWorkspace(workspacePath: string, candidate: unknown): { ok: true; relative: string; /** The same place with symlinks resolved, relative to the workspace. */ real: string } | { ok: false; reason: PathReason } {
   // NUL is rejected before any filesystem call: Node throws ERR_INVALID_ARG_VALUE for it, not ENOENT.
   if (typeof candidate !== 'string' || candidate === '' || candidate.length > MAX_PATH_CHARS || candidate.includes('\0') || candidate.includes('\\')) return { ok: false, reason: 'invalid_path' }
   // A `..` after a symlink is resolved by the kernel against the link's target, but resolve() below removes it textually,
@@ -131,9 +131,11 @@ export function checkPathInWorkspace(workspacePath: string, candidate: unknown):
   const abs = resolve(workspacePath, candidate)
   if (!isInside(workspacePath, abs)) return { ok: false, reason: 'outside_workspace' }
   let cur = abs
+  let resolved = ''
   for (;;) {
     try {
       const real = realpathSync(cur)
+      resolved = join(real, relative(cur, abs))
       if (!isInside(workspacePath, real)) return { ok: false, reason: 'outside_workspace' }
       // An existing regular file with more than one name may be a hard link to a file outside the workspace, which no path
       // check can see. It is refused (this also refuses a second name inside the workspace, which is the safe side).
@@ -159,5 +161,5 @@ export function checkPathInWorkspace(workspacePath: string, candidate: unknown):
       return { ok: false, reason: 'invalid_path' }
     }
   }
-  return { ok: true, relative: relative(workspacePath, abs) || '.' }
+  return { ok: true, relative: relative(workspacePath, abs) || '.', real: relative(workspacePath, resolved) || '.' }
 }

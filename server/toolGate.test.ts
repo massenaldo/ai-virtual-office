@@ -19,8 +19,9 @@ const workspace = () => {
   return r.ok ? ({ ok: true, workspace: r.workspace } as const) : ({ ok: false } as const)
 }
 
-function gate(approve: (request: { tool: string; input: unknown }, digest: string) => Promise<ToolGateResult>, extra: { isLive?: () => boolean; stale?: (tool: string, detail: string) => void; signal?: AbortSignal; permit?: ToolGateDeps['permit'] } = {}): ToolGate {
-  return createToolGate({ taskId: 'task-1', policy, workspace, isLive: extra.isLive ?? (() => true), approve, stale: extra.stale ?? (() => {}), signal: extra.signal ?? new AbortController().signal, permit: extra.permit ?? (() => ({ ok: true })) })
+function gate(approve: (request: { tool: string; input: unknown }, digest: string) => Promise<ToolGateResult>, extra: { isLive?: () => boolean; stale?: (tool: string, detail: string) => void; signal?: AbortSignal; permit?: ToolGateDeps['permit']; track?: ToolGateDeps['track'] } = {}): ToolGate {
+  const signal = extra.signal ?? new AbortController().signal
+  return createToolGate({ taskId: 'task-1', policy, workspace, isLive: extra.isLive ?? (() => true), approve, stale: extra.stale ?? (() => {}), signal, permit: extra.permit ?? (() => ({ ok: true, ruleId: 'rule-1' })), track: extra.track ?? (() => ({ signal, end: () => {} })) })
 }
 const write = { tool: 'Write', input: { file_path: 'sub/out.txt', content: 'x' } }
 
@@ -180,7 +181,7 @@ describe('the start context', () => {
 describe('createToolGate: permit', () => {
   it('runs permit after the approval and before perform, with the digest and the checked paths', async () => {
     const order: string[] = []
-    const permit = vi.fn((_r: unknown, _d: string, _p: unknown) => { order.push('permit'); return { ok: true } as const })
+    const permit = vi.fn((_r: unknown, _d: string, _p: unknown) => { order.push('permit'); return { ok: true, ruleId: 'rule-1' } as const })
     const g = gate((_r, d) => { order.push(`approve:${d.slice(0, 6)}`); return Promise.resolve(ALLOWED) }, { permit })
     await g.use(write, () => { order.push('perform'); return 'ok' })
     expect(order).toEqual([expect.stringMatching(/^approve:/), 'permit', 'perform'])
@@ -202,20 +203,20 @@ describe('createToolGate: permit', () => {
     ['the task is no longer live', { isLive: () => false }, 'cancelled'],
     ['the signal aborted', { signal: AbortSignal.abort() }, 'cancelled'],
   ] as const)('does not call permit when %s', async (_name, extra, outcome) => {
-    const permit = vi.fn(() => ({ ok: true }) as const)
+    const permit = vi.fn(() => ({ ok: true, ruleId: 'rule-1' }) as const)
     const out = await gate(() => Promise.resolve(ALLOWED), { ...extra, permit }).use(write, vi.fn())
     expect(out).toMatchObject({ behavior: 'deny', outcome })
     expect(permit).not.toHaveBeenCalled()
   })
 
   it('does not call permit when the workspace changed or the path check failed after approval', async () => {
-    const permit = vi.fn(() => ({ ok: true }) as const)
+    const permit = vi.fn(() => ({ ok: true, ruleId: 'rule-1' }) as const)
     await gate(() => { renameSync(ws.path('sandbox'), join(ws.root, 'moved')); return Promise.resolve(ALLOWED) }, { permit }).use(write, vi.fn())
     expect(permit).not.toHaveBeenCalled()
   })
 
   it('does not call permit when the answer was a denial', async () => {
-    const permit = vi.fn(() => ({ ok: true }) as const)
+    const permit = vi.fn(() => ({ ok: true, ruleId: 'rule-1' }) as const)
     await gate(() => Promise.resolve({ behavior: 'deny', outcome: 'denied', message: 'no' }), { permit }).use(write, vi.fn())
     expect(permit).not.toHaveBeenCalled()
   })
@@ -227,5 +228,37 @@ describe('actionHash', () => {
     expect(actionHash('Write', { a: 1 })).not.toBe(actionHash('Write', { a: 2 }))
     expect(actionHash('Write', { a: 1 })).not.toBe(actionHash('Edit', { a: 1 }))
     expect(actionHash('Write', { a: 1 })).toMatch(/^[0-9a-f]{64}$/)
+  })
+})
+
+describe('createToolGate: tracking the call', () => {
+  it('hands perform the tracked signal, tracked by the allowing rule, and ends it after success', async () => {
+    const call = new AbortController()
+    const end = vi.fn()
+    const track = vi.fn(() => ({ signal: call.signal, end }))
+    let seen: AbortSignal | null = null
+    await gate(() => Promise.resolve(ALLOWED), { permit: () => ({ ok: true, ruleId: 'rule-9' }), track }).use(write, (a) => { seen = a.signal; expect(end).not.toHaveBeenCalled() })
+    expect(track).toHaveBeenCalledTimes(1)
+    expect(track).toHaveBeenCalledWith('rule-9')
+    expect(seen).toBe(call.signal)
+    expect(end).toHaveBeenCalledTimes(1)
+  })
+
+  it('ends the tracked call when perform throws', async () => {
+    const end = vi.fn()
+    await expect(gate(() => Promise.resolve(ALLOWED), { track: () => ({ signal: new AbortController().signal, end }) }).use(write, () => { throw new Error('boom') })).rejects.toThrow('boom')
+    expect(end).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not track a call that permit refused', async () => {
+    const track = vi.fn(() => ({ signal: new AbortController().signal, end: () => {} }))
+    await gate(() => Promise.resolve(ALLOWED), { permit: () => ({ ok: false }), track }).use(write, vi.fn())
+    expect(track).not.toHaveBeenCalled()
+  })
+
+  it('tracks right after permit with nothing in between', async () => {
+    const order: string[] = []
+    await gate(() => Promise.resolve(ALLOWED), { permit: () => { order.push('permit'); return { ok: true, ruleId: 'r' } }, track: () => { order.push('track'); return { signal: new AbortController().signal, end: () => {} } } }).use(write, () => { order.push('perform') })
+    expect(order).toEqual(['permit', 'track', 'perform'])
   })
 })

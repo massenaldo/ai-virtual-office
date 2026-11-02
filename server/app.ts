@@ -17,6 +17,7 @@ import { ClaudeAgentRuntimeProvider } from './runtime/claudeAgent'
 import { ServerMockProvider } from './runtime/mockProvider'
 import type { ServerRuntimeProvider } from './runtime/types'
 import { openWorkforceStore, type WorkforceStore } from './store'
+import { toRuleView } from './permissions/view'
 import { openPermissionStore, type PermissionChange, type PermissionStore } from './permissions/store'
 import { TaskManager, type LifecycleEvent } from './taskManager'
 import { toolPolicyFrom } from './toolPolicy'
@@ -63,7 +64,7 @@ function permissionAudit(change: PermissionChange): AuditInput | null {
   const { rule } = change
   const action = change.kind === 'granted' ? 'permission.granted' : change.kind === 'revoked' ? 'permission.revoked' : change.kind === 'expired' ? 'permission.expired' : null
   if (action === null) return null
-  const input: AuditInput = { action, actor: change.kind === 'expired' || rule.createdBy !== 'user' ? 'system' : 'api', ruleId: rule.id, tool: rule.tool, reason: rule.scope, detail: rule.effect }
+  const input: AuditInput = { action, actor: change.kind === 'expired' || (change.kind === 'granted' && rule.createdBy !== 'user') ? 'system' : 'api', ruleId: rule.id, tool: rule.tool, reason: rule.scope, detail: rule.effect }
   if (rule.agentId !== null) input.agentId = rule.agentId
   if (rule.taskId !== null) input.taskId = rule.taskId
   return input
@@ -86,11 +87,11 @@ export function createApp(config: ServerConfig, deps: AppDeps = {}): App {
     const audit = deps.audit ?? openAuditLog({ dataDir: config.dataDir, maxBytes: config.auditLogMaxBytes, now, log, hide: config.workspaceRoot ? [config.workspaceRoot] : [] })
     const apiToken = resolveApiToken({ configured: config.apiToken?.reveal() ?? null, dataDir: config.dataDir })
     const provider = deps.provider ?? (config.runtime === 'mock' ? new ServerMockProvider({ timings: deps.mockTimings }) : new ClaudeAgentRuntimeProvider({ credentialsConfigured: config.credentialsConfigured }))
-    const permissions = deps.permissions ?? openPermissionStore({ dataDir: config.dataDir, now, log, onChange: (change) => { const record = permissionAudit(change); if (record) audit.write(record) } })
+    const permissions = deps.permissions ?? openPermissionStore({ dataDir: config.dataDir, now, log, onChange: (change) => { const record = permissionAudit(change); if (record) audit.write(record); events.appendPermission(change.kind, toRuleView(change.rule, now())) } })
     const manager = new TaskManager({ store, provider, permissions, config, policy: toolPolicyFrom(config), now, log, onLifecycle: (e) => audit.write(toAuditInput(e)) })
     const streams = new Set<ServerResponse>()
     const startedAt = now()
-    const routes = createRoutes({ config, store, events, provider, manager, now, startedAt, heartbeatMs: deps.heartbeatMs ?? HEARTBEAT_MS, streams, log, maxStreams: deps.maxStreams, audit })
+    const routes = createRoutes({ config, store, events, provider, manager, permissions, now, startedAt, heartbeatMs: deps.heartbeatMs ?? HEARTBEAT_MS, streams, log, maxStreams: deps.maxStreams, audit })
     const onReject = (r: { requestId: string; code: string; method: string; path: string }) => audit.write({ action: 'request.rejected', actor: 'api', requestId: r.requestId, reason: r.code, detail: `${r.method} ${r.path}` })
     const guards = [...createSecurityGuards({ allowedOrigins: config.allowedOrigins, apiToken: apiToken.value, onReject }), ...(deps.guards ?? [])]
     const responseHeaders = (req: IncomingMessage) => ({ ...securityHeaders(req, config.allowedOrigins), ...(deps.responseHeaders?.(req) ?? {}) })

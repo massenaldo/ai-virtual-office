@@ -8,6 +8,7 @@ import type { ServerConfig } from './config'
 import { messageTruncatedMarker, outputLimitMarker, truncateUtf8 } from './limits'
 import type { Logger } from './log'
 import type { PermissionStore } from './permissions/store'
+import type { PermissionRule } from './permissions/types'
 import { redactSecrets } from './redact'
 import { sourceFor, type DemoProvider, type ServerRuntimeProvider, type ToolGateResult, type ToolRequest } from './runtime/types'
 import type { WorkforceStore } from './store'
@@ -84,6 +85,8 @@ export class TaskManager {
   private readonly log: Logger
   private readonly onLifecycle: TaskManagerOptions['onLifecycle']
   private readonly runs = new Map<string, Run>()
+  /** Calls that are running now, by the permission rule that allowed them. */
+  private readonly inflight = new Map<string, Set<AbortController>>()
   private readonly unsubscribe: () => void
   private readonly source
 
@@ -183,6 +186,7 @@ export class TaskManager {
           signal: run.abort.signal,
           approve: (request, digest) => this.approveTool(taskId, request, digest),
           permit: (request, digest, paths) => this.permitTool(taskId, request, digest, paths),
+          track: (ruleId) => this.trackCall(run, ruleId),
           stale: (tool, detail) => { const t = this.task(taskId); if (t) this.report('tool.stale', t, { actor: 'runtime', tool, decision: 'deny', reason: 'stale_approval', detail }) },
         }),
         audit: (note) => { const t = this.task(taskId); if (t) this.report('runtime.note', t, { actor: 'runtime', detail: note }) },
@@ -428,8 +432,49 @@ export class TaskManager {
     return promise
   }
 
+  /** A call's own signal: it aborts with the task's, or when the rule that allowed it is revoked (task and once rules only). */
+  private trackCall(run: Run, ruleId: string | null): { signal: AbortSignal; end(): void } {
+    const own = new AbortController()
+    const signal = AbortSignal.any([run.abort.signal, own.signal])
+    if (ruleId !== null) {
+      const calls = this.inflight.get(ruleId) ?? new Set<AbortController>()
+      calls.add(own)
+      this.inflight.set(ruleId, calls)
+    }
+    return {
+      signal,
+      end: () => {
+        if (ruleId === null) return
+        const calls = this.inflight.get(ruleId)
+        calls?.delete(own)
+        if (calls?.size === 0) this.inflight.delete(ruleId)
+      },
+    }
+  }
+
+  /** Revoking a permission scoped to a task stops the calls it allowed that are still running; broader rules only change what comes next. */
+  private abortCallsOf(rule: PermissionRule): void {
+    if (rule.scope !== 'task' && rule.scope !== 'once') return
+    for (const call of this.inflight.get(rule.id) ?? []) call.abort()
+  }
+
+  revokePermission(id: string): ManagerResult<{ rule: PermissionRule }> {
+    const r = this.permissions.revoke(id)
+    if (!r.ok) return r.error === 'not_found' ? { ok: false, code: 'not_found', error: 'Permission not found.' } : { ok: false, code: 'conflict', error: 'That permission is no longer active.' }
+    this.abortCallsOf(r.rule)
+    return { ok: true, rule: r.rule }
+  }
+
+  /** Revokes the agent's agent, task and once rules at once; global rules stay. */
+  revokeAgentPermissions(agentId: string): ManagerResult<{ revoked: PermissionRule[] }> {
+    if (!this.state.agents.some((a) => a.id === agentId)) return { ok: false, code: 'not_found', error: 'Agent not found.' }
+    const revoked = this.permissions.revokeForAgent(agentId)
+    for (const rule of revoked) this.abortCallsOf(rule)
+    return { ok: true, revoked }
+  }
+
   /** The last check before `perform`: the rules are asked again, and a once-grant is spent. Anything but a clear allow refuses. */
-  private permitTool(taskId: string, request: ToolRequest, digest: string, paths: ReadonlyArray<{ readonly relative: string }>): { ok: boolean } {
+  private permitTool(taskId: string, request: ToolRequest, digest: string, paths: ReadonlyArray<{ readonly relative: string }>): { ok: true; ruleId: string | null } | { ok: false } {
     const task = this.task(taskId)
     if (!task) return { ok: false }
     const tool = request.tool
@@ -445,7 +490,7 @@ export class TaskManager {
       return { ok: false }
     }
     this.report('permission.used', task, { actor: 'runtime', tool, decision: 'allow', reason: p.source, ...ruleId, ...ids })
-    return { ok: true }
+    return { ok: true, ruleId: p.ruleId }
   }
 
   private demo(taskId: string): ManagerResult<{ task: AgentTask; provider: DemoProvider }> {

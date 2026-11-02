@@ -1,17 +1,21 @@
 import { errorSentence } from '../errorCodes'
 import type { ServerResponse } from 'node:http'
 import pkg from '../../package.json' with { type: 'json' }
-import type { StateResponse, WorkspacesResponse } from '../../src/workforce/api'
+import type { AgentPermissionsRevokedResponse, PermissionResponse, PermissionsResponse, StateResponse, WorkspacesResponse } from '../../src/workforce/api'
 import { restoreDemoAgents } from '../../src/workforce/demo'
 import { assignDesk, createAgent, updateAgent } from '../../src/workforce/operations'
 import type { ServerConfig } from '../config'
 import type { AuditLog } from '../audit'
 import type { Logger } from '../log'
 import type { EventLog } from '../eventLog'
+import { ruleState } from '../permissions/engine'
+import type { PermissionStore } from '../permissions/store'
+import type { GrantError } from '../permissions/types'
+import { toRuleView } from '../permissions/view'
 import type { ServerRuntimeProvider } from '../runtime/types'
 import type { WorkforceStore } from '../store'
 import type { ManagerError, TaskManager } from '../taskManager'
-import { parseApproval, parseCreateAgent, parseCreateTask, parseDesk, parsePatchAgent } from './inputs'
+import { parseApproval, parseCreateAgent, parseCreatePermission, parseCreateTask, parseDesk, parsePatchAgent } from './inputs'
 import { HttpError, type Reply, type Route } from './router'
 import { eventsRoute } from './sse'
 
@@ -21,6 +25,7 @@ export type RouteDeps = {
   events: EventLog
   provider: ServerRuntimeProvider
   manager: TaskManager
+  permissions: PermissionStore
   now: () => string
   startedAt: string
   heartbeatMs: number
@@ -29,6 +34,22 @@ export type RouteDeps = {
   maxStreams?: number
   audit: AuditLog
 }
+
+/** What a refused grant tells the person. The store's own `limit` is a conflict, the rest are 422. */
+const GRANT_COPY: Record<GrantError, string> = {
+  unknown_tool: 'Unknown tool.',
+  invalid_scope: '"agentId" is only for an agent rule.',
+  invalid_effect: '"effect" must be "allow", "deny" or "ask".',
+  missing_agent: '"agentId" is required for an agent rule.',
+  missing_task: 'Invalid permission.',
+  missing_digest: 'Invalid permission.',
+  scope_not_allowed_for_tool: 'That tool can only be allowed once, so it cannot be allowed for an agent or everyone.',
+  invalid_pattern: '"pathPattern" must be a workspace-relative pattern such as src/**.',
+  invalid_expiry: '"expiresAt" must be a date in the future.',
+  invalid_reason: '"reason" is too long (200 characters at most).',
+}
+
+const HISTORY_LIMIT = 200
 
 const STATUS: Record<ManagerError['code'], number> = { not_found: 404, invalid: 422, conflict: 409, unavailable: 503, bad_request: 400 }
 
@@ -42,8 +63,10 @@ function must<T extends { ok: boolean }>(r: T): Extract<T, { ok: true }> {
 }
 
 export function createRoutes(deps: RouteDeps): Route[] {
-  const { config, store, events, provider, manager, now, startedAt } = deps
+  const { config, store, events, provider, manager, permissions, now, startedAt } = deps
   const agent = (id: string) => store.state.agents.find((a) => a.id === id)
+
+  const view = (rule: Parameters<typeof toRuleView>[0]) => toRuleView(rule, now())
 
   const routes: Route[] = [
     {
@@ -131,6 +154,54 @@ export function createRoutes(deps: RouteDeps): Route[] {
       path: '/api/tasks/:id/cancel',
       body: 'none',
       handler: ({ params, requestId }) => ({ status: 202, body: { task: must(manager.cancelTask(params.id, { requestId })).task } }),
+    },
+    {
+      method: 'GET',
+      path: '/api/permissions',
+      handler: () => {
+        const at = now()
+        const body: PermissionsResponse = { rules: permissions.rules.filter((r) => ruleState(r, at) === 'active').map(view) }
+        return { status: 200, body }
+      },
+    },
+    {
+      method: 'GET',
+      path: '/api/permissions/history',
+      // Rules that are no longer in force, newest first: revoked, expired, used up, or ended with their task.
+      handler: () => {
+        const at = now()
+        const body: PermissionsResponse = { rules: permissions.rules.filter((r) => ruleState(r, at) !== 'active').reverse().slice(0, HISTORY_LIMIT).map(view) }
+        return { status: 200, body }
+      },
+    },
+    {
+      method: 'POST',
+      path: '/api/permissions',
+      body: 'json',
+      handler: ({ body }) => {
+        const input = parseCreatePermission(body as Record<string, unknown>)
+        if (input.scope === 'agent' && input.agentId !== null && !agent(input.agentId)) throw new HttpError(404, 'Agent not found.')
+        const r = permissions.grant({ ...input, createdBy: 'user' })
+        if (!r.ok) throw r.error === 'limit' ? new HttpError(409, 'Too many active permissions.') : new HttpError(422, GRANT_COPY[r.error])
+        const reply: PermissionResponse = { rule: view(r.rule) }
+        return { status: 201, body: reply }
+      },
+    },
+    {
+      method: 'DELETE',
+      path: '/api/permissions/:id',
+      handler: ({ params }) => {
+        const reply: PermissionResponse = { rule: view(must(manager.revokePermission(params.id)).rule) }
+        return { status: 200, body: reply }
+      },
+    },
+    {
+      method: 'DELETE',
+      path: '/api/agents/:id/permissions',
+      handler: ({ params }) => {
+        const reply: AgentPermissionsRevokedResponse = { revoked: must(manager.revokeAgentPermissions(params.id)).revoked.map(view) }
+        return { status: 200, body: reply }
+      },
     },
     {
       method: 'POST',

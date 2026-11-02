@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { EventDraft } from './deriveEvents'
 import { EventLog } from './eventLog'
+import type { PermissionRuleView } from '../src/workforce/api'
 import { silentLogger } from './log'
 
 const NOW = '2026-10-31T09:00:00.000Z'
@@ -77,5 +78,39 @@ describe('EventLog', () => {
     log.append([draft(1)])
     expect(seen).toEqual(['boot:1'])
     expect(errors).toHaveBeenCalledTimes(1)
+  })
+})
+
+const rule = (id: string): PermissionRuleView => ({ id, scope: 'agent', effect: 'allow', tool: 'Write', agentId: 'a1', taskId: null, pathPattern: null, createdAt: NOW, createdBy: 'user', expiresAt: null, revokedAt: null, usedAt: null, endedAt: null, reason: null, state: 'active' })
+
+describe('EventLog: permission events', () => {
+  it('shares the id sequence with workforce events', () => {
+    const log = make()
+    const [a] = log.append([draft(1)])
+    const p = log.appendPermission('granted', rule('perm-1'))
+    const [b] = log.append([draft(2)])
+    expect([a.id, p.id, b.id]).toEqual(['boot:1', 'boot:2', 'boot:3'])
+    expect(p).toEqual({ id: 'boot:2', type: 'permission.changed', at: NOW, kind: 'granted', rule: rule('perm-1') })
+  })
+
+  it('replays them in order with the others, and tells listeners', () => {
+    const log = make()
+    const heard: string[] = []
+    log.subscribe((e) => heard.push(e.type))
+    log.append([draft(1)])
+    log.appendPermission('revoked', rule('perm-1'))
+    log.append([draft(2)])
+    expect(heard).toEqual(['state.changed', 'permission.changed', 'state.changed'])
+    const r = log.since('boot:1')
+    expect(r.kind === 'replay' && r.events.map((e) => e.type)).toEqual(['permission.changed', 'state.changed'])
+  })
+
+  it('keeps only the newest events across both kinds', () => {
+    const log = make(2)
+    log.append([draft(1)])
+    log.appendPermission('used', rule('perm-1'))
+    log.appendPermission('ended', rule('perm-2'))
+    expect(ids(log.since('boot:1'))).toEqual(['boot:2', 'boot:3'])
+    expect(ids(log.since('boot:0'))).toBe('reset')
   })
 })

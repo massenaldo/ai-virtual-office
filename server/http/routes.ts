@@ -100,7 +100,7 @@ export function createRoutes(deps: RouteDeps): Route[] {
       },
     },
     ...createSessionRoutes({ sessions: deps.sessions, apiToken: deps.apiToken, audit: deps.audit, now }),
-    eventsRoute({ events, heartbeatMs: deps.heartbeatMs, streams: deps.streams, now, log: deps.log, maxStreams: deps.maxStreams }),
+    eventsRoute({ events, heartbeatMs: deps.heartbeatMs, streams: deps.streams, now, log: deps.log, maxStreams: deps.maxStreams, sessions: deps.sessions, apiToken: deps.apiToken }),
     {
       method: 'POST',
       path: '/api/agents',

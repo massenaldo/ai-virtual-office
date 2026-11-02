@@ -1,7 +1,9 @@
 import type { ServerResponse } from 'node:http'
 import type { WorkforceEvent } from '../../src/workforce/api'
 import type { EventLog } from '../eventLog'
+import { tokenMatches } from '../auth'
 import type { Logger } from '../log'
+import { sessionIdFromCookie, sessionKey, type SessionStore } from '../session'
 import { HttpError, type Route } from './router'
 
 /**
@@ -24,8 +26,12 @@ export function formatSseFrame(e: WorkforceEvent): string {
   return `id: ${e.id}\nevent: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`
 }
 
-export function eventsRoute(deps: { events: EventLog; heartbeatMs: number; streams: Set<ServerResponse>; now: () => string; log: Logger; maxStreams?: number; maxBufferBytes?: number }): Route {
-  const { events, heartbeatMs, streams, now, log, maxStreams = MAX_EVENT_STREAMS, maxBufferBytes = MAX_STREAM_BUFFER_BYTES } = deps
+export function eventsRoute(deps: { events: EventLog; heartbeatMs: number; streams: Set<ServerResponse>; now: () => string; log: Logger; maxStreams?: number; maxBufferBytes?: number; sessions: SessionStore; apiToken: string }): Route {
+  const { events, heartbeatMs, streams, now, log, sessions, apiToken, maxStreams = MAX_EVENT_STREAMS, maxBufferBytes = MAX_STREAM_BUFFER_BYTES } = deps
+  // Streams opened by a cookie-only request, by session key. Auth runs once at open, so a session that ends (logout,
+  // eviction, expiry) must close its streams itself. Bearer streams have no session and are never listed here.
+  const bySession = new Map<string, Set<() => void>>()
+  sessions.onEnd((key) => { for (const close of [...(bySession.get(key) ?? [])]) close() })
   return {
     method: 'GET',
     path: '/api/events',
@@ -35,6 +41,9 @@ export function eventsRoute(deps: { events: EventLog; heartbeatMs: number; strea
       const header = req.headers['last-event-id']
       const resume = (typeof header === 'string' && header !== '' ? header : null) ?? (url.searchParams.get('lastEventId') || null)
 
+      // The auth guard already let this request in; a valid bearer wins over a cookie, as it does there.
+      const sessionId = tokenMatches(apiToken, req.headers.authorization) ? undefined : sessionIdFromCookie(req.headers.cookie)
+      const key = sessionId === undefined ? undefined : sessionKey(sessionId)
       let cleaned = false
       let off = () => {}
       let timer: ReturnType<typeof setInterval> | undefined
@@ -44,7 +53,13 @@ export function eventsRoute(deps: { events: EventLog; heartbeatMs: number; strea
         off()
         if (timer) clearInterval(timer)
         streams.delete(res)
+        if (key !== undefined) {
+          const set = bySession.get(key)
+          set?.delete(end)
+          if (set?.size === 0) bySession.delete(key)
+        }
       }
+      const end = () => { res.end(); cleanup() }
       // A client that stops reading must not make the server buffer without bound: it is cut off and can reconnect.
       const send = (text: string) => {
         if (cleaned) return
@@ -67,7 +82,11 @@ export function eventsRoute(deps: { events: EventLog; heartbeatMs: number; strea
 
       if (!cleaned) {
         off = events.subscribe((event) => { send(formatSseFrame(event)) })
-        timer = setInterval(() => { send(': ping\n\n') }, heartbeatMs)
+        if (key !== undefined) bySession.set(key, (bySession.get(key) ?? new Set()).add(end))
+        timer = setInterval(() => {
+          if (sessionId !== undefined && !sessions.valid(sessionId)) return end()
+          send(': ping\n\n')
+        }, heartbeatMs)
       }
       req.on('close', cleanup)
       res.on('close', cleanup)

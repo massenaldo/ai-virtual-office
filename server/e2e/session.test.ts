@@ -85,11 +85,12 @@ describe('browser session, real server', () => {
     expect(await agentCount()).toBe(before + 1)
   })
 
-  it('logout invalidates the cookie for new requests and streams; an already-open stream is not cut', async () => {
+  it('logout invalidates the cookie for new requests and streams; an already-open stream is ended', async () => {
     const { cookie } = await pair()
     const open = await openEventStream(server.url, { headers: { cookie, authorization: '' } })
     streams.push(open)
     expect(open.response.status).toBe(200)
+    const openStreams = server.app.streams.size // other tests' aborted streams may still be closing
 
     expect((await call('DELETE', '/api/session', { cookie })).status).toBe(403) // cookie-authenticated, so Origin is required
     const out = await call('DELETE', '/api/session', { cookie, origin: ORIGIN })
@@ -100,11 +101,13 @@ describe('browser session, real server', () => {
     expect((await fetch(`${server.url}/api/events`, { headers: { cookie } })).status).toBe(401)
     expect((await call('POST', '/api/agents', { cookie, origin: ORIGIN, body: newAgent })).status).toBe(401)
 
-    // FINDING: authentication happens once, when the stream is opened. A stream opened before logout keeps receiving events
-    // afterwards (until the client disconnects or the server closes). Asserted here as the actual behaviour.
+    // An already-open stream ends at logout: the session it was opened with is gone.
+    const deadline = Date.now() + 3000
+    while (server.app.streams.size >= openStreams && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10))
+    expect(server.app.streams.size).toBeLessThan(openStreams)
     expect((await call('POST', '/api/agents', { bearer: true, body: { ...newAgent, name: 'After' } })).status).toBe(201)
-    const seen = await open.until((e) => JSON.stringify(e).includes('After'), 3000)
-    expect(seen.length).toBeGreaterThan(0)
+    await new Promise((r) => setTimeout(r, 100))
+    expect(JSON.stringify(open.events)).not.toContain('After')
   })
 
   it('has no Domain attribute on the cookie; the server itself does not bind a session to a hostname', async () => {

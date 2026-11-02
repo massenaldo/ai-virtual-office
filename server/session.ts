@@ -10,20 +10,27 @@ export type SessionStore = {
   valid(id: string | undefined): boolean
   destroy(id: string | undefined): boolean
   readonly size: number
+  /** Calls `listener` with the session's key (a hash, never the id) whenever a session ends: destroyed, evicted or expired. */
+  onEnd(listener: (key: string) => void): void
   /** TEST-ONLY: the stored map keys (hashes), to assert raw ids are never stored. */
   debugKeys(): string[]
 }
 
 const hashId = (id: string): string => createHash('sha256').update(id).digest('hex')
 
+/** The store's key for an id: what `onEnd` listeners receive. */
+export const sessionKey = hashId
+
 /** In-memory session store: 256-bit random ids, only SHA-256 hashes kept, expiry checked on every use. */
 export function createSessionStore(opts: { now: () => number }): SessionStore {
   // Map preserves insertion order, so the first key is the oldest session.
   const sessions = new Map<string, number>()
+  const listeners: Array<(key: string) => void> = []
+  const ended = (key: string): void => { for (const l of listeners) l(key) }
 
   const purge = (): void => {
     const t = opts.now()
-    for (const [key, expiresAt] of sessions) if (expiresAt <= t) sessions.delete(key)
+    for (const [key, expiresAt] of sessions) if (expiresAt <= t) { sessions.delete(key); ended(key) }
   }
 
   return {
@@ -33,6 +40,7 @@ export function createSessionStore(opts: { now: () => number }): SessionStore {
         const oldest = sessions.keys().next().value
         if (oldest === undefined) break
         sessions.delete(oldest)
+        ended(oldest)
       }
       const id = randomBytes(32).toString('base64url')
       const expiresAt = opts.now() + SESSION_TTL_MS
@@ -47,9 +55,13 @@ export function createSessionStore(opts: { now: () => number }): SessionStore {
     },
     destroy(id) {
       if (!id || id.length > MAX_ID_LENGTH) return false
-      return sessions.delete(hashId(id))
+      const key = hashId(id)
+      const removed = sessions.delete(key)
+      if (removed) ended(key)
+      return removed
     },
     get size() { return sessions.size },
+    onEnd(listener) { listeners.push(listener) },
     debugKeys() { return [...sessions.keys()] },
   }
 }

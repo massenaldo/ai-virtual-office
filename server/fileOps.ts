@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { closeSync, constants, fchmodSync, fstatSync, fsyncSync, lstatSync, openSync, readdirSync, readSync, realpathSync, renameSync, unlinkSync, writeSync, type Dirent, type Stats } from 'node:fs'
 import { join } from 'node:path'
 import { REVIEW_MAX_BYTES } from '../src/workforce/types'
+import { redactSecrets } from './redact'
 import { isValidPathPattern, matchesPathPattern } from './permissions/pathPattern'
 import { isProtectedAbsolute, isSensitiveRelative } from './sensitivePaths'
 import { MAX_PATH_CHARS } from './workspaces'
@@ -14,6 +15,8 @@ import { MAX_PATH_CHARS } from './workspaces'
 // Errors are a fixed code only; no path or operating-system message ever leaves this module.
 
 export const FILE_READ_MAX_BYTES = 65536
+/** Extra bytes a redacting reader reads past FILE_READ_MAX_BYTES so a secret that straddles the cut is still matched whole. */
+export const READ_REDACTION_LOOKAHEAD = 8192
 
 export type FileOpError = 'not_found' | 'not_a_file' | 'not_a_directory' | 'unsafe_path' | 'too_large' | 'not_text' | 'not_unique' | 'no_match' | 'conflict' | 'aborted' | 'failed'
 
@@ -114,13 +117,14 @@ export function openInside(workspacePath: string, relative: string, flags: numbe
  * FILE_READ_MAX_BYTES), not the file's size. When the file is longer, `truncated` is true and the cut is moved back so
  * it never splits a multi-byte character.
  */
-export function readTextFile(workspacePath: string, relative: string, signal: AbortSignal, hooks?: OpenHooks): { text: string; truncated: boolean; bytes: number } {
+export function readTextFile(workspacePath: string, relative: string, signal: AbortSignal, hooks?: OpenHooks, opts?: { maxBytes?: number }): { text: string; truncated: boolean; bytes: number } {
+  const max = opts?.maxBytes ?? FILE_READ_MAX_BYTES
   const fd = openInside(workspacePath, relative, constants.O_RDONLY, signal, hooks)
   try {
     const st = fstatSync(fd)
     if (!st.isFile()) throw new FileOpFailure('not_a_file')
     if (st.nlink !== 1) throw new FileOpFailure('unsafe_path')
-    const buf = Buffer.alloc(FILE_READ_MAX_BYTES + 1)
+    const buf = Buffer.alloc(max + 1)
     let got = 0
     while (got < buf.length) {
       checkAborted(signal)
@@ -128,8 +132,8 @@ export function readTextFile(workspacePath: string, relative: string, signal: Ab
       if (n === 0) break
       got += n
     }
-    const truncated = got > FILE_READ_MAX_BYTES
-    let end = truncated ? FILE_READ_MAX_BYTES : got
+    const truncated = got > max
+    let end = truncated ? max : got
     if (truncated) {
       // A multi-byte character is at most 4 bytes, so at most 3 steps back; anything else is not valid text.
       for (let steps = 0; steps < 3 && end > 0 && (buf[end]! & 0xc0) === 0x80; steps++) end--
@@ -434,7 +438,7 @@ export function grepFiles(
       if (!hay.includes(needle)) continue
       if (matches.length >= GREP_MAX_MATCHES) { truncated = true; return false }
       if (opts.mode === 'files_with_matches') { matches.push({ path: relative, line: 0, text: '' }); break }
-      matches.push({ path: relative, line: i + 1, text: cutLine(lines[i]!) })
+      matches.push({ path: relative, line: i + 1, text: cutLine(redactSecrets(lines[i]!)) })
     }
     return true
   }, extra)

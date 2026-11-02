@@ -1,4 +1,4 @@
-import { editTextFile, FILE_READ_MAX_BYTES, FileOpFailure, globFiles, grepFiles, readTextFile, writeTextFile, type FileOpError } from '../fileOps'
+import { editTextFile, FILE_READ_MAX_BYTES, FileOpFailure, READ_REDACTION_LOOKAHEAD, globFiles, grepFiles, readTextFile, writeTextFile, type FileOpError } from '../fileOps'
 import { truncateUtf8 } from '../limits'
 import { redactSecrets } from '../redact'
 import type { GatedAction, GatedOutcome, StartContext, ToolRequest } from '../runtime/types'
@@ -41,7 +41,8 @@ class NotSupported extends Error {}
 const fail = (error: ToolErrorCode): ToolResult => ({ ok: false, error, text: RESULT_TEXT[error] })
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined)
-const posInt = (v: unknown): number | undefined => (typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined)
+const posInt = (v: unknown): number | undefined => (typeof v === 'number' && Number.isSafeInteger(v) && v > 0 ? v : undefined)
+const optionalPosInt = (v: unknown): boolean => v === undefined || posInt(v) !== undefined
 
 type Target = { workspacePath: string; relative: string | null; signal: AbortSignal }
 
@@ -61,80 +62,75 @@ function capped(text: string, truncated: boolean): string {
 }
 
 export function createGatedTools(ctx: Pick<StartContext, 'tools'>, opts: { protectedRoots: readonly string[] }) {
-  async function run(tool: string, input: unknown, perform: (action: GatedAction, input: Record<string, unknown>) => string): Promise<ToolResult> {
-    if (!isRecord(input)) return fail('invalid_input')
-    const request: ToolRequest = { tool, input }
-    let outcome: GatedOutcome<string>
+  // `valid` runs before the gate, so malformed input never spends an approval or a once-grant.
+  async function run(tool: string, input: unknown, valid: (input: Record<string, unknown>) => boolean, perform: (action: GatedAction, input: Record<string, unknown>) => string): Promise<ToolResult> {
+    if (!isRecord(input) || !valid(input)) return fail('invalid_input')
     try {
-      outcome = await ctx.tools.use(request, (action) => perform(action, isRecord(action.input) ? action.input : {}))
+      const outcome: GatedOutcome<string> = await ctx.tools.use({ tool, input } satisfies ToolRequest, (action) => perform(action, isRecord(action.input) ? action.input : {}))
+      if (isRecord(outcome) && outcome.behavior === 'allow' && typeof outcome.value === 'string') return { ok: true, text: outcome.value }
+      if (isRecord(outcome) && outcome.behavior === 'deny' && typeof outcome.outcome === 'string' && Object.hasOwn(RESULT_TEXT, outcome.outcome)) return fail(outcome.outcome)
+      return fail('failed')
     } catch (error) {
       if (error instanceof NotSupported) return fail('not_supported')
       return fail(error instanceof FileOpFailure ? error.code : 'failed')
     }
-    if (outcome.behavior === 'deny') return fail(outcome.outcome)
-    return { ok: true, text: outcome.value }
   }
 
   return {
     vo_read: (input: unknown) =>
-      run('Read', input, (action, i) => {
+      run('Read', input, (i) => typeof i.file_path === 'string' && optionalPosInt(i.offset) && optionalPosInt(i.limit), (action, i) => {
         const t = target(action, true)
-        const read = readTextFile(t.workspacePath, t.relative!, t.signal)
+        // Read a little past the cap so a secret that straddles it is redacted whole, then cut after redacting.
+        const read = readTextFile(t.workspacePath, t.relative!, t.signal, undefined, { maxBytes: FILE_READ_MAX_BYTES + READ_REDACTION_LOOKAHEAD })
         let text = read.text
+        let sliced = false
         const offset = posInt(i.offset)
         const limit = posInt(i.limit)
         if (offset !== undefined || limit !== undefined) {
           const start = (offset ?? 1) - 1
           const lines = text.split('\n')
-          text = lines.slice(start, limit !== undefined ? start + limit : undefined).join('\n')
+          const end = limit !== undefined ? start + limit : lines.length
+          sliced = end < lines.length
+          text = lines.slice(start, end).join('\n')
         }
         const cut = truncateUtf8(redactSecrets(text), FILE_READ_MAX_BYTES)
-        return read.truncated || cut.truncated ? cut.text + READ_MARKER : cut.text
+        return cut.truncated || (read.truncated && !sliced) ? cut.text + READ_MARKER : cut.text
       }),
 
     vo_glob: (input: unknown) =>
-      run('Glob', input, (action, i) => {
-        const pattern = str(i.pattern)
-        if (pattern === undefined) throw new FileOpFailure('failed')
+      run('Glob', input, (i) => typeof i.pattern === 'string' && (i.path === undefined || typeof i.path === 'string'), (action, i) => {
         const t = target(action, str(i.path) !== undefined)
-        const found = globFiles(t.workspacePath, baseOf(t), pattern, t.signal, opts.protectedRoots)
+        const found = globFiles(t.workspacePath, baseOf(t), str(i.pattern)!, t.signal, opts.protectedRoots)
         return found.paths.length === 0 ? 'No files found.' : capped(found.paths.join('\n'), found.truncated)
       }),
 
     vo_grep: (input: unknown) =>
-      run('Grep', input, (action, i) => {
-        const pattern = str(i.pattern)
-        if (pattern === undefined) throw new FileOpFailure('failed')
+      run('Grep', input, (i) => typeof i.pattern === 'string' && (i.path === undefined || typeof i.path === 'string'), (action, i) => {
         const t = target(action, str(i.path) !== undefined)
         const mode = i.output_mode === 'content' ? 'content' : 'files_with_matches'
-        const found = grepFiles(t.workspacePath, baseOf(t), pattern, { glob: str(i.glob), ignoreCase: i['-i'] === true, mode }, t.signal, opts.protectedRoots)
+        const found = grepFiles(t.workspacePath, baseOf(t), str(i.pattern)!, { glob: str(i.glob), ignoreCase: i['-i'] === true, mode }, t.signal, opts.protectedRoots)
         if (found.matches.length === 0) return 'No matches found.'
         const lines = found.matches.map((m) => (mode === 'content' ? `${m.path}:${m.line}:${m.text}` : m.path))
         return capped(lines.join('\n'), found.truncated)
       }),
 
     vo_write: (input: unknown) =>
-      run('Write', input, (action, i) => {
-        const content = str(i.content)
-        if (content === undefined) throw new FileOpFailure('failed')
+      run('Write', input, (i) => typeof i.file_path === 'string' && typeof i.content === 'string', (action, i) => {
         const t = target(action, true)
-        const written = writeTextFile(t.workspacePath, t.relative!, content, t.signal)
+        const written = writeTextFile(t.workspacePath, t.relative!, str(i.content)!, t.signal)
         return `Wrote ${written.bytes} bytes to ${t.relative}.`
       }),
 
     vo_edit: (input: unknown) =>
-      run('Edit', input, (action, i) => {
-        const oldString = str(i.old_string)
-        const newString = str(i.new_string)
-        if (oldString === undefined || newString === undefined) throw new FileOpFailure('failed')
+      run('Edit', input, (i) => typeof i.file_path === 'string' && typeof i.old_string === 'string' && typeof i.new_string === 'string', (action, i) => {
         const t = target(action, true)
-        editTextFile(t.workspacePath, t.relative!, oldString, newString, i.replace_all === true, t.signal)
+        editTextFile(t.workspacePath, t.relative!, str(i.old_string)!, str(i.new_string)!, i.replace_all === true, t.signal)
         return `Edited ${t.relative}.`
       }),
 
     // Audited through the gate, but nothing is ever run: perform refuses even when the gate approves.
     vo_run: (input: unknown) =>
-      run('Bash', input, () => {
+      run('Bash', input, () => true, () => {
         throw new NotSupported()
       }),
   }

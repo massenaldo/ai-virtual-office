@@ -14,7 +14,7 @@ function approvingGate(paths: (req: ToolRequest) => GatedAction['paths'], ws = (
   return {
     async use<T>(request: ToolRequest, perform: (a: GatedAction) => Promise<T> | T): Promise<GatedOutcome<T>> {
       calls.push(request)
-      const value = await perform({ tool: request.tool, input: request.input, workspace: ws(), signal: new AbortController().signal, paths: paths(request) })
+      const value = await perform({ tool: request.tool, input: freeze(structuredClone(request.input)), workspace: ws(), signal: new AbortController().signal, paths: paths(request) })
       return { behavior: 'allow', outcome: 'approved', value }
     },
   }
@@ -35,6 +35,11 @@ beforeEach(() => {
   calls = []
 })
 afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+function freeze<T>(v: T): T {
+  if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) { Object.freeze(v); for (const x of Object.values(v)) freeze(x) }
+  return v
+}
 
 describe('gated tools', () => {
   it('uses policy tool names', async () => {
@@ -166,11 +171,71 @@ describe('gated tools', () => {
       for (const r of results) {
         if (!r.ok) expect(r.text).toBe(RESULT_TEXT[r.error])
         expect(r.text).not.toContain(dir)
-        if (name !== 'vo_read' || !r.ok) expect(r.text).not.toContain(MARKER)
+        expect(r.text).not.toContain(MARKER)
       }
     }
     for (const s of all) { expect(s).not.toContain(dir); expect(s).not.toContain('/') }
     const codes: ToolErrorCode[] = Object.keys(RESULT_TEXT) as ToolErrorCode[]
     expect(codes).toHaveLength(19)
+  })
+
+  it('raw input paths are ignored by every path tool', async () => {
+    mkdirSync(join(dir, 'real'))
+    writeFileSync(join(dir, 'real', 'f.txt'), 'needle here')
+    const at = (relative: string) => make(approvingGate(() => [{ arg: 'x', relative }]))
+    expect((await at('real').vo_glob({ pattern: '*.txt', path: '../../..' })).text).toBe('real/f.txt')
+    expect((await at('real').vo_grep({ pattern: 'needle', path: '/etc' })).text).toBe('real/f.txt')
+    expect(await at('w.txt').vo_write({ file_path: '/etc/evil', content: 'q' })).toEqual({ ok: true, text: 'Wrote 1 bytes to w.txt.' })
+    expect(readFileSync(join(dir, 'w.txt'), 'utf8')).toBe('q')
+    expect(await at('w.txt').vo_edit({ file_path: '../../x', old_string: 'q', new_string: 'r' })).toEqual({ ok: true, text: 'Edited w.txt.' })
+    expect(readFileSync(join(dir, 'w.txt'), 'utf8')).toBe('r')
+  })
+
+  it('redacts secrets in grep matches, including ones near the line cut', async () => {
+    const key = 'AIza' + 'Sy' + 'abcdefghijklmnopqrstuvwxyz0123456'.slice(0, 33)
+    writeFileSync(join(dir, 'g.txt'), 'x'.repeat(174) + ' ' + key + ' tail needle\n' + 'needle sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789\n')
+    const r = await make(approvingGate(pathOf)).vo_grep({ pattern: 'needle', output_mode: 'content' })
+    expect(r.text).not.toContain(key.slice(4, 16))
+    expect(r.text).not.toContain('AIza')
+    expect(r.text).not.toContain('sk-ant')
+  })
+
+  it('redacts secrets that straddle the read cut', async () => {
+    const key = 'AKIA' + 'ABCDEFGHIJKLMNOP'
+    writeFileSync(join(dir, 'r.txt'), 'a'.repeat(65536 - 9) + ' ' + key + '\n' + 'b'.repeat(100))
+    const r = await make(approvingGate(pathOf)).vo_read({ file_path: 'r.txt' })
+    expect(r.text).not.toContain('AKIA')
+    expect(r.text).not.toContain('ABCDEFGH')
+    const pem = '-----BEGIN RSA PRIVATE KEY-----\n' + 'MIIEowIBAAKCAQEA'.repeat(40) + '\n-----END RSA PRIVATE KEY-----\n'
+    writeFileSync(join(dir, 'p.txt'), 'a'.repeat(65536 - 100) + '\n' + pem + 'tail')
+    const p = await make(approvingGate(pathOf)).vo_read({ file_path: 'p.txt' })
+    expect(p.text).not.toContain('MIIEow')
+    expect(p.text).not.toContain('BEGIN RSA')
+  })
+
+  it('validates required fields before calling the gate', async () => {
+    const t = make(approvingGate(pathOf))
+    const bad: Array<[((i: unknown) => Promise<ToolResult>), unknown]> = [
+      [t.vo_read, { file_path: 5 }], [t.vo_read, { file_path: 'a', offset: 0 }], [t.vo_read, { file_path: 'a', limit: 1.5 }], [t.vo_read, { file_path: 'a', offset: '2' }],
+      [t.vo_glob, {}], [t.vo_grep, {}], [t.vo_grep, { pattern: 1 }],
+      [t.vo_write, { file_path: 'a' }], [t.vo_write, { content: 'x' }],
+      [t.vo_edit, { file_path: 'a', old_string: 'x' }], [t.vo_edit, { file_path: 'a', new_string: 'x' }],
+    ]
+    for (const [f, input] of bad) expect(await f(input)).toEqual({ ok: false, error: 'invalid_input', text: RESULT_TEXT.invalid_input })
+    expect(calls).toEqual([])
+  })
+
+  it('fails closed on unexpected gate results', async () => {
+    const weird: unknown[] = [undefined, null, { behavior: 'allow', outcome: 'allowed', value: 5 }, { behavior: 'allow', outcome: 'allowed' }, { behavior: 'deny', outcome: 'bogus', message: 'x' }, { behavior: 'huh' }]
+    for (const w of weird) {
+      const gate = { async use() { return w } } as unknown as ToolGate
+      expect(await make(gate).vo_read({ file_path: 'a' })).toEqual({ ok: false, error: 'failed', text: RESULT_TEXT.failed })
+    }
+  })
+
+  it('only marks truncation when the slice reaches the cap', async () => {
+    writeFileSync(join(dir, 's.txt'), 'one\ntwo\n' + 'z'.repeat(70000))
+    const r = await make(approvingGate(pathOf)).vo_read({ file_path: 's.txt', limit: 2 })
+    expect(r.text).toBe('one\ntwo')
   })
 })

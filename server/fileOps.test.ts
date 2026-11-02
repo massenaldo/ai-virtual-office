@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { constants, linkSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync, closeSync, fstatSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -35,7 +36,8 @@ describe('readTextFile', () => {
     mkdirSync(join(ws, 'd'))
     writeFileSync(join(ws, 'd', 'a.txt'), 'x')
     expect(readTextFile(ws, 'd//./a.txt', live).text).toBe('x')
-    expect(readTextFile(ws, './d/a.txt/', live).text).toBe('x')
+    expect(readTextFile(ws, './d/a.txt', live).text).toBe('x')
+    expect(code(() => readTextFile(ws, 'd/a.txt/', live))).toBe('unsafe_path')
   })
   it('truncates at the cap; bytes is what was returned', () => {
     writeFileSync(join(ws, 'big.txt'), 'a'.repeat(FILE_READ_MAX_BYTES + 100))
@@ -158,9 +160,36 @@ describe('openInside', () => {
     symlinkSync(outside, join(ws, 'dir'))
     expect(code(() => openInside(ws, 'dir', constants.O_RDONLY | constants.O_DIRECTORY, live))).toBe('unsafe_path')
   })
-  it('can create a missing final component when asked to', () => {
-    const fd = openInside(ws, 'new.txt', constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, live)
-    closeSync(fd)
-    expect(readTextFile(ws, 'new.txt', live).text).toBe('')
+  it('refuses creating, truncating, appending and writing flags before touching the filesystem', () => {
+    writeFileSync(join(ws, 'keep.txt'), 'keep')
+    for (const f of [constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, constants.O_RDONLY | constants.O_CREAT, constants.O_WRONLY, constants.O_RDWR, constants.O_RDONLY | constants.O_TRUNC, constants.O_RDONLY | constants.O_APPEND]) {
+      expect(code(() => openInside(ws, 'new.txt', f, live))).toBe('unsafe_path')
+      expect(code(() => openInside(ws, 'keep.txt', f, live))).toBe('unsafe_path')
+    }
+    expect(code(() => readTextFile(ws, 'new.txt', live))).toBe('not_found')
+    expect(readTextFile(ws, 'keep.txt', live).text).toBe('keep')
+  })
+  it.skipIf(process.platform === 'win32')('a FIFO is not_a_file and does not block', () => {
+    execFileSync('mkfifo', [join(ws, 'pipe')])
+    expect(code(() => readTextFile(ws, 'pipe', live))).toBe('not_a_file')
+  })
+  it('a parent swapped for a symlink to another folder inside the workspace is unsafe_path', () => {
+    mkdirSync(join(ws, 'a'))
+    mkdirSync(join(ws, 'other'))
+    writeFileSync(join(ws, 'a', 'f.txt'), 'x')
+    writeFileSync(join(ws, 'other', 'f.txt'), 'y')
+    const c = code(() => openInside(ws, 'a/f.txt', constants.O_RDONLY, live, {
+      beforeOpen: () => { renameSync(join(ws, 'a'), join(ws, 'a.old')); symlinkSync(join(ws, 'other'), join(ws, 'a')) },
+    }))
+    expect(c).toBe('unsafe_path')
+  })
+  it('readTextFile never returns content reached through a swapped directory', () => {
+    mkdirSync(join(ws, 'dir'))
+    writeFileSync(join(ws, 'dir', 's.txt'), 'inside')
+    writeFileSync(join(outside, 's.txt'), 'secret')
+    let result: unknown
+    const c = code(() => { result = readTextFile(ws, 'dir/s.txt', live, { beforeOpen: () => { renameSync(join(ws, 'dir'), join(ws, 'dir.old')); symlinkSync(outside, join(ws, 'dir')) } }) })
+    expect(c).toBe('unsafe_path')
+    expect(result).toBeUndefined()
   })
 })

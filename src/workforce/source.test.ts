@@ -42,7 +42,7 @@ describe('createControllerFor', () => {
 
   it('the backend source never touches browser storage', async () => {
     const backend = createFakeBackend({ baseUrl: BASE, state: stateResponse })
-    const c = createControllerFor({ kind: 'backend', baseUrl: BASE }, { storage: noStorage, fetch: backend.fetch, createEventSource: (u) => new FakeEventSource(u) })
+    const c = createControllerFor({ kind: 'backend', baseUrl: BASE }, { storage: noStorage, fetch: backend.fetch, createEventSource: (u, o) => new FakeEventSource(u, o) })
     await vi.advanceTimersByTimeAsync(0)
     expect(c.getSnapshot().environment.kind).toBe('backend')
     expect(noStorage.getItem).not.toHaveBeenCalled()

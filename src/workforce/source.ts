@@ -22,7 +22,7 @@ export function resolveWorkforceSource(raw: string | undefined): WorkforceSource
 
 export function createControllerFor(
   source: WorkforceSource,
-  deps: { storage: Pick<Storage, 'getItem' | 'setItem'> | null; fetch?: typeof fetch; createEventSource?: (url: string) => EventSourceLike },
+  deps: { storage: Pick<Storage, 'getItem' | 'setItem'> | null; fetch?: typeof fetch; createEventSource?: (url: string, opts: { withCredentials: boolean }) => EventSourceLike },
 ): WorkforceController {
   switch (source.kind) {
     case 'browser': return createWorkforceController({ storage: deps.storage })

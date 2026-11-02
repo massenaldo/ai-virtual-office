@@ -2,7 +2,9 @@ import { MUTATION_HEADERS } from '../api'
 
 /** status is null when no response arrived (network failure or abort). */
 /** What a 401 means to the person running the app, whatever the server's own wording. */
-export const NOT_AUTHORIZED = 'Not authorized. Start the app with npm run dev:full, or run npm run server and npm run dev with VITE_WORKFORCE_API_URL=/.'
+export const NOT_AUTHORIZED = 'Not authorized. In backend mode the app asks for the API token; in dev:full the dev server adds it. Otherwise start the app with npm run dev:full, or run npm run server and npm run dev with VITE_WORKFORCE_API_URL=/.'
+/** What a 401 from the pairing call means: the token itself was wrong. */
+export const PAIR_REJECTED = 'That token was not accepted.'
 
 export type ApiResult<T> = { ok: true; status: number; body: T } | { ok: false; status: number | null; error: string }
 export type MutationMethod = 'POST' | 'PUT' | 'PATCH' | 'DELETE'
@@ -10,6 +12,8 @@ export type ApiClient = {
   baseUrl: string
   get<T>(path: string, signal?: AbortSignal): Promise<ApiResult<T>>
   send<T>(method: MutationMethod, path: string, body?: unknown): Promise<ApiResult<T>>
+  /** Trades the API token for a browser session cookie. The token is sent once and never kept. */
+  pair(token: string): Promise<ApiResult<{ ok: true; expiresAt: string }>>
 }
 
 /** A thin fetch wrapper. It never throws: every failure becomes an ApiResult, and a server's `{ error }` text is passed on unchanged. */
@@ -17,10 +21,10 @@ export function createApiClient(opts: { baseUrl: string; fetch?: typeof fetch })
   const doFetch = opts.fetch ?? globalThis.fetch.bind(globalThis)
   const { baseUrl } = opts
 
-  async function request<T>(path: string, init: RequestInit): Promise<ApiResult<T>> {
+  async function request<T>(path: string, init: RequestInit, unauthorized: string = NOT_AUTHORIZED): Promise<ApiResult<T>> {
     let response: Response
     try {
-      response = await doFetch(baseUrl + path, init)
+      response = await doFetch(baseUrl + path, { ...init, credentials: 'include' })
     } catch {
       return { ok: false, status: null, error: baseUrl === '' ? "Can't reach the backend." : `Can't reach the backend at ${baseUrl}.` }
     }
@@ -32,7 +36,7 @@ export function createApiClient(opts: { baseUrl: string; fetch?: typeof fetch })
       parsed = undefined
     }
     if (response.ok) return { ok: true, status: response.status, body: parsed as T }
-    if (response.status === 401) return { ok: false, status: 401, error: NOT_AUTHORIZED }
+    if (response.status === 401) return { ok: false, status: 401, error: unauthorized }
     const message = typeof parsed === 'object' && parsed !== null && typeof (parsed as { error?: unknown }).error === 'string' ? (parsed as { error: string }).error : null
     return { ok: false, status: response.status, error: message ?? `Request failed (${response.status}).` }
   }
@@ -41,5 +45,6 @@ export function createApiClient(opts: { baseUrl: string; fetch?: typeof fetch })
     baseUrl,
     get: (path, signal) => request(path, { method: 'GET', signal }),
     send: (method, path, body) => request(path, { method, headers: { ...MUTATION_HEADERS }, body: body === undefined ? undefined : JSON.stringify(body) }),
+    pair: (token) => request('/api/session', { method: 'POST', headers: { ...MUTATION_HEADERS }, body: JSON.stringify({ token }) }, PAIR_REJECTED),
   }
 }

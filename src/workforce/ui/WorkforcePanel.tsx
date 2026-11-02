@@ -6,6 +6,7 @@ import AgentDetail from './AgentDetail'
 import AgentForm from './AgentForm'
 import AgentList from './AgentList'
 import AssignDesk from './AssignDesk'
+import PairingForm from './PairingForm'
 
 export type WorkforceView = { kind: 'list' } | { kind: 'create' } | { kind: 'detail' | 'edit'; agentId: string } | { kind: 'assign'; deskId: string }
 
@@ -29,6 +30,7 @@ export default function WorkforcePanel({ workforce, layout, view, onViewChange: 
   </>
   // Before the first snapshot an empty list would offer "Restore demo agents" for a backend that simply hasn't answered yet.
   const waiting = workforce.connection !== 'local' && workforce.lastSyncedAt === null
+  const pairing = workforce.needsPairing && actions.pair ? actions.pair : null
   const agentId = selectedAgentId(view)
   const agent = agentId ? state.agents.find((a) => a.id === agentId) : undefined
   const assignDesk = view.kind === 'assign' ? layout.furniture.find((f) => f.id === view.deskId && f.type === 'desk') : undefined
@@ -45,9 +47,10 @@ export default function WorkforcePanel({ workforce, layout, view, onViewChange: 
 
   return <aside className="editor-panel workforce" aria-label="AI agents">
     {header}
-    {workforce.connectionError && workforce.connection === 'offline' && <p className="form-error" role="alert">{workforce.connectionError}</p>}
-    {waiting && <p className="panel-hint">{workforce.connection === 'misconfigured' ? 'The backend address is not configured.' : 'Waiting for the local backend…'}</p>}
-    {!waiting && shown.kind === 'list' && <AgentList state={state} layout={layout} onOpen={(id) => setView({ kind: 'detail', agentId: id })} onCreate={() => setView({ kind: 'create' })} onRestoreDemo={actions.restoreDemoAgents}/>}
+    {!pairing && workforce.connectionError && workforce.connection === 'offline' && <p className="form-error" role="alert">{workforce.connectionError}</p>}
+    {pairing && <PairingForm onPair={pairing}/>}
+    {waiting && !pairing && <p className="panel-hint">{workforce.connection === 'misconfigured' ? 'The backend address is not configured.' : 'Waiting for the local backend…'}</p>}
+    {!waiting && !pairing && shown.kind === 'list' && <AgentList state={state} layout={layout} onOpen={(id) => setView({ kind: 'detail', agentId: id })} onCreate={() => setView({ kind: 'create' })} onRestoreDemo={actions.restoreDemoAgents}/>}
     {shown.kind === 'create' && <>
       <div className="field-group-label">New agent</div>
       <AgentForm onCancel={list} onSubmit={async (input) => {

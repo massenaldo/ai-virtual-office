@@ -3,6 +3,7 @@ import { getBrowserStorage } from '../layout/storage'
 import type { WorkforceController, WorkforceSnapshot } from './controller'
 import { createControllerFor, resolveWorkforceSource } from './source'
 
+/** The snapshot (including needsPairing) plus the controller; actions.pair exists only in backend mode. */
 export type Workforce = WorkforceSnapshot & { actions: WorkforceController }
 
 /**

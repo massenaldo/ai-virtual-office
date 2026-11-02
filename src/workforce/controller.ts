@@ -24,6 +24,8 @@ export type WorkforceSnapshot = {
   commandError: string | null
   /** Why the backend connection is down (the server's own message when it gave one); null while connected or in browser mode. */
   connectionError: string | null
+  /** The backend refused the browser (401): the person has to paste the API token. Always false in browser mode. */
+  needsPairing: boolean
 }
 export type ActionResult = { ok: true } | { ok: false; error: string }
 
@@ -43,6 +45,8 @@ export type WorkforceController = {
   restoreDemoAgents(): void
   dismissLoadProblem(): void
   dismissCommandError(): void
+  /** Backend mode only: trade the API token for a session cookie. The token is never kept. */
+  pair?(token: string): Promise<ActionResult>
   dispose(): void
 }
 
@@ -57,7 +61,7 @@ export function createWorkforceController(opts: { storage: KV | null; now?: () =
   const loaded = loadWorkforce(opts.storage, now())
   const listeners = new Set<() => void>()
   let current = loaded.state
-  let snapshot: WorkforceSnapshot = { state: current, loadProblem: loaded.problem, preserved: loaded.preserved, saveError: null, environment: { kind: 'browser' }, connection: 'local', lastSyncedAt: null, commandError: null, connectionError: null }
+  let snapshot: WorkforceSnapshot = { state: current, loadProblem: loaded.problem, preserved: loaded.preserved, saveError: null, environment: { kind: 'browser' }, connection: 'local', lastSyncedAt: null, commandError: null, connectionError: null, needsPairing: false }
   let disposed = false
 
   const publish = (patch: Partial<WorkforceSnapshot>) => {

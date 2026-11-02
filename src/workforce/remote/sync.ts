@@ -8,12 +8,14 @@ export type EventSourceLike = {
   addEventListener(type: string, listener: (event: { data?: string }) => void): void
   close(): void
 }
-export type SyncSnapshot = Pick<WorkforceSnapshot, 'state' | 'loadProblem' | 'preserved' | 'saveError' | 'environment' | 'connection' | 'lastSyncedAt' | 'connectionError'>
+export type SyncSnapshot = Pick<WorkforceSnapshot, 'state' | 'loadProblem' | 'preserved' | 'saveError' | 'environment' | 'connection' | 'lastSyncedAt' | 'connectionError' | 'needsPairing'>
 export type RemoteSync = {
   getSnapshot(): SyncSnapshot
   subscribe(listener: () => void): () => void
   /** Adds the agent unless an event already delivered it (an event's copy is never older than the response's). */
   insertAgentIfAbsent(agent: Agent): void
+  /** Starts over from the snapshot right now (used after pairing); also leaves the stopped state of needsPairing. */
+  reconnect(): void
   dispose(): void
 }
 
@@ -26,11 +28,11 @@ export const reconnectDelay = (attempt: number): number => Math.min(1000 * 2 ** 
  * EventSource retry is never used: every error closes the stream and goes through the backoff here.
  * Each connect has a generation number, so a late response or stream callback from an older connect changes nothing.
  */
-export function createRemoteSync(opts: { client: ApiClient; createEventSource: (url: string) => EventSourceLike; now?: () => string }): RemoteSync {
+export function createRemoteSync(opts: { client: ApiClient; createEventSource: (url: string, opts: { withCredentials: boolean }) => EventSourceLike; now?: () => string }): RemoteSync {
   const { client } = opts
   const now = opts.now ?? (() => new Date().toISOString())
   const listeners = new Set<() => void>()
-  let snap: SyncSnapshot = { state: emptyWorkforce(), loadProblem: null, preserved: null, saveError: null, environment: { kind: 'backend', runtime: null, available: null, reason: null }, connection: 'connecting', lastSyncedAt: null, connectionError: null }
+  let snap: SyncSnapshot = { state: emptyWorkforce(), loadProblem: null, preserved: null, saveError: null, environment: { kind: 'backend', runtime: null, available: null, reason: null }, connection: 'connecting', lastSyncedAt: null, connectionError: null, needsPairing: false }
   let generation = 0
   let cursor: { boot: string; seq: number } | null = null
   let stream: EventSourceLike | null = null
@@ -61,6 +63,13 @@ export function createRemoteSync(opts: { client: ApiClient; createEventSource: (
     publish({ connection: 'offline', connectionError: reason })
     timer = setTimeout(() => { timer = null; void connect() }, reconnectDelay(attempt))
     attempt += 1
+  }
+
+  /** A 401: only a pairing can fix it, so there is no retry timer. reconnect() starts again. */
+  const needPairing = (reason: string) => {
+    stop()
+    if (disposed) return
+    publish({ connection: 'offline', connectionError: reason, needsPairing: true })
   }
 
   /** A trusted-copy failure: reload the snapshot at once, or after a growing delay when it keeps happening. */
@@ -104,12 +113,13 @@ export function createRemoteSync(opts: { client: ApiClient; createEventSource: (
     const r = await pending
     if (g !== generation) return
     const parsed = r.ok ? parseEventId(r.body.lastEventId) : null
+    if (!r.ok && r.status === 401) { needPairing(r.error); return }
     if (!r.ok) { goOffline(r.error); return }
     if (!parsed) { goOffline('The backend sent an invalid event id.'); return }
     cursor = parsed
-    publish({ state: r.body.state, loadProblem: r.body.loadProblem, preserved: r.body.preserved, saveError: r.body.saveError, lastSyncedAt: now() })
+    publish({ needsPairing: false, state: r.body.state, loadProblem: r.body.loadProblem, preserved: r.body.preserved, saveError: r.body.saveError, lastSyncedAt: now() })
 
-    const source = opts.createEventSource(`${client.baseUrl}/api/events?lastEventId=${encodeURIComponent(r.body.lastEventId)}`)
+    const source = opts.createEventSource(`${client.baseUrl}/api/events?lastEventId=${encodeURIComponent(r.body.lastEventId)}`, { withCredentials: true })
     stream = source
     for (const name of WORKFORCE_EVENT_TYPES) source.addEventListener(name, (e) => onFrame(g, name, e.data))
     source.addEventListener('open', () => {
@@ -131,6 +141,12 @@ export function createRemoteSync(opts: { client: ApiClient; createEventSource: (
     insertAgentIfAbsent(agent) {
       if (disposed || snap.state.agents.some((a) => a.id === agent.id)) return
       publish({ state: { ...snap.state, agents: [...snap.state.agents, agent] } })
+    },
+    reconnect() {
+      if (disposed) return
+      attempt = 0
+      resetStreak = 0
+      void connect()
     },
     dispose() {
       disposed = true

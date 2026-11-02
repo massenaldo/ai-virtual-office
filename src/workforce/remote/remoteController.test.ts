@@ -16,9 +16,10 @@ const newAgent = { ...demo.agents[0], id: 'a9', name: 'Older' }
 let backend: ReturnType<typeof createFakeBackend>
 let c: WorkforceController
 
-function make(state = stateAt('b1:5')) {
+function make(state = stateAt('b1:5'), before?: (b: ReturnType<typeof createFakeBackend>) => void) {
   backend = createFakeBackend({ baseUrl: BASE, state })
-  c = createRemoteWorkforceController({ baseUrl: BASE, fetch: backend.fetch, createEventSource: (u) => new FakeEventSource(u), now: () => NOW })
+  before?.(backend)
+  c = createRemoteWorkforceController({ baseUrl: BASE, fetch: backend.fetch, createEventSource: (u, o) => new FakeEventSource(u, o), now: () => NOW })
 }
 
 beforeEach(() => { vi.useFakeTimers(); FakeEventSource.reset() })
@@ -89,5 +90,34 @@ describe('createRemoteWorkforceController', () => {
     await flush()
     c.dispose()
     expect(FakeEventSource.instances[0].closed).toBe(true)
+  })
+
+  it('pair posts the token, then reconnects and clears needsPairing', async () => {
+    make(stateAt('b1:5'), (b) => b.respond('GET', '/api/state', 401, { error: 'Unauthorized.' }))
+    await flush()
+    expect(c.getSnapshot().needsPairing).toBe(true)
+    backend.respond('POST', '/api/session', 200, { ok: true, expiresAt: NOW })
+    backend.respond('GET', '/api/state', 200, stateAt('b1:5'))
+    expect(await c.pair!('tok')).toEqual({ ok: true })
+    await flush()
+    expect(backend.calls.find((x) => x.url === `${BASE}/api/session`)?.body).toBe('{"token":"tok"}')
+    expect(c.getSnapshot()).toMatchObject({ needsPairing: false, lastSyncedAt: NOW })
+  })
+
+  it('pair returns the server error and does not reconnect on failure', async () => {
+    make(stateAt('b1:5'), (b) => b.respond('GET', '/api/state', 401, { error: 'Unauthorized.' }))
+    await flush()
+    backend.respond('POST', '/api/session', 401, { error: 'Unauthorized.' })
+    expect(await c.pair!('bad')).toEqual({ ok: false, error: 'That token was not accepted.' })
+    await flush()
+    expect(c.getSnapshot().needsPairing).toBe(true)
+    expect(backend.calls.filter((x) => x.method === 'GET' && x.url === `${BASE}/api/state`)).toHaveLength(1)
+  })
+
+  it('a misconfigured controller fails pair with the config error and is never in needsPairing', async () => {
+    const m = createRemoteWorkforceController({ baseUrl: '', configError: 'bad address' })
+    expect(m.getSnapshot().needsPairing).toBe(false)
+    expect(await m.pair!('t')).toEqual({ ok: false, error: 'bad address' })
+    m.dispose()
   })
 })

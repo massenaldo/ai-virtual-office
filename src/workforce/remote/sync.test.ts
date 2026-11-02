@@ -25,7 +25,7 @@ function start(opts: { down?: boolean; lastEventId?: string; before?: (b: Return
   backend = createFakeBackend({ baseUrl: BASE, state: stateAt(opts.lastEventId ?? 'b1:5') })
   backend.down = opts.down ?? false
   opts.before?.(backend)
-  sync = createRemoteSync({ client: createApiClient({ baseUrl: BASE, fetch: backend.fetch }), createEventSource: (url) => new FakeEventSource(url), now: () => NOW })
+  sync = createRemoteSync({ client: createApiClient({ baseUrl: BASE, fetch: backend.fetch }), createEventSource: (url, o) => new FakeEventSource(url, o), now: () => NOW })
 }
 
 beforeEach(() => { vi.useFakeTimers(); FakeEventSource.reset() })
@@ -171,19 +171,65 @@ describe('createRemoteSync: offline, restart and cleanup', () => {
     expect(sync.getSnapshot().connectionError).toBe('The event stream was interrupted.')
   })
 
-  it('shows Not authorized on a 401 and keeps retrying', async () => {
+  it('opens the event stream with credentials', async () => {
+    start()
+    await flush()
+    expect(es(0).opts).toEqual({ withCredentials: true })
+  })
+
+  it('a 401 on the snapshot sets needsPairing and stops: no backoff timer', async () => {
     start({ before: (b) => b.respond('GET', '/api/state', 401, { error: 'Unauthorized.' }) })
     await flush()
-    expect(sync.getSnapshot()).toMatchObject({ connection: 'offline', connectionError: NOT_AUTHORIZED })
+    expect(sync.getSnapshot()).toMatchObject({ connection: 'offline', connectionError: NOT_AUTHORIZED, needsPairing: true })
+    await vi.advanceTimersByTimeAsync(120000)
+    expect(calls(backend, '/api/state')).toBe(1)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('reconnect() after pairing loads the snapshot again and clears needsPairing', async () => {
+    start({ before: (b) => b.respond('GET', '/api/state', 401, { error: 'Unauthorized.' }) })
+    await flush()
     backend.respond('GET', '/api/state', 200, stateAt('b1:5'))
-    await vi.advanceTimersByTimeAsync(1000)
+    sync.reconnect()
+    await flush()
+    expect(calls(backend, '/api/state')).toBe(2)
+    expect(sync.getSnapshot().needsPairing).toBe(false)
     es(0).open()
-    expect(sync.getSnapshot()).toMatchObject({ connection: 'live', connectionError: null })
+    expect(sync.getSnapshot()).toMatchObject({ connection: 'live', connectionError: null, needsPairing: false })
+  })
+
+  it('a stream error followed by a 401 snapshot (session ended) sets needsPairing and stops', async () => {
+    start()
+    await flush()
+    es(0).open()
+    backend.respond('GET', '/api/state', 401, { error: 'Unauthorized.' })
+    es(0).fail()
+    expect(sync.getSnapshot().needsPairing).toBe(false)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(sync.getSnapshot().needsPairing).toBe(true)
+    await vi.advanceTimersByTimeAsync(120000)
+    expect(calls(backend, '/api/state')).toBe(2)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('a failed reconnect (still 401) stays in needsPairing without a timer', async () => {
+    start({ before: (b) => b.respond('GET', '/api/state', 401, { error: 'Unauthorized.' }) })
+    await flush()
+    sync.reconnect()
+    await flush()
+    expect(sync.getSnapshot().needsPairing).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('other failures keep needsPairing false and retry', async () => {
+    start({ before: (b) => b.respond('GET', '/api/state', 403, { error: 'Origin not allowed.' }) })
+    await flush()
+    expect(sync.getSnapshot().needsPairing).toBe(false)
   })
 
   it('opens the event stream on the same origin when the base URL is empty', async () => {
     backend = createFakeBackend({ baseUrl: '', state: stateAt('b1:5') })
-    sync = createRemoteSync({ client: createApiClient({ baseUrl: '', fetch: backend.fetch }), createEventSource: (url) => new FakeEventSource(url), now: () => NOW })
+    sync = createRemoteSync({ client: createApiClient({ baseUrl: '', fetch: backend.fetch }), createEventSource: (url, o) => new FakeEventSource(url, o), now: () => NOW })
     await flush()
     expect(es(0).url).toBe('/api/events?lastEventId=b1%3A5')
   })

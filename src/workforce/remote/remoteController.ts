@@ -7,7 +7,7 @@ import { createRemoteSync, type EventSourceLike, type RemoteSync } from './sync'
 export type RemoteControllerOptions = {
   baseUrl: string
   fetch?: typeof fetch
-  createEventSource?: (url: string) => EventSourceLike
+  createEventSource?: (url: string, opts: { withCredentials: boolean }) => EventSourceLike
   now?: () => string
   /** A bad VITE_WORKFORCE_API_URL: nothing connects, the error is shown, and every command fails with it. */
   configError?: string
@@ -21,12 +21,12 @@ export function createRemoteWorkforceController(opts: RemoteControllerOptions): 
   let loadDismissed = false
 
   const client: ApiClient = opts.configError !== undefined
-    ? { baseUrl: opts.baseUrl, get: async () => ({ ok: false, status: null, error: opts.configError! }), send: async () => ({ ok: false, status: null, error: opts.configError! }) }
+    ? { baseUrl: opts.baseUrl, get: async () => ({ ok: false, status: null, error: opts.configError! }), send: async () => ({ ok: false, status: null, error: opts.configError! }), pair: async () => ({ ok: false, status: null, error: opts.configError! }) }
     : createApiClient({ baseUrl: opts.baseUrl, fetch: opts.fetch })
 
   const sync: RemoteSync | null = opts.configError !== undefined
     ? null
-    : createRemoteSync({ client, createEventSource: opts.createEventSource ?? ((url) => new EventSource(url)), now: opts.now })
+    : createRemoteSync({ client, createEventSource: opts.createEventSource ?? ((url, o) => new EventSource(url, o)), now: opts.now })
   const unsubscribe = sync?.subscribe(notify)
 
   const setCommandError = (message: string | null) => {
@@ -39,7 +39,7 @@ export function createRemoteWorkforceController(opts: RemoteControllerOptions): 
 
   const misconfigured: Omit<WorkforceSnapshot, 'commandError'> = {
     state: emptyWorkforce(), loadProblem: null, preserved: null, saveError: null,
-    environment: { kind: 'backend', runtime: null, available: null, reason: null }, connection: 'misconfigured' satisfies ConnectionStatus, lastSyncedAt: null, connectionError: null,
+    environment: { kind: 'backend', runtime: null, available: null, reason: null }, connection: 'misconfigured' satisfies ConnectionStatus, lastSyncedAt: null, connectionError: null, needsPairing: false,
   }
 
   // useSyncExternalStore needs the same object back until something changed.
@@ -66,6 +66,12 @@ export function createRemoteWorkforceController(opts: RemoteControllerOptions): 
       notify()
     },
     dismissCommandError: () => setCommandError(null),
+    async pair(token) {
+      const r = await client.pair(token)
+      if (!r.ok) return { ok: false, error: r.error }
+      sync?.reconnect()
+      return { ok: true }
+    },
     dispose() {
       unsubscribe?.()
       sync?.dispose()

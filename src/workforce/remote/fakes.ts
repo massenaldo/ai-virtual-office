@@ -2,7 +2,7 @@ import type { StateResponse, HealthResponse, WorkforceEvent } from '../api'
 
 // Test doubles for fetch and EventSource. Never imported by the app.
 
-export type FakeCall = { method: string; url: string; headers: Record<string, string>; body: string | undefined }
+export type FakeCall = { method: string; url: string; headers: Record<string, string>; body: string | undefined; credentials: RequestCredentials | undefined }
 
 const DEFAULT_HEALTH: HealthResponse = { ok: true, version: 'test', runtime: 'mock', available: true, reason: null, credentialsConfigured: false, startedAt: '2026-10-31T09:00:00.000Z' }
 
@@ -30,7 +30,7 @@ export function createFakeBackend(opts: { baseUrl: string; state: StateResponse;
       const method = init?.method ?? 'GET'
       const headers: Record<string, string> = {}
       for (const [k, v] of Object.entries((init?.headers ?? {}) as Record<string, string>)) headers[k.toLowerCase()] = v
-      calls.push({ method, url, headers, body: typeof init?.body === 'string' ? init.body : undefined })
+      calls.push({ method, url, headers, body: typeof init?.body === 'string' ? init.body : undefined, credentials: init?.credentials })
       if (backend.down) throw new TypeError('Failed to fetch')
       const path = url.slice(opts.baseUrl.length).split('?')[0]
       const gate = held.get(path)
@@ -61,7 +61,7 @@ export class FakeEventSource {
   static reset(): void { FakeEventSource.instances = [] }
   closed = false
   private listeners = new Map<string, Listener[]>()
-  constructor(public url: string) { FakeEventSource.instances.push(this) }
+  constructor(public url: string, public opts: { withCredentials: boolean } = { withCredentials: false }) { FakeEventSource.instances.push(this) }
   addEventListener(type: string, fn: Listener): void { this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn]) }
   close(): void { this.closed = true }
   open(): void { this.dispatch('open', {}) }

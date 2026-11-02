@@ -17,6 +17,8 @@ import type { WorkforceStore } from '../store'
 import type { ManagerError, TaskManager } from '../taskManager'
 import { parseApproval, parseCreateAgent, parseCreatePermission, parseCreateTask, parseDesk, parsePatchAgent } from './inputs'
 import { HttpError, type Reply, type Route } from './router'
+import { createSessionRoutes } from './sessionRoutes'
+import type { SessionStore } from '../session'
 import { eventsRoute } from './sse'
 
 export type RouteDeps = {
@@ -33,6 +35,8 @@ export type RouteDeps = {
   log: Logger
   maxStreams?: number
   audit: AuditLog
+  sessions: SessionStore
+  apiToken: string
 }
 
 /** What a refused grant tells the person. The store's own `limit` is a conflict, the rest are 422. */
@@ -95,7 +99,8 @@ export function createRoutes(deps: RouteDeps): Route[] {
         return { status: 200, body }
       },
     },
-    eventsRoute({ events, heartbeatMs: deps.heartbeatMs, streams: deps.streams, now, log: deps.log, maxStreams: deps.maxStreams }),
+    ...createSessionRoutes({ sessions: deps.sessions, apiToken: deps.apiToken, audit: deps.audit, now }),
+    eventsRoute({ events, heartbeatMs: deps.heartbeatMs, streams: deps.streams, now, log: deps.log, maxStreams: deps.maxStreams, sessions: deps.sessions, apiToken: deps.apiToken }),
     {
       method: 'POST',
       path: '/api/agents',

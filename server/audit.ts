@@ -19,6 +19,7 @@ export type AuditAction =
   | 'approval.requested' | 'approval.decided' | 'approval.timeout'
   | 'tool.allowed' | 'tool.denied' | 'tool.asked' | 'tool.stale' | 'workspace.rejected' | 'request.rejected' | 'runtime.note'
   | 'permission.granted' | 'permission.denied' | 'permission.revoked' | 'permission.expired' | 'permission.used'
+  | 'session.created' | 'session.ended' | 'session.rejected'
 
 export type AuditActor = 'api' | 'system' | 'runtime'
 
@@ -119,7 +120,8 @@ export function openAuditLog({ dataDir, maxBytes, now, log, hide = [] }: AuditOp
         inWindow = 0
         flushSuppressed()
       }
-      if (entry.action === 'request.rejected' && entry.reason !== 'suppressed') {
+      // Unauthenticated callers can trigger both kinds of rejection, so both share the same per-minute cap.
+      if ((entry.action === 'request.rejected' || entry.action === 'session.rejected') && entry.reason !== 'suppressed') {
         if (inWindow >= REJECTED_PER_MINUTE) { suppressed++; return }
         inWindow++
       }

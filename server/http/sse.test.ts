@@ -1,3 +1,4 @@
+import { createSessionStore } from '../session'
 import { EventEmitter } from 'node:events'
 import type { ServerResponse } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -166,7 +167,7 @@ describe('stream limits and CORS', () => {
     const events = new EventLog({ capacity: 10, now: () => '2026-10-31T09:00:00.000Z', bootId: 'b', log: silentLogger })
     const streams = new Set<ServerResponse>()
     const warn = vi.fn()
-    const route = eventsRoute({ events, heartbeatMs: 60000, streams, now: () => 'x', log: { ...silentLogger, warn }, maxBufferBytes: 10 })
+    const route = eventsRoute({ events, heartbeatMs: 60000, streams, now: () => 'x', log: { ...silentLogger, warn }, maxBufferBytes: 10, sessions: createSessionStore({ now: Date.now }), apiToken: 'x' })
     const req = Object.assign(new EventEmitter(), { headers: {} })
     const res = Object.assign(new EventEmitter(), { writeHead: vi.fn(), write: vi.fn(() => false), writableLength: 11, end: vi.fn() })
     void route.handler({ req: req as never, res: res as never, url: new URL('http://x/api/events'), params: {}, body: undefined, requestId: 'r' })

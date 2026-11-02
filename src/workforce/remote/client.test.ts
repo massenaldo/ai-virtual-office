@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createDemoWorkforce } from '../demo'
 import type { StateResponse } from '../api'
-import { createApiClient, NOT_AUTHORIZED, type ApiClient } from './client'
+import { createApiClient, NOT_AUTHORIZED, PAIR_REJECTED, type ApiClient } from './client'
 import { createFakeBackend } from './fakes'
 
 const BASE = 'http://127.0.0.1:8787'
@@ -54,6 +54,30 @@ describe('createApiClient', () => {
     expect(await client.get('/api/state')).toEqual({ ok: false, status: 401, error: NOT_AUTHORIZED })
     backend.respond('POST', '/api/agents', 401, { error: 'Unauthorized.' })
     expect(await client.send('POST', '/api/agents', {})).toEqual({ ok: false, status: 401, error: NOT_AUTHORIZED })
+  })
+
+  it('sends every request with credentials: include', async () => {
+    await client.get('/api/state')
+    await client.send('POST', '/api/agents', {})
+    expect(backend.calls.map((c) => c.credentials)).toEqual(['include', 'include'])
+  })
+
+  it('pair posts { token } as JSON with MUTATION_HEADERS and credentials', async () => {
+    backend.respond('POST', '/api/session', 200, { ok: true, expiresAt: '2026-11-02T20:00:00.000Z' })
+    expect(await client.pair('s3cret')).toEqual({ ok: true, status: 200, body: { ok: true, expiresAt: '2026-11-02T20:00:00.000Z' } })
+    expect(backend.calls[0]).toMatchObject({ method: 'POST', url: `${BASE}/api/session`, body: '{"token":"s3cret"}', credentials: 'include' })
+    expect(backend.calls[0].headers['content-type']).toBe('application/json')
+  })
+
+  it('a 401 from pair says the token was not accepted, not NOT_AUTHORIZED', async () => {
+    backend.respond('POST', '/api/session', 401, { error: 'Unauthorized.' })
+    expect(await client.pair('bad')).toEqual({ ok: false, status: 401, error: PAIR_REJECTED })
+    expect(PAIR_REJECTED).toBe('That token was not accepted.')
+  })
+
+  it('a 429 from pair shows the server text', async () => {
+    backend.respond('POST', '/api/session', 429, { error: 'Too many attempts. Try again soon.' })
+    expect(await client.pair('x')).toEqual({ ok: false, status: 429, error: 'Too many attempts. Try again soon.' })
   })
 
   it('works against the same origin and says so when it cannot reach it', async () => {

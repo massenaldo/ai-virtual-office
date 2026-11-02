@@ -51,5 +51,10 @@ const digest = (text: string) => createHash('sha256').update(text).digest()
 /** True only for `Authorization: Bearer <token>`. Compares fixed-length digests in constant time. */
 export function tokenMatches(expected: string, header: string | undefined): boolean {
   const match = /^Bearer (\S+)$/i.exec(header ?? '')
-  return match !== null && timingSafeEqual(digest(match[1]), digest(expected))
+  return match !== null && tokenEquals(expected, match[1])
+}
+
+/** Constant-time equality of two tokens (fixed-length digests are compared). */
+export function tokenEquals(expected: string, candidate: string): boolean {
+  return timingSafeEqual(digest(candidate), digest(expected))
 }

@@ -1,10 +1,12 @@
 import type { IncomingMessage } from 'node:http'
 import { tokenMatches } from '../auth'
+import { authenticatedSession, sessionClearCookie, sessionIdsFromCookie, type SessionStore } from '../session'
 import type { Guard, RejectInfo, Reply } from './router'
 
 // The browser-facing guards. Order matters: Host first (it stops DNS rebinding, where a hostile page reaches the API under
-// its own name), then Origin (it stops other web pages), then preflight, then the bearer token (it stops programs that talk to the backend directly; a program that can reach the dev
-// proxy can still send a request that looks same-origin, see the README), then the JSON-only rule (it turns a cross-origin
+// its own name), then Origin (it stops other web pages), then preflight, then auth (bearer token or session cookie; it stops programs that talk to the backend directly; a program that can reach the dev
+// proxy can still send a request that looks same-origin, see the README), then the cookie-Origin rule (a state change authenticated only by cookie must carry an allowed
+// Origin, which stops CSRF), then the JSON-only rule (it turns a cross-origin
 // "simple request" into one that needs a preflight, which the Origin guard denies).
 
 export const ALLOWED_HOST_NAMES = ['127.0.0.1', 'localhost', '[::1]'] as const
@@ -12,11 +14,16 @@ export const PREFLIGHT_MAX_AGE_S = 600
 export const CORS_METHODS = 'GET, POST, PUT, PATCH, DELETE'
 export const CORS_HEADERS = 'Content-Type, Last-Event-ID'
 
-export type GuardOptions = { allowedOrigins: readonly string[]; apiToken: string; onReject?: (r: RejectInfo) => void }
+export type GuardOptions = { allowedOrigins: readonly string[]; apiToken: string; sessions: SessionStore; onReject?: (r: RejectInfo) => void }
 
 const STATE_CHANGING = ['POST', 'PUT', 'PATCH', 'DELETE']
 
-export function createSecurityGuards({ allowedOrigins, apiToken, onReject }: GuardOptions): Guard[] {
+/** How a request proved itself, held per request object so nothing is added to the request. */
+type AuthKind = 'bearer' | 'cookie'
+
+export function createSecurityGuards({ allowedOrigins, apiToken, sessions, onReject }: GuardOptions): Guard[] {
+  const authenticatedBy = new WeakMap<IncomingMessage, AuthKind>()
+
   const refuse = (req: IncomingMessage, url: URL, requestId: string, status: number, code: RejectInfo['code'], error: string, headers?: Record<string, string>): Reply => {
     onReject?.({ status, code, method: req.method ?? '', path: url.pathname.slice(0, 128), requestId })
     return { status, body: { error }, ...(headers ? { headers } : {}) }
@@ -38,14 +45,30 @@ export function createSecurityGuards({ allowedOrigins, apiToken, onReject }: Gua
     if (req.method !== 'OPTIONS') return null
     const value = req.headers.origin
     if (value === undefined) return { status: 204, body: null, headers: { allow: `${CORS_METHODS}, OPTIONS` } }
-    return { status: 204, body: null, headers: { 'access-control-allow-origin': value, 'access-control-allow-methods': CORS_METHODS, 'access-control-allow-headers': CORS_HEADERS, 'access-control-max-age': String(PREFLIGHT_MAX_AGE_S) } }
+    return { status: 204, body: null, headers: { 'access-control-allow-origin': value, 'access-control-allow-methods': CORS_METHODS, 'access-control-allow-headers': CORS_HEADERS, 'access-control-allow-credentials': 'true', 'access-control-max-age': String(PREFLIGHT_MAX_AGE_S) } }
   }
 
-  // Every route needs the bearer token, including the event stream and requests with no Origin header (curl, another local
-  // program). Only the health check (it carries no state) and preflight are open. The token is read from the header only.
+  // Every route needs the bearer token or a valid session cookie, including the event stream and requests with no Origin header
+  // (curl, another local program). Only the health check (it carries no state), pairing (POST /api/session, which checks the
+  // token itself) and preflight are open. The token is read from the header or the pairing body only, never a URL.
   const auth: Guard = (req, url, { requestId }) => {
     if (req.method === 'GET' && url.pathname === '/api/health') return null
-    return tokenMatches(apiToken, req.headers.authorization) ? null : refuse(req, url, requestId, 401, 'auth', 'Unauthorized.', { 'www-authenticate': 'Bearer' })
+    // Pairing is how a browser gets a session; it still passes Host, Origin, preflight and JSON-only, and the route checks the token itself.
+    if (req.method === 'POST' && url.pathname === '/api/session') return null
+    // A valid bearer wins even when a cookie is sent too.
+    if (tokenMatches(apiToken, req.headers.authorization)) { authenticatedBy.set(req, 'bearer'); return null }
+    if (authenticatedSession(req, sessions) !== undefined) { authenticatedBy.set(req, 'cookie'); return null }
+    // A logout with a stale or expired cookie still clears it in the browser; the 401 body is unchanged.
+    const clears = req.method === 'DELETE' && url.pathname === '/api/session' && sessionIdsFromCookie(req.headers.cookie).length > 0
+    return refuse(req, url, requestId, 401, 'auth', 'Unauthorized.', { 'www-authenticate': 'Bearer', ...(clears ? { 'set-cookie': sessionClearCookie(req.headers.origin) } : {}) })
+  }
+
+  // The browser sends a cookie on its own, so a cookie-authenticated state change must prove where it came from: an allowed
+  // Origin is required (a missing one is refused). Bearer requests are unaffected.
+  const cookieOrigin: Guard = (req, url, { requestId }) => {
+    if (!STATE_CHANGING.includes(req.method ?? '') || authenticatedBy.get(req) !== 'cookie') return null
+    const value = req.headers.origin
+    return value !== undefined && allowedOrigins.includes(value) ? null : refuse(req, url, requestId, 403, 'origin', 'Origin not allowed.')
   }
 
   // Covers body-less routes too (cancel, the demo POSTs, DELETE): their bodies are never read, but the header is still required.
@@ -55,10 +78,10 @@ export function createSecurityGuards({ allowedOrigins, apiToken, onReject }: Gua
     return type === 'application/json' ? null : refuse(req, url, requestId, 415, 'content_type', 'Content-Type must be application/json.')
   }
 
-  return [host, origin, preflight, auth, jsonOnly]
+  return [host, origin, preflight, auth, cookieOrigin, jsonOnly]
 }
 
-/** Headers for every reply. CORS headers appear only for an allowed Origin, never as `*`, and never with credentials. */
+/** Headers for every reply. CORS headers appear only for an allowed Origin, never as `*`; credentials are allowed only alongside that exact Origin. */
 export function securityHeaders(req: IncomingMessage, allowedOrigins: readonly string[]): Record<string, string> {
   const headers: Record<string, string> = {
     // JSON replies set this themselves; the event stream writes its own headers, so it comes from here too.
@@ -71,6 +94,7 @@ export function securityHeaders(req: IncomingMessage, allowedOrigins: readonly s
   const origin = req.headers.origin
   if (origin !== undefined && allowedOrigins.includes(origin)) {
     headers['access-control-allow-origin'] = origin
+    headers['access-control-allow-credentials'] = 'true'
     headers['access-control-expose-headers'] = 'X-Request-Id'
   }
   return headers

@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process'
-import { constants, linkSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync, closeSync, fstatSync } from 'node:fs'
+import { chmodSync, closeSync, constants, fstatSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { FILE_READ_MAX_BYTES, FileOpFailure, openInside, readTextFile, type FileOpError } from './fileOps'
+import { REVIEW_MAX_BYTES } from '../src/workforce/types'
+import { FILE_READ_MAX_BYTES, FileOpFailure, editTextFile, openInside, readTextFile, writeTextFile, type FileOpError } from './fileOps'
 
 let base: string
 let ws: string
@@ -191,5 +192,181 @@ describe('openInside', () => {
     const c = code(() => { result = readTextFile(ws, 'dir/s.txt', live, { beforeOpen: () => { renameSync(join(ws, 'dir'), join(ws, 'dir.old')); symlinkSync(outside, join(ws, 'dir')) } }) })
     expect(c).toBe('unsafe_path')
     expect(result).toBeUndefined()
+  })
+})
+
+const tmps = (dir: string) => readdirSync(dir).filter((n) => n.endsWith('.tmp'))
+
+describe('writeTextFile', () => {
+  it('creates a file and reports bytes and created', () => {
+    expect(writeTextFile(ws, 'a.txt', 'héllo', live)).toEqual({ bytes: 6, created: true })
+    expect(readFileSync(join(ws, 'a.txt'), 'utf8')).toBe('héllo')
+    expect(statSync(join(ws, 'a.txt')).mode & 0o777).toBe(0o600)
+    expect(tmps(ws)).toEqual([])
+  })
+  it('overwrites, keeps the existing mode, reports created false', () => {
+    writeFileSync(join(ws, 'a.txt'), 'old')
+    chmodSync(join(ws, 'a.txt'), 0o640)
+    expect(writeTextFile(ws, 'a.txt', 'new', live)).toEqual({ bytes: 3, created: false })
+    expect(readFileSync(join(ws, 'a.txt'), 'utf8')).toBe('new')
+    expect(statSync(join(ws, 'a.txt')).mode & 0o777).toBe(0o640)
+    expect(tmps(ws)).toEqual([])
+  })
+  it('writes in an existing subdirectory; a missing parent is not_found and not created', () => {
+    mkdirSync(join(ws, 'd'))
+    writeTextFile(ws, 'd/a.txt', 'x', live)
+    expect(readFileSync(join(ws, 'd', 'a.txt'), 'utf8')).toBe('x')
+    expect(code(() => writeTextFile(ws, 'nope/a.txt', 'x', live))).toBe('not_found')
+    expect(readdirSync(ws)).toEqual(['d'])
+  })
+  it('content over REVIEW_MAX_BYTES (bytes, not chars) is too_large and nothing is written', () => {
+    expect(code(() => writeTextFile(ws, 'a.txt', 'é'.repeat(REVIEW_MAX_BYTES / 2 + 1), live))).toBe('too_large')
+    expect(readdirSync(ws)).toEqual([])
+    expect(writeTextFile(ws, 'ok.txt', 'a'.repeat(REVIEW_MAX_BYTES), live).bytes).toBe(REVIEW_MAX_BYTES)
+  })
+  it('refuses an empty path, .., absolute and symlink targets', () => {
+    writeFileSync(join(outside, 's.txt'), 'secret')
+    symlinkSync(join(outside, 's.txt'), join(ws, 'l.txt'))
+    expect(code(() => writeTextFile(ws, '', 'x', live))).toBe('not_a_file')
+    expect(code(() => writeTextFile(ws, '../x.txt', 'x', live))).toBe('unsafe_path')
+    expect(code(() => writeTextFile(ws, 'l.txt', 'x', live))).toBe('unsafe_path')
+    expect(readFileSync(join(outside, 's.txt'), 'utf8')).toBe('secret')
+    expect(tmps(ws)).toEqual([])
+  })
+  it('a dangling symlink target is unsafe_path and creates nothing outside', () => {
+    symlinkSync(join(outside, 'gone'), join(ws, 'dangling'))
+    expect(code(() => writeTextFile(ws, 'dangling', 'x', live))).toBe('unsafe_path')
+    expect(readdirSync(outside)).toEqual([])
+  })
+  it('a hard-linked target is unsafe_path and the outside inode is untouched', () => {
+    writeFileSync(join(outside, 'h.txt'), 'secret')
+    linkSync(join(outside, 'h.txt'), join(ws, 'h.txt'))
+    expect(code(() => writeTextFile(ws, 'h.txt', 'x', live))).toBe('unsafe_path')
+    expect(readFileSync(join(outside, 'h.txt'), 'utf8')).toBe('secret')
+    expect(tmps(ws)).toEqual([])
+  })
+  it('a directory target is not_a_file; a file as a parent is not_a_directory', () => {
+    mkdirSync(join(ws, 'd'))
+    writeFileSync(join(ws, 'f'), 'x')
+    expect(code(() => writeTextFile(ws, 'd', 'x', live))).toBe('not_a_file')
+    expect(code(() => writeTextFile(ws, 'f/x', 'x', live))).toBe('not_a_directory')
+    expect(tmps(ws)).toEqual([])
+  })
+  it('a symlinked parent directory is unsafe_path', () => {
+    symlinkSync(outside, join(ws, 'dir'))
+    expect(code(() => writeTextFile(ws, 'dir/a.txt', 'x', live))).toBe('unsafe_path')
+    expect(readdirSync(outside)).toEqual([])
+  })
+  it('an aborted signal writes nothing', () => {
+    const c = new AbortController()
+    c.abort()
+    expect(code(() => writeTextFile(ws, 'a.txt', 'x', c.signal))).toBe('aborted')
+    expect(readdirSync(ws)).toEqual([])
+  })
+  it('abort between the temp write and the rename keeps the original and leaves no temp file', () => {
+    writeFileSync(join(ws, 'a.txt'), 'original')
+    const c = new AbortController()
+    expect(code(() => writeTextFile(ws, 'a.txt', 'new', c.signal, { beforeRename: () => c.abort() }))).toBe('aborted')
+    expect(readFileSync(join(ws, 'a.txt'), 'utf8')).toBe('original')
+    expect(tmps(ws)).toEqual([])
+  })
+  it('a parent swapped for a symlink after the temp file is created writes nothing outside', () => {
+    mkdirSync(join(ws, 'dir'))
+    writeFileSync(join(ws, 'dir', 'a.txt'), 'original')
+    const c = code(() => writeTextFile(ws, 'dir/a.txt', 'new', live, {
+      beforeRename: () => { renameSync(join(ws, 'dir'), join(ws, 'dir.old')); symlinkSync(outside, join(ws, 'dir')) },
+    }))
+    expect(c).toBe('unsafe_path')
+    expect(readdirSync(outside)).toEqual([])
+    expect(readFileSync(join(ws, 'dir.old', 'a.txt'), 'utf8')).toBe('original')
+  })
+  it('a parent swapped right after the temp file is created is unsafe_path and nothing lands outside', () => {
+    mkdirSync(join(ws, 'dir'))
+    const c = code(() => writeTextFile(ws, 'dir/a.txt', 'new', live, {
+      afterTempCreate: () => { renameSync(join(ws, 'dir'), join(ws, 'dir.old')); symlinkSync(outside, join(ws, 'dir')) },
+    }))
+    expect(c).toBe('unsafe_path')
+    expect(readdirSync(outside)).toEqual([])
+  })
+  it('the temp file replaced by a symlink is unsafe_path and nothing is written through it', () => {
+    writeFileSync(join(outside, 's.txt'), 'secret')
+    const c = code(() => writeTextFile(ws, 'a.txt', 'new', live, {
+      afterTempCreate: () => {
+        const t = tmps(ws)[0]!
+        rmSync(join(ws, t))
+        symlinkSync(join(outside, 's.txt'), join(ws, t))
+      },
+    }))
+    expect(c).toBe('unsafe_path')
+    expect(readFileSync(join(outside, 's.txt'), 'utf8')).toBe('secret')
+    expect(readdirSync(ws).filter((n) => n === 'a.txt')).toEqual([])
+  })
+  it('two writers to one file leave one complete winner and no temp files', () => {
+    writeFileSync(join(ws, 'a.txt'), 'original')
+    writeTextFile(ws, 'a.txt', 'first first first', live, {
+      beforeRename: () => { writeTextFile(ws, 'a.txt', 'second', live) },
+    })
+    expect(['first first first', 'second']).toContain(readFileSync(join(ws, 'a.txt'), 'utf8'))
+    expect(readFileSync(join(ws, 'a.txt'), 'utf8')).toBe('first first first')
+    expect(tmps(ws)).toEqual([])
+  })
+})
+
+describe('editTextFile', () => {
+  const edit = (old: string, neu: string, all = false) => editTextFile(ws, 'a.txt', old, neu, all, live)
+  const put = (s: string) => writeFileSync(join(ws, 'a.txt'), s)
+  const get = () => readFileSync(join(ws, 'a.txt'), 'utf8')
+  it('replaces a unique match', () => {
+    put('one two three')
+    expect(edit('two', '2')).toEqual({ replacements: 1 })
+    expect(get()).toBe('one 2 three')
+  })
+  it('zero matches and an empty old string are no_match', () => {
+    put('abc')
+    expect(code(() => edit('zzz', 'x'))).toBe('no_match')
+    expect(code(() => edit('', 'x'))).toBe('no_match')
+    expect(get()).toBe('abc')
+  })
+  it('two matches without replaceAll are not_unique and the file is unchanged', () => {
+    put('a b a')
+    expect(code(() => edit('a', 'x'))).toBe('not_unique')
+    expect(get()).toBe('a b a')
+  })
+  it('replaceAll replaces every match and counts them; replacement text is literal', () => {
+    put('a b a')
+    expect(edit('a', '$&$1', true)).toEqual({ replacements: 2 })
+    expect(get()).toBe('$&$1 b $&$1')
+  })
+  it('keeps the file mode', () => {
+    put('abc')
+    chmodSync(join(ws, 'a.txt'), 0o640)
+    edit('b', 'x')
+    expect(statSync(join(ws, 'a.txt')).mode & 0o777).toBe(0o640)
+  })
+  it('a file over the read cap is too_large, not truncated', () => {
+    put('a'.repeat(FILE_READ_MAX_BYTES + 10))
+    expect(code(() => edit('a', 'b', true))).toBe('too_large')
+    expect(get().length).toBe(FILE_READ_MAX_BYTES + 10)
+  })
+  it('a result over REVIEW_MAX_BYTES is too_large and the file is unchanged', () => {
+    put('x' + 'a'.repeat(REVIEW_MAX_BYTES - 1))
+    expect(code(() => edit('x', 'yy'))).toBe('too_large')
+    expect(get().length).toBe(REVIEW_MAX_BYTES)
+  })
+  it('missing, symlinked and hard-linked files are refused', () => {
+    expect(code(() => edit('a', 'b'))).toBe('not_found')
+    writeFileSync(join(outside, 's.txt'), 'secret')
+    symlinkSync(join(outside, 's.txt'), join(ws, 'l.txt'))
+    linkSync(join(outside, 's.txt'), join(ws, 'h.txt'))
+    expect(code(() => editTextFile(ws, 'l.txt', 's', 'x', false, live))).toBe('unsafe_path')
+    expect(code(() => editTextFile(ws, 'h.txt', 's', 'x', false, live))).toBe('unsafe_path')
+    expect(readFileSync(join(outside, 's.txt'), 'utf8')).toBe('secret')
+  })
+  it('abort before rename keeps the original', () => {
+    put('abc')
+    const c = new AbortController()
+    expect(code(() => editTextFile(ws, 'a.txt', 'b', 'x', false, c.signal, { beforeRename: () => c.abort() }))).toBe('aborted')
+    expect(get()).toBe('abc')
+    expect(tmps(ws)).toEqual([])
   })
 })

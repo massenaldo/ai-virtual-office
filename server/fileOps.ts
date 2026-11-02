@@ -1,5 +1,7 @@
-import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, realpathSync, type Stats } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import { closeSync, constants, fchmodSync, fstatSync, fsyncSync, lstatSync, openSync, readSync, realpathSync, renameSync, unlinkSync, writeSync, type Stats } from 'node:fs'
 import { join } from 'node:path'
+import { REVIEW_MAX_BYTES } from '../src/workforce/types'
 import { MAX_PATH_CHARS } from './workspaces'
 
 // The filesystem layer behind the gated file tools. Node has no openat, so a path is checked component by component with
@@ -140,4 +142,116 @@ export function readTextFile(workspacePath: string, relative: string, signal: Ab
   } finally {
     try { closeSync(fd) } catch { /* nothing more to do */ }
   }
+}
+
+/** Test injection points for writes: after the temp file is created and verified, and just before the final rename. */
+export type WriteHooks = { beforeRename?: () => void; afterTempCreate?: () => void }
+
+/**
+ * Writes a UTF-8 text file atomically: a temp file in the (verified) parent directory, fsync, then rename over the
+ * target. Parent directories are never created. The target, if present, must be a regular file with one link; its mode
+ * is kept (a new file is 0600). Content over REVIEW_MAX_BYTES is `too_large` before anything is created. A cancelled
+ * write never renames, and the temp file is always removed.
+ */
+export function writeTextFile(workspacePath: string, relative: string, content: string, signal: AbortSignal, hooks?: WriteHooks): { bytes: number; created: boolean } {
+  checkAborted(signal)
+  const data = Buffer.from(content, 'utf8')
+  if (data.length > REVIEW_MAX_BYTES) throw new FileOpFailure('too_large')
+  let parentFd: number | undefined
+  let tmpFd: number | undefined
+  let tmpPath: string | undefined
+  let tmpStat: Stats | undefined
+  let renamed = false
+  try {
+    const parts = splitRelative(relative)
+    if (parts.length === 0) throw new FileOpFailure('not_a_file')
+    const name = parts[parts.length - 1]!
+    const parentParts = parts.slice(0, -1)
+    const parentPath = join(workspacePath, ...parentParts)
+    const target = join(parentPath, name)
+    // The parent is opened through the same checked walk as reads; the descriptor holds its identity (dev + ino).
+    parentFd = openInside(workspacePath, parentParts.join('/'), constants.O_RDONLY | constants.O_DIRECTORY, signal)
+    const parentStat = fstatSync(parentFd)
+    const verifyParent = (): void => {
+      let now: Stats
+      try { now = lstatSync(parentPath) } catch { throw new FileOpFailure('unsafe_path') }
+      if (now.isSymbolicLink() || !now.isDirectory() || now.dev !== parentStat.dev || now.ino !== parentStat.ino) throw new FileOpFailure('unsafe_path')
+      if (realpathSync(parentPath) !== parentPath) throw new FileOpFailure('unsafe_path')
+    }
+    verifyParent()
+
+    let mode = 0o600
+    let created = true
+    try {
+      const st = lstatSync(target)
+      if (st.isSymbolicLink()) throw new FileOpFailure('unsafe_path')
+      if (!st.isFile()) throw new FileOpFailure('not_a_file')
+      if (st.nlink !== 1) throw new FileOpFailure('unsafe_path')
+      mode = st.mode & 0o7777
+      created = false
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error
+    }
+
+    checkAborted(signal)
+    tmpPath = join(parentPath, `.${name}.${randomBytes(8).toString('hex')}.tmp`)
+    // RESIDUAL: without openat, the parent can be swapped for a symlink between verifyParent() and this create (or
+    // between the last check and the rename below); the create/rename would then land in the swapped-in directory.
+    // The checks after it narrow but cannot close that window. It is a same-user race, accepted and listed for the final review.
+    tmpFd = openSync(tmpPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
+    tmpStat = fstatSync(tmpFd)
+    hooks?.afterTempCreate?.()
+    verifyParent()
+    let onDisk: Stats
+    try { onDisk = lstatSync(tmpPath) } catch { throw new FileOpFailure('unsafe_path') }
+    if (!tmpStat.isFile() || tmpStat.nlink !== 1 || onDisk.isSymbolicLink() || onDisk.dev !== tmpStat.dev || onDisk.ino !== tmpStat.ino) throw new FileOpFailure('unsafe_path')
+    fchmodSync(tmpFd, mode)
+
+    let off = 0
+    while (off < data.length) {
+      checkAborted(signal)
+      off += writeSync(tmpFd, data, off, data.length - off)
+    }
+    fsyncSync(tmpFd)
+    hooks?.beforeRename?.()
+    checkAborted(signal)
+    verifyParent()
+    // RESIDUAL: a swap of the parent after verifyParent() and before this rename is not detectable (no openat/renameat).
+    renameSync(tmpPath, target)
+    renamed = true
+    return { bytes: data.length, created }
+  } catch (error) {
+    throw mapErrno(error)
+  } finally {
+    if (tmpFd !== undefined) { try { closeSync(tmpFd) } catch { /* nothing more to do */ } }
+    if (tmpPath !== undefined && tmpStat !== undefined && !renamed) {
+      // Remove only what we created: the path must still be the very file we made. If the parent was moved away
+      // (a swap), the temp file went with it and cannot be reached without openat; it stays inside the moved directory,
+      // never outside the workspace, and is a hidden .tmp file.
+      try {
+        const now = lstatSync(tmpPath)
+        if (now.dev === tmpStat.dev && now.ino === tmpStat.ino) unlinkSync(tmpPath)
+      } catch { /* already gone */ }
+    }
+    if (parentFd !== undefined) { try { closeSync(parentFd) } catch { /* nothing more to do */ } }
+  }
+}
+
+/**
+ * Replaces `oldString` with `newString` in a UTF-8 text file. The whole file is read (over FILE_READ_MAX_BYTES is
+ * `too_large`, never truncated); an empty or absent `oldString` is `no_match`; several matches without `replaceAll` is
+ * `not_unique`; a result over REVIEW_MAX_BYTES is `too_large`. The write goes through writeTextFile.
+ */
+export function editTextFile(workspacePath: string, relative: string, oldString: string, newString: string, replaceAll: boolean, signal: AbortSignal, hooks?: WriteHooks): { replacements: number } {
+  const { text, truncated } = readTextFile(workspacePath, relative, signal)
+  if (truncated) throw new FileOpFailure('too_large')
+  if (oldString === '') throw new FileOpFailure('no_match')
+  const pieces = text.split(oldString)
+  const count = pieces.length - 1
+  if (count === 0) throw new FileOpFailure('no_match')
+  if (count > 1 && !replaceAll) throw new FileOpFailure('not_unique')
+  const next = pieces.join(newString)
+  if (Buffer.byteLength(next, 'utf8') > REVIEW_MAX_BYTES) throw new FileOpFailure('too_large')
+  writeTextFile(workspacePath, relative, next, signal, hooks)
+  return { replacements: count }
 }

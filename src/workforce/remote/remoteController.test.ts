@@ -16,10 +16,10 @@ const newAgent = { ...demo.agents[0], id: 'a9', name: 'Older' }
 let backend: ReturnType<typeof createFakeBackend>
 let c: WorkforceController
 
-function make(state = stateAt('b1:5'), before?: (b: ReturnType<typeof createFakeBackend>) => void) {
+function make(state = stateAt('b1:5'), before?: (b: ReturnType<typeof createFakeBackend>) => void, location?: { hostname: string; port: string }) {
   backend = createFakeBackend({ baseUrl: BASE, state })
   before?.(backend)
-  c = createRemoteWorkforceController({ baseUrl: BASE, fetch: backend.fetch, createEventSource: (u, o) => new FakeEventSource(u, o), now: () => NOW })
+  c = createRemoteWorkforceController({ baseUrl: BASE, fetch: backend.fetch, createEventSource: (u, o) => new FakeEventSource(u, o), now: () => NOW, location })
 }
 
 beforeEach(() => { vi.useFakeTimers(); FakeEventSource.reset() })
@@ -112,6 +112,49 @@ describe('createRemoteWorkforceController', () => {
     await flush()
     expect(c.getSnapshot().needsPairing).toBe(true)
     expect(backend.calls.filter((x) => x.method === 'GET' && x.url === `${BASE}/api/state`)).toHaveLength(1)
+  })
+
+  it('pair that succeeds but is followed by another 401 says the browser did not keep the session', async () => {
+    make(stateAt('b1:5'), (b) => b.respond('GET', '/api/state', 401, { error: 'Unauthorized.' }))
+    await flush()
+    backend.respond('POST', '/api/session', 200, { ok: true, expiresAt: NOW })
+    expect(await c.pair!('tok')).toEqual({ ok: false, error: 'Paired, but the browser did not keep the session. Open the app at the same address you started the backend with (127.0.0.1 or localhost).' })
+    expect(c.getSnapshot().needsPairing).toBe(true)
+  })
+
+  it('pair that succeeds while the backend then fails (not 401) says it is not reachable yet', async () => {
+    make(stateAt('b1:5'), (b) => b.respond('GET', '/api/state', 401, { error: 'Unauthorized.' }))
+    await flush()
+    backend.respond('POST', '/api/session', 200, { ok: true, expiresAt: NOW })
+    backend.respond('GET', '/api/state', 500, { error: 'boom' })
+    expect(await c.pair!('tok')).toEqual({ ok: false, error: 'Paired, but the backend is not reachable yet.' })
+  })
+
+  it('names both hosts when the page host differs from the backend host, never the token', async () => {
+    make(stateAt('b1:5'), (b) => b.respond('GET', '/api/state', 401, { error: 'Unauthorized.' }), { hostname: 'localhost', port: '5173' })
+    await flush()
+    expect(c.getSnapshot().pairingNote).toBe('This page is open at localhost but the backend is at 127.0.0.1. Open the app at http://127.0.0.1:5173 so the browser keeps the session.')
+  })
+
+  it('has no pairing note when the hosts match, or the backend is the page origin', async () => {
+    make(stateAt('b1:5'), (b) => b.respond('GET', '/api/state', 401, { error: 'Unauthorized.' }), { hostname: '127.0.0.1', port: '5173' })
+    await flush()
+    expect(c.getSnapshot().pairingNote).toBeNull()
+    c.dispose()
+    const same = createRemoteWorkforceController({ baseUrl: '', fetch: createFakeBackend({ baseUrl: '', state: stateAt('b1:5') }).fetch, createEventSource: (u, o) => new FakeEventSource(u, o), location: { hostname: 'localhost', port: '5173' } })
+    expect(same.getSnapshot().pairingNote).toBeNull()
+    same.dispose()
+  })
+
+  it('a 401 from a command makes the sync reconnect, so needsPairing is set at once', async () => {
+    make()
+    await flush()
+    expect(c.getSnapshot().needsPairing).toBe(false)
+    backend.respond('POST', '/api/agents', 401, { error: 'Unauthorized.' })
+    backend.respond('GET', '/api/state', 401, { error: 'Unauthorized.' })
+    expect(await c.createAgent({ name: 'X', role: 'R', department: 'design' })).toMatchObject({ ok: false })
+    await flush()
+    expect(c.getSnapshot().needsPairing).toBe(true)
   })
 
   it('a misconfigured controller fails pair with the config error and is never in needsPairing', async () => {

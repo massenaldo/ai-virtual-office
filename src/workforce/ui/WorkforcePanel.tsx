@@ -48,10 +48,10 @@ export default function WorkforcePanel({ workforce, layout, view, onViewChange: 
   return <aside className="editor-panel workforce" aria-label="AI agents">
     {header}
     {!pairing && workforce.connectionError && workforce.connection === 'offline' && <p className="form-error" role="alert">{workforce.connectionError}</p>}
-    {pairing && <PairingForm onPair={pairing}/>}
+    {pairing && <PairingForm onPair={pairing} note={workforce.pairingNote}/>}
     {waiting && !pairing && <p className="panel-hint">{workforce.connection === 'misconfigured' ? 'The backend address is not configured.' : 'Waiting for the local backend…'}</p>}
     {!waiting && !pairing && shown.kind === 'list' && <AgentList state={state} layout={layout} onOpen={(id) => setView({ kind: 'detail', agentId: id })} onCreate={() => setView({ kind: 'create' })} onRestoreDemo={actions.restoreDemoAgents}/>}
-    {shown.kind === 'create' && <>
+    {!pairing && shown.kind === 'create' && <>
       <div className="field-group-label">New agent</div>
       <AgentForm onCancel={list} onSubmit={async (input) => {
         const r = await actions.createAgent(input)
@@ -60,7 +60,7 @@ export default function WorkforcePanel({ workforce, layout, view, onViewChange: 
         return null
       }}/>
     </>}
-    {shown.kind === 'edit' && agent && <>
+    {!pairing && shown.kind === 'edit' && agent && <>
       <div className="field-group-label">Edit {agent.name}</div>
       <AgentForm agent={agent} onCancel={() => setView({ kind: 'detail', agentId: agent.id })} onSubmit={async (input) => {
         const r = await actions.updateAgent(agent.id, input)
@@ -69,8 +69,8 @@ export default function WorkforcePanel({ workforce, layout, view, onViewChange: 
         return null
       }}/>
     </>}
-    {shown.kind === 'detail' && agent && <AgentDetail key={agent.id} workforce={workforce} layout={layout} agent={agent} onBack={list} onEdit={() => setView({ kind: 'edit', agentId: agent.id })} onRemove={() => remove(agent.id)} onFocusDesk={() => agent.deskId && onFocusDesk(agent.deskId)}/>}
-    {shown.kind === 'assign' && assignDesk && <AssignDesk key={assignDesk.id} state={state} layout={layout} deskId={assignDesk.id} deskLabel={deskLabel(assignDesk.id)} onCancel={list} onAssign={async (id) => {
+    {!pairing && shown.kind === 'detail' && agent && <AgentDetail key={agent.id} workforce={workforce} layout={layout} agent={agent} onBack={list} onEdit={() => setView({ kind: 'edit', agentId: agent.id })} onRemove={() => remove(agent.id)} onFocusDesk={() => agent.deskId && onFocusDesk(agent.deskId)}/>}
+    {!pairing && shown.kind === 'assign' && assignDesk && <AssignDesk key={assignDesk.id} state={state} layout={layout} deskId={assignDesk.id} deskLabel={deskLabel(assignDesk.id)} onCancel={list} onAssign={async (id) => {
       const r = await actions.assignDesk(id, assignDesk.id)
       if (!r.ok) return r.error
       setView({ kind: 'detail', agentId: id })

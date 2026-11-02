@@ -1,7 +1,7 @@
-import { useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useBusy } from './useBusy'
 
-export type PairingFormProps = { onPair(token: string): Promise<{ ok: boolean; error?: string }> }
+export type PairingFormProps = { onPair(token: string): Promise<{ ok: boolean; error?: string }>; note?: string | null }
 
 /** Runs one pairing attempt. Returns the message to show, or null when it worked. A thrown error never echoes the token. */
 export async function attemptPairing(onPair: PairingFormProps['onPair'], token: string): Promise<string | null> {
@@ -17,10 +17,12 @@ export async function attemptPairing(onPair: PairingFormProps['onPair'], token: 
  * Asks for the API token once. The token lives only in the input's own value until submit, is cleared at once and
  * after every attempt, and goes nowhere but onPair: no state, no storage.
  */
-export default function PairingForm({ onPair }: PairingFormProps) {
+export default function PairingForm({ onPair, note }: PairingFormProps) {
   const input = useRef<HTMLInputElement>(null)
   const [error, setError] = useState<string | null>(null)
   const { busy, run } = useBusy()
+  // A disabled input drops focus: put it back once a failed attempt is over, so the next try can be typed at once.
+  useEffect(() => { if (!busy && error) input.current?.focus() }, [busy, error])
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     if (busy || !input.current) return
@@ -32,6 +34,7 @@ export default function PairingForm({ onPair }: PairingFormProps) {
   }
   return <form onSubmit={submit} noValidate>
     <div className="field-group-label">Connect to the backend</div>
+    {note && <p className="form-error pairing-note" role="status">{note}</p>}
     <label className="field"><span>API token</span><input ref={input} className="field-input" type="password" autoComplete="off" spellCheck={false} autoFocus disabled={busy}/></label>
     <p className="panel-hint">Paste the API token: the token file in the backend's data folder, or your API_TOKEN. Open the app at the same address you started the backend with (127.0.0.1 or localhost); a session made on one is not valid on the other.</p>
     {error && <p className="form-error" role="alert">{error}</p>}

@@ -221,6 +221,29 @@ describe('createRemoteSync: offline, restart and cleanup', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
+  it('a 401 publishes the pairing note it was given, and a good snapshot clears it', async () => {
+    backend = createFakeBackend({ baseUrl: BASE, state: stateAt('b1:5') })
+    backend.respond('GET', '/api/state', 401, { error: 'Unauthorized.' })
+    sync = createRemoteSync({ client: createApiClient({ baseUrl: BASE, fetch: backend.fetch }), createEventSource: (url, o) => new FakeEventSource(url, o), now: () => NOW, pairingNote: 'Use the other host.' })
+    expect(sync.getSnapshot().pairingNote).toBeNull()
+    await flush()
+    expect(sync.getSnapshot()).toMatchObject({ needsPairing: true, pairingNote: 'Use the other host.' })
+    backend.respond('GET', '/api/state', 200, stateAt('b1:5'))
+    void sync.reconnect()
+    await flush()
+    expect(sync.getSnapshot().pairingNote).toBeNull()
+  })
+
+  it('reconnect() resolves to what the snapshot answered: ok, unauthorized or failed', async () => {
+    start({ before: (b) => b.respond('GET', '/api/state', 401, { error: 'Unauthorized.' }) })
+    await flush()
+    expect(await sync.reconnect()).toBe('unauthorized')
+    backend.respond('GET', '/api/state', 200, stateAt('b1:5'))
+    expect(await sync.reconnect()).toBe('ok')
+    backend.respond('GET', '/api/state', 500, { error: 'boom' })
+    expect(await sync.reconnect()).toBe('failed')
+  })
+
   it('other failures keep needsPairing false and retry', async () => {
     start({ before: (b) => b.respond('GET', '/api/state', 403, { error: 'Origin not allowed.' }) })
     await flush()

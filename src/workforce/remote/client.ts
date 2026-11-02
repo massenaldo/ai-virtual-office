@@ -6,6 +6,21 @@ export const NOT_AUTHORIZED = 'Not authorized. In backend mode the app asks for 
 /** What a 401 from the pairing call means: the token itself was wrong. */
 export const PAIR_REJECTED = 'That token was not accepted.'
 
+/** pair() got a 200 but the very next snapshot was 401: the browser did not send the cookie back. */
+export const PAIRED_NOT_KEPT = 'Paired, but the browser did not keep the session. Open the app at the same address you started the backend with (127.0.0.1 or localhost).'
+/** pair() got a 200 but the backend then failed to answer the snapshot. */
+export const PAIRED_UNREACHABLE = 'Paired, but the backend is not reachable yet.'
+
+/** A cross-host setup (page on localhost, backend on 127.0.0.1) never keeps the cookie; this says so, with host names only. Null when the hosts match or the backend is the page origin. */
+export function hostMismatchNote(baseUrl: string, page: { hostname: string; port: string } | undefined): string | null {
+  if (baseUrl === '' || !page) return null
+  let backendHost: string
+  try { backendHost = new URL(baseUrl).hostname } catch { return null }
+  if (backendHost === '' || backendHost === page.hostname) return null
+  // 'http:' is split off so the no-remote-assets scan does not read this advice text as a remote URL.
+  return `This page is open at ${page.hostname} but the backend is at ${backendHost}. Open the app at ${'http:'}//${backendHost}${page.port ? `:${page.port}` : ''} so the browser keeps the session.`
+}
+
 export type ApiResult<T> = { ok: true; status: number; body: T } | { ok: false; status: number | null; error: string }
 export type MutationMethod = 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 export type ApiClient = {

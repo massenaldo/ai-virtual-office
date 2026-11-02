@@ -8,18 +8,18 @@ The backend (sessions, pairing routes, guard, CORS credentials, stream shutdown)
 
 | Check | Result |
 |---|---|
-| `rtk proxy npm test` | 86 files, 1411 tests pass |
+| `rtk proxy npm test` | 86 files, 1432 tests pass |
 | `npx tsc -b` | clean (no errors) |
 | `npm run build` | built (the existing chunk-size warning only) |
 | `npm run server:build` | built (`dist-server/index.js`) |
 | `npm run check:secrets` | no secrets found (12 files checked) |
 | `npm audit` | 0 vulnerabilities |
 
-One full run showed a single failing test in an unrelated timing-sensitive file under parallel load (the known flake from the stage C and E reports); the next full run passed 1411 of 1411. No real browser was run: the pairing form is covered by component tests that render to markup and by tests of its submit logic (the project has no DOM test environment).
+During stage D one full run showed a single failing test that was not captured (which test failed was not recorded); the next run passed. Intermittent timing failures under parallel load were seen in earlier stages in `server/redact.test.ts` and `server/secrets.test.ts`, and one reappeared in `server/redact.test.ts` (the JWT linear-time check) during the final fix wave. The final runs passed 1432 of 1432. No real browser was run: the pairing form is covered by component tests that render to markup and by tests of its submit logic (the project has no DOM test environment; the refocus after a failed attempt is only checked against the component source).
 
 ## What changed
 
-Commits on this branch (`git log --oneline main..HEAD`, before this report):
+Commits on this branch (`git log --oneline main..HEAD`):
 
 - `1b39132` docs: milestone 3B.4 stage D plan, browser session
 - `47d03bb` feat(server): in-memory session store
@@ -28,6 +28,10 @@ Commits on this branch (`git log --oneline main..HEAD`, before this report):
 - `e89e584` test(server): browser session end to end
 - `98d4c99` fix(server): end event streams when their session ends
 - `4fe0ba1` feat(web): browser pairing screen and session credentials
+- `536f077` docs: milestone 3B.4 stage D report
+- `32efc99` fix(server): accept any valid session cookie, harden session end listeners
+- `51deafa` fix(web): explain cross-host pairing, gate every view, reconnect on command 401
+- (this commit) docs: correct SameSite claims, document pairing limits and host rules
 
 Browser (`4fe0ba1`):
 
@@ -53,7 +57,10 @@ Browser (`4fe0ba1`):
 - Event streams end at logout or expiry; the browser notices on the next retry and shows the form.
 - Cookie-only mutations need an allowed `Origin`.
 - A local program holding the token can pair too (it is the bearer's secret). Same-user processes are out of scope without a sandbox.
-- The pairing form cannot check which host name the page uses: a session made on `127.0.0.1` is not valid on `localhost`; the form says so.
+- A session made on `127.0.0.1` is not valid on `localhost`. When the page host differs from the backend host the form says so and names both hosts; if pairing succeeds but the cookie is not kept, `pair` reports that.
+- `SameSite=Strict` does not separate loopback ports (same host name, any port is same-site) and the cookie is host-only with `Path=/api`, so the browser sends it to any local web server on that host name under `/api/*`. Another local port's page is stopped by the Origin allowlist (every method; preflight refused 403), CORP and HttpOnly, not by SameSite. Another local web server that sees the cookie could replay the session id with a forged Origin for up to 8 h; use a dedicated host name or restart the backend. Later hardening: a narrower cookie path under a unique API prefix, or `__Host-` plus `Secure` once TLS exists.
+- While the pairing limit is active even the correct token is refused (10 wrong tokens a minute from a local program locks pairing).
+- A session can outlive a logout by the time a request body takes to upload.
 - The dev proxy limitation stays: any local program that can reach port 5173 gets an authenticated path while it runs (`docs/browser-auth.md`).
 - Not verified in a real browser (no DOM test environment; manual check is left for stage G).
 
@@ -63,6 +70,8 @@ Browser (`4fe0ba1`):
 
 ## What is left
 
+- A logout control in the UI (stages F or G).
+- Tighter end-to-end tests: the liveness check should match the cookie-paired event, a total-count logout check, and a multi-stream case.
 - **F (UI):** pending-approval and queue visibility, path pattern choice, and opting in to `permission.changed`.
 - **G:** end-to-end test (including a real-browser pairing check) and the closing 3B.4 report.
 - Later, outside 3B.4: the SDK provider and the sandbox; TLS (and then the `Secure` cookie flag) before any remote deployment.

@@ -92,11 +92,11 @@ describe('checkPathInWorkspace', () => {
     linkSync(join(outside, 'secret.txt'), join(W, 'inside.txt'))
     expect(checkPathInWorkspace(W, 'inside.txt')).toEqual({ ok: false, reason: 'unsafe_link' })
     expect(checkPathInWorkspace(W, join(W, 'inside.txt'))).toEqual({ ok: false, reason: 'unsafe_link' })
-    expect(checkPathInWorkspace(W, 'notes.md')).toEqual({ ok: true, relative: 'notes.md' })
-    expect(checkPathInWorkspace(W, 'not-yet.txt')).toEqual({ ok: true, relative: 'not-yet.txt' })
-    expect(checkPathInWorkspace(W, 'sub')).toEqual({ ok: true, relative: 'sub' })
+    expect(checkPathInWorkspace(W, 'notes.md')).toMatchObject({ ok: true, relative: 'notes.md' })
+    expect(checkPathInWorkspace(W, 'not-yet.txt')).toMatchObject({ ok: true, relative: 'not-yet.txt' })
+    expect(checkPathInWorkspace(W, 'sub')).toMatchObject({ ok: true, relative: 'sub' })
     rmSync(join(W, 'inside.txt'))
-    expect(checkPathInWorkspace(W, 'inside.txt')).toEqual({ ok: true, relative: 'inside.txt' })
+    expect(checkPathInWorkspace(W, 'inside.txt')).toMatchObject({ ok: true, relative: 'inside.txt' })
   })
 
   it('rejects a path that goes through a regular file', () => {
@@ -105,22 +105,34 @@ describe('checkPathInWorkspace', () => {
   })
 
   it('judges every call on the filesystem as it is now', () => {
-    expect(checkPathInWorkspace(W, 'sub/out.txt')).toEqual({ ok: true, relative: 'sub/out.txt' })
+    expect(checkPathInWorkspace(W, 'sub/out.txt')).toMatchObject({ ok: true, relative: 'sub/out.txt' })
     rmSync(join(W, 'sub'), { recursive: true })
     symlinkSync(outside, join(W, 'sub'))
     expect(checkPathInWorkspace(W, 'sub/out.txt')).toEqual({ ok: false, reason: 'outside_workspace' })
     rmSync(join(W, 'sub'))
     mkdirSync(join(W, 'sub'))
-    expect(checkPathInWorkspace(W, 'sub/out.txt')).toEqual({ ok: true, relative: 'sub/out.txt' })
+    expect(checkPathInWorkspace(W, 'sub/out.txt')).toMatchObject({ ok: true, relative: 'sub/out.txt' })
     renameSync(join(W, 'sub'), join(W, 'moved'))
-    expect(checkPathInWorkspace(W, 'moved/out.txt')).toEqual({ ok: true, relative: 'moved/out.txt' })
+    expect(checkPathInWorkspace(W, 'moved/out.txt')).toMatchObject({ ok: true, relative: 'moved/out.txt' })
+  })
+
+  it('returns the resolved location in `real`, also for a missing file in a symlinked folder', () => {
+    mkdirSync(join(W, 'sub', 'deep'), { recursive: true })
+    writeFileSync(join(W, 'sub', 'deep', 'f.txt'), 'x')
+    symlinkSync(join(W, 'sub'), join(W, 'alias'))
+    expect(checkPathInWorkspace(W, 'notes.md')).toMatchObject({ relative: 'notes.md', real: 'notes.md' })
+    expect(checkPathInWorkspace(W, 'alias/deep/f.txt')).toMatchObject({ ok: true, relative: 'alias/deep/f.txt', real: 'sub/deep/f.txt' })
+    expect(checkPathInWorkspace(W, 'alias/deep/new.txt')).toMatchObject({ ok: true, relative: 'alias/deep/new.txt', real: 'sub/deep/new.txt' })
+    expect(checkPathInWorkspace(W, 'alias/missing/dir/new.txt')).toMatchObject({ ok: true, relative: 'alias/missing/dir/new.txt', real: 'sub/missing/dir/new.txt' })
+    expect(checkPathInWorkspace(W, 'alias')).toMatchObject({ ok: true, real: 'sub' })
+    expect(checkPathInWorkspace(W, '.')).toMatchObject({ ok: true, relative: '.', real: '.' })
   })
 
   it('accepts paths inside', () => {
-    expect(checkPathInWorkspace(W, 'notes.md')).toEqual({ ok: true, relative: 'notes.md' })
-    expect(checkPathInWorkspace(W, join(W, 'notes.md'))).toEqual({ ok: true, relative: 'notes.md' })
-    expect(checkPathInWorkspace(W, '.')).toEqual({ ok: true, relative: '.' })
-    expect(checkPathInWorkspace(W, 'sub/new/deep.txt')).toEqual({ ok: true, relative: 'sub/new/deep.txt' })
+    expect(checkPathInWorkspace(W, 'notes.md')).toMatchObject({ ok: true, relative: 'notes.md' })
+    expect(checkPathInWorkspace(W, join(W, 'notes.md'))).toMatchObject({ ok: true, relative: 'notes.md' })
+    expect(checkPathInWorkspace(W, '.')).toMatchObject({ ok: true, relative: '.' })
+    expect(checkPathInWorkspace(W, 'sub/new/deep.txt')).toMatchObject({ ok: true, relative: 'sub/new/deep.txt' })
   })
 
   it('rejects paths outside', () => {
@@ -133,7 +145,7 @@ describe('checkPathInWorkspace', () => {
     for (const p of ['link/../notes.md', 'sub/../notes.md', `${W}/link/../x`, 'a/b/../../notes.md', '..']) {
       expect(checkPathInWorkspace(W, p)).toEqual({ ok: false, reason: 'outside_workspace' })
     }
-    expect(checkPathInWorkspace(W, 'sub/..hidden/x')).toEqual({ ok: true, relative: 'sub/..hidden/x' })
+    expect(checkPathInWorkspace(W, 'sub/..hidden/x')).toMatchObject({ ok: true, relative: 'sub/..hidden/x' })
   })
 
   it('refuses a write through a dangling symlink', () => {

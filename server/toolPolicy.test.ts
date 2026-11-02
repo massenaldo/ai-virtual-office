@@ -4,13 +4,13 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { REVIEW_MAX_BYTES } from '../src/workforce/types'
 import { MOCK_DEMO_WRITE } from './runtime/mockProvider'
-import { decideToolUse, DEFAULT_ALLOWED_TOOLS, sanitizeSummary, TOOL_CATALOGUE, toolDeniedMessage, type ToolDecision } from './toolPolicy'
+import { decideToolUse, DEFAULT_ALLOWED_TOOLS, sanitizeSummary, TOOL_CATALOGUE, toolDeniedMessage, toolPolicyFrom, type ToolDecision } from './toolPolicy'
 import { makeWorkspaceRoot } from './test/workspaces'
 
 let ws: ReturnType<typeof makeWorkspaceRoot>
 let outside: string
 let W: { id: string; path: string }
-const ALL = { allowedTools: new Set(TOOL_CATALOGUE.map((t) => t.name)) }
+const ALL = { allowedTools: new Set(TOOL_CATALOGUE.map((t) => t.name)), protectedRoots: [] as readonly string[] }
 
 beforeEach(() => {
   ws = makeWorkspaceRoot(['sandbox'])
@@ -41,7 +41,7 @@ describe('decideToolUse', () => {
   })
 
   it('denies a known tool that is not allowlisted', () => {
-    expect(decide('Bash', { command: 'ls' }, W, { allowedTools: new Set(['Read']) })).toMatchObject({ decision: 'deny', reason: 'not_allowed' })
+    expect(decide('Bash', { command: 'ls' }, W, { ...ALL, allowedTools: new Set(['Read']) })).toMatchObject({ decision: 'deny', reason: 'not_allowed' })
   })
 
   it('allows read-only tools inside the workspace', () => {
@@ -277,5 +277,75 @@ describe('sanitizeSummary and toolDeniedMessage', () => {
   it('words a denial', () => {
     expect(toolDeniedMessage('Write', 'not_allowed')).toBe('Tool "Write" denied by policy: not in ALLOWED_TOOLS.')
     expect(toolDeniedMessage('Read', 'outside_workspace')).toBe('Tool "Read" denied by policy: path is outside the task workspace.')
+  })
+})
+
+describe('sensitive paths', () => {
+  const cases: [string, string][] = [['Read', 'file_path'], ['Write', 'file_path'], ['Edit', 'file_path'], ['Glob', 'path'], ['Grep', 'path']]
+  const extra = (tool: string, arg: string, value: string) => ({
+    [arg]: value,
+    ...(tool === 'Glob' ? { pattern: '*.md' } : {}),
+    ...(tool === 'Grep' ? { pattern: 'x' } : {}),
+    ...(tool === 'Write' ? { content: 'x' } : {}),
+    ...(tool === 'Edit' ? { old_string: 'a', new_string: 'b' } : {}),
+  })
+  it.each(cases)('%s refuses .env, .git and protected roots', (tool, arg) => {
+    for (const p of ['.env', '.git/HEAD']) expect(decide(tool, extra(tool, arg, p))).toMatchObject({ decision: 'deny', reason: 'sensitive_path' })
+    const policy = { ...ALL, protectedRoots: [join(W.path, 'sub')] }
+    expect(decide(tool, extra(tool, arg, 'sub/x.txt'), W, policy)).toMatchObject({ decision: 'deny', reason: 'sensitive_path' })
+  })
+  it('leaves a normal path alone', () => {
+    expect(decide('Read', { file_path: 'notes.md' })).toMatchObject({ decision: 'allow' })
+    expect(decide('Glob', { pattern: '*.md', path: 'sub' })).toMatchObject({ decision: 'allow' })
+  })
+  it('refuses a glob that reaches .env or .git', () => {
+    expect(decide('Glob', { pattern: '.env*' })).toMatchObject({ decision: 'deny', reason: 'sensitive_path' })
+    expect(decide('Glob', { pattern: '**/.git/**' })).toMatchObject({ decision: 'deny', reason: 'sensitive_path' })
+    expect(decide('Grep', { pattern: 'x', glob: '.env*' })).toMatchObject({ decision: 'deny', reason: 'sensitive_path' })
+    expect(decide('Grep', { pattern: 'x', glob: '.git/*' })).toMatchObject({ decision: 'deny', reason: 'sensitive_path' })
+    expect(decide('Grep', { pattern: 'x', glob: '*.ts' })).toMatchObject({ decision: 'allow' })
+  })
+  it('words the denial without a path', () => {
+    expect(toolDeniedMessage('Read', 'sensitive_path')).toBe('Tool "Read" denied by policy: the path is protected.')
+  })
+})
+
+describe('sensitive paths through links and case', () => {
+  const input = (tool: string, p: string) => ({ file_path: p, ...(tool === 'Write' ? { content: 'x' } : {}), ...(tool === 'Edit' ? { old_string: 'a', new_string: 'b' } : {}) })
+  const sensitive = expect.objectContaining({ decision: 'deny', reason: 'sensitive_path' })
+  beforeEach(() => {
+    writeFileSync(join(W.path, '.env'), 'S=1')
+    mkdirSync(join(W.path, '.git'))
+    mkdirSync(join(W.path, 'vault'))
+    writeFileSync(join(W.path, 'vault', 'tok.txt'), 't')
+    symlinkSync(join(W.path, '.env'), join(W.path, 'notes-link'))
+    symlinkSync(join(W.path, '.git'), join(W.path, 'repo'))
+    symlinkSync(join(W.path, 'vault', 'tok.txt'), join(W.path, 'tok-link'))
+  })
+  it.each(['Read', 'Write', 'Edit'])('%s refuses a symlink to .env, .git or a protected root', (tool) => {
+    expect(decide(tool, input(tool, 'notes-link'))).toEqual(sensitive)
+    expect(decide(tool, input(tool, 'repo/HEAD'))).toEqual(sensitive)
+    expect(decide(tool, input(tool, 'repo'))).toEqual(sensitive)
+    expect(decide(tool, input(tool, 'tok-link'), W, { ...ALL, protectedRoots: [join(W.path, 'vault')] })).toEqual(sensitive)
+  })
+  it('refuses spellings of .env and .git', () => {
+    for (const p of ['./.env', '.ENV', '.GIT/HEAD', '.env/']) expect(decide('Read', { file_path: p })).toEqual(sensitive)
+  })
+  it('matches a protected root in any case', () => {
+    const policy = { ...ALL, protectedRoots: [join(W.path, 'VAULT')] }
+    expect(decide('Read', { file_path: 'vault/tok.txt' }, W, policy)).toEqual(sensitive)
+  })
+  it('still reports a link out of the workspace as outside_workspace', () => {
+    expect(decide('Read', { file_path: 'link/secret.txt' })).toMatchObject({ decision: 'deny', reason: 'outside_workspace' })
+  })
+})
+
+describe('toolPolicyFrom', () => {
+  it('protects the real path of dataDir, and survives a missing one', () => {
+    const real = realpathSync(outside)
+    const alias = join(outside, 'alias')
+    symlinkSync(real, alias)
+    expect(toolPolicyFrom({ allowedTools: ['Read'], dataDir: alias }).protectedRoots).toEqual([real])
+    expect(toolPolicyFrom({ allowedTools: ['Read'], dataDir: join(outside, 'missing') }).protectedRoots).toEqual([join(outside, 'missing')])
   })
 })

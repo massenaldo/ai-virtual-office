@@ -13,7 +13,7 @@ beforeEach(() => { ws = makeWorkspaceRoot(['sandbox']); outside = makeWorkspaceR
 afterEach(() => { ws.cleanup(); outside.cleanup() })
 
 const ALLOWED: ToolGateResult = { behavior: 'allow', outcome: 'approved' }
-const policy = { allowedTools: new Set(DEFAULT_ALLOWED_TOOLS) }
+const policy = { allowedTools: new Set(DEFAULT_ALLOWED_TOOLS), protectedRoots: [] }
 const workspace = () => {
   const r = resolveWorkspace({ workspaceRoot: ws.root, workspaces: [{ id: 'sandbox', relativePath: 'sandbox' }] }, 'sandbox')
   return r.ok ? ({ ok: true, workspace: r.workspace } as const) : ({ ok: false } as const)

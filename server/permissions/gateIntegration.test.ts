@@ -32,7 +32,7 @@ function build(allowed: readonly string[] = DEFAULT_ALLOWED_TOOLS, limits?: { ma
   fake = new FakeProvider()
   permissions = openPermissionStore({ dataDir: dir, now, log: silentLogger, writeFile: () => {}, limits })
   manager = new TaskManager({
-    store, provider: fake, permissions, policy: { allowedTools: new Set(allowed) },
+    store, provider: fake, permissions, policy: { allowedTools: new Set(allowed), protectedRoots: [] },
     config: { ...CONFIG, workspaceRoot: ws.root, workspaces: [{ id: 'sandbox', relativePath: 'sandbox' }] },
     now, log: silentLogger, onLifecycle: (e) => events.push(e),
   })

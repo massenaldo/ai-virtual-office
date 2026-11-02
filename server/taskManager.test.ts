@@ -39,7 +39,7 @@ afterEach(async () => {
 let perms: ReturnType<typeof openPermissionStore>
 function make(provider: ServerRuntimeProvider, config: Partial<typeof BASE_CONFIG> = {}, onLifecycle?: TaskManagerOptions['onLifecycle'], allowed: readonly string[] = DEFAULT_ALLOWED_TOOLS): TaskManager {
   perms = openPermissionStore({ dataDir: dir, now: () => NOW, log: silentLogger, writeFile: () => {} })
-  manager = new TaskManager({ store, provider, permissions: perms, config: { ...BASE_CONFIG, ...config }, policy: { allowedTools: new Set(allowed) }, now: () => NOW, log: silentLogger, onLifecycle })
+  manager = new TaskManager({ store, provider, permissions: perms, config: { ...BASE_CONFIG, ...config }, policy: { allowedTools: new Set(allowed), protectedRoots: [] }, now: () => NOW, log: silentLogger, onLifecycle })
   return manager
 }
 const mock = () => new ServerMockProvider({ timings: { thinkingMs: 100, workingMs: 200 } })

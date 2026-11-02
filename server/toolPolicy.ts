@@ -2,6 +2,9 @@ import type { ServerConfig } from './config'
 import { REVIEW_MAX_BYTES, type ToolReviewBody } from '../src/workforce/types'
 import { formatBytes } from './limits'
 import { redactSecrets, scrub } from './redact'
+import { realpathSync } from 'node:fs'
+import { join, resolve } from 'node:path'
+import { globReachesSensitive, isProtectedAbsolute, isSensitiveRelative } from './sensitivePaths'
 import { checkPathInWorkspace, type ResolvedWorkspace } from './workspaces'
 
 // What an agent may do. decideToolUse is pure apart from read-only filesystem checks. There is deliberately no bypass:
@@ -41,9 +44,9 @@ const ALLOWED_FIELDS: Record<string, readonly string[]> = {
   WebSearch: ['query', 'allowed_domains', 'blocked_domains'],
 }
 
-export type ToolPolicy = { readonly allowedTools: ReadonlySet<string> }
+export type ToolPolicy = { readonly allowedTools: ReadonlySet<string>; /** Real paths no tool may touch (the data directory). */ readonly protectedRoots: readonly string[] }
 
-export type DenyReason = 'unknown_tool' | 'not_allowed' | 'invalid_input' | 'invalid_path' | 'missing_path' | 'outside_workspace' | 'unsafe_symlink' | 'no_workspace' | 'approval_pending' | 'not_reviewable' | 'unsafe_link' | 'permission_denied'
+export type DenyReason = 'unknown_tool' | 'not_allowed' | 'invalid_input' | 'invalid_path' | 'missing_path' | 'outside_workspace' | 'unsafe_symlink' | 'no_workspace' | 'approval_pending' | 'not_reviewable' | 'unsafe_link' | 'permission_denied' | 'sensitive_path'
 
 /** A path argument that passed the workspace check: the argument name and the path relative to the workspace. */
 export type CheckedPath = { readonly arg: string; readonly relative: string }
@@ -66,10 +69,13 @@ const DENY_TEXT: Record<DenyReason, string> = {
   not_reviewable: 'the request cannot be shown to a reviewer in full',
   unsafe_link: 'the file has more than one name (a hard link)',
   permission_denied: 'denied by a permission rule',
+  sensitive_path: 'the path is protected',
 }
 
-export function toolPolicyFrom(config: Pick<ServerConfig, 'allowedTools'>): ToolPolicy {
-  return { allowedTools: new Set(config.allowedTools) }
+export function toolPolicyFrom(config: Pick<ServerConfig, 'allowedTools' | 'dataDir'>): ToolPolicy {
+  let data = resolve(config.dataDir)
+  try { data = realpathSync(data) } catch { /* not created yet: the resolved path is the best known location */ }
+  return { allowedTools: new Set(config.allowedTools), protectedRoots: [data] }
 }
 
 /** Redacts secrets, flattens control characters and spaces, and caps the length: safe to show a human and to store. */
@@ -173,8 +179,10 @@ export function decideToolUse(policy: ToolPolicy, toolName: string, input: unkno
     const checked = checkPathInWorkspace(workspace!.path, input[arg])
     if (!checked.ok) return denied(checked.reason)
     rel = checked.relative
+    if (isSensitiveRelative(checked.relative) || isProtectedAbsolute(join(workspace!.path, checked.relative), policy.protectedRoots)) return denied('sensitive_path')
     paths.push({ arg, relative: checked.relative })
   }
+  if (globs.some((g) => typeof g === 'string' && globReachesSensitive(g))) return denied('sensitive_path')
   const withPaths = paths.length > 0 ? { paths } : {}
 
   const raw = summaryFor(spec.name, input, rel)

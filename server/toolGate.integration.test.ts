@@ -38,7 +38,7 @@ beforeEach(() => {
   fake = new FakeProvider()
   events = []
   manager = new TaskManager({
-    store, provider: fake, permissions: openPermissionStore({ dataDir: dir, now: () => NOW, log: silentLogger, writeFile: () => {} }), policy: { allowedTools: new Set(DEFAULT_ALLOWED_TOOLS) },
+    store, provider: fake, permissions: openPermissionStore({ dataDir: dir, now: () => NOW, log: silentLogger, writeFile: () => {} }), policy: { allowedTools: new Set(DEFAULT_ALLOWED_TOOLS), protectedRoots: [] },
     config: { ...CONFIG, workspaceRoot: ws.root, workspaces: [{ id: 'sandbox', relativePath: 'sandbox' }, { id: 'other', relativePath: 'other' }] },
     now: () => NOW, log: silentLogger, onLifecycle: (e) => events.push(e),
   })

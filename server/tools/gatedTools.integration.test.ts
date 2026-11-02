@@ -143,12 +143,14 @@ describe('revoking the task rule during a write', () => {
     if (!rule.ok) throw new Error(rule.error)
     writeFileSync(join(wsPath(), 'dir', 'target.txt'), 'ORIGINAL')
     let revoked = false
+    let tempsInHook = -1
     seam.beforeRename = () => {
       // The temp file exists and holds the new content at this point; the real revoke path aborts the call's signal.
-      expect(strayTemps(join(wsPath(), 'dir')).length).toBe(1)
+      tempsInHook = strayTemps(join(wsPath(), 'dir')).length
       revoked = app.manager.revokePermission(rule.rule.id).ok
     }
     const result = await tools.vo_write({ file_path: 'dir/target.txt', content: CONTENT })
+    expect(tempsInHook).toBe(1)
     expect(revoked).toBe(true)
     expect(result).toEqual({ ok: false, error: 'aborted', text: RESULT_TEXT.aborted })
     expect(readFileSync(join(wsPath(), 'dir', 'target.txt'), 'utf8')).toBe('ORIGINAL')
@@ -178,8 +180,10 @@ describe('policy refuses before any prompt', () => {
     expect(await ask((t) => t.vo_edit({ file_path: '.env', old_string: 'abc', new_string: 'z' }))).toEqual(denied)
     expect(await ask((t) => t.vo_read({ file_path: '.env' }))).toEqual(denied)
     expect(readFileSync(join(wsPath(), '.env'), 'utf8')).toBe('TOKEN=abc')
+    expect(auditRecords().map((r) => r.action)).not.toContain('approval.requested')
   })
 
+  // The separate (outside-workspace) data dir needs no relative-path case: no workspace-relative path can reach it.
   it('denies a path inside a data folder that sits inside the workspace', async () => {
     await app.manager.dispose()
     app.audit.close()
@@ -200,12 +204,9 @@ describe('symlinks', () => {
   it('fails a write through ws/link -> outside, creates nothing outside, and leaks no path', async () => {
     symlinkSync(outside, join(wsPath(), 'link'))
     const { id, tools } = await start()
-    const pending = tools.vo_write({ file_path: 'link/x', content: CONTENT })
-    await tick()
-    // The gate may refuse at once or ask first; either way nothing may land outside.
-    if (task(id).status === 'waiting_for_approval') decide(id, 'allow_once')
-    const result = await pending
-    expect(result.ok).toBe(false)
+    const result = await tools.vo_write({ file_path: 'link/x', content: CONTENT })
+    expect(result).toMatchObject({ ok: false, error: 'denied_by_policy' }) // refused by the policy before any prompt
+    expect(task(id).status).toBe('running')
     expect(readdirSync(outside)).toEqual([])
     expect(result.text).not.toContain(base)
     expect(Object.values(RESULT_TEXT)).toContain(result.text)
@@ -220,9 +221,10 @@ describe('symlinks', () => {
     symlinkSync(outside, join(wsPath(), 'dir'))
     expect(decide(id, 'allow_once').ok).toBe(true)
     const result = await pending
-    expect(result.ok).toBe(false)
-    expect(['stale_approval', 'unsafe_path', 'revoked']).toContain((result as { error: string }).error)
+    expect(result).toEqual({ ok: false, error: 'stale_approval', text: RESULT_TEXT.stale_approval })
+    expect(auditRecords().some((r) => r.action === 'tool.stale' && r.taskId === id)).toBe(true)
     expect(readdirSync(outside)).toEqual([])
+    expect(readdirSync(join(wsPath(), 'dir-moved')).sort()).toEqual(['notes.md'])
     expect(result.text).not.toContain(base)
   })
 })

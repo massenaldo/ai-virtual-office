@@ -28,7 +28,7 @@ const denyGate = (outcome: Extract<GatedOutcome<never>, { behavior: 'deny' }>['o
   async use() { return { behavior: 'deny', outcome, message: `denied at ${dir} ${MARKER}` } },
 })
 const errorOf = (r: ToolResult) => (r.ok ? null : r.error)
-const make = (gate: ToolGate) => createGatedTools({ tools: gate }, { protectedRoots: [] })
+const make = (gate: ToolGate) => createGatedTools({ tools: gate }, { protectedRoots: ['/vo-test-protected-root'] })
 
 beforeEach(() => {
   dir = realpathSync(mkdtempSync(join(tmpdir(), 'gt-')))
@@ -218,11 +218,17 @@ describe('gated tools', () => {
     const bad: Array<[((i: unknown) => Promise<ToolResult>), unknown]> = [
       [t.vo_read, { file_path: 5 }], [t.vo_read, { file_path: 'a', offset: 0 }], [t.vo_read, { file_path: 'a', limit: 1.5 }], [t.vo_read, { file_path: 'a', offset: '2' }],
       [t.vo_glob, {}], [t.vo_grep, {}], [t.vo_grep, { pattern: 1 }],
+      [t.vo_grep, { pattern: 'x', type: 'ts' }], [t.vo_grep, { pattern: 'x', '-n': true }], [t.vo_grep, { pattern: 'x', '-A': 2 }], [t.vo_grep, { pattern: 'x', '-B': 2 }],
+      [t.vo_grep, { pattern: 'x', '-C': 2 }], [t.vo_grep, { pattern: 'x', head_limit: 5 }], [t.vo_grep, { pattern: 'x', multiline: false }],
       [t.vo_write, { file_path: 'a' }], [t.vo_write, { content: 'x' }],
       [t.vo_edit, { file_path: 'a', old_string: 'x' }], [t.vo_edit, { file_path: 'a', new_string: 'x' }],
     ]
     for (const [f, input] of bad) expect(await f(input)).toEqual({ ok: false, error: 'invalid_input', text: RESULT_TEXT.invalid_input })
     expect(calls).toEqual([])
+  })
+
+  it('refuses to be created without protected roots', () => {
+    expect(() => createGatedTools({ tools: approvingGate(pathOf) }, { protectedRoots: [] })).toThrow('protectedRoots must not be empty')
   })
 
   it('fails closed on unexpected gate results', async () => {

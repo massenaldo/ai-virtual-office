@@ -61,7 +61,12 @@ function capped(text: string, truncated: boolean): string {
   return cut.truncated || truncated ? cut.text + LIST_MARKER : cut.text
 }
 
+// Accepted by the Grep policy but not implemented by vo_grep: refused up front so the result never silently differs from the request.
+const UNSUPPORTED_GREP_OPTIONS = ['type', '-n', '-A', '-B', '-C', 'head_limit', 'multiline'] as const
+
 export function createGatedTools(ctx: Pick<StartContext, 'tools'>, opts: { protectedRoots: readonly string[] }) {
+  // An empty list would silently protect nothing (for example the server data folder), so a mis-wired provider fails loudly.
+  if (opts.protectedRoots.length === 0) throw new Error('protectedRoots must not be empty')
   // `valid` runs before the gate, so malformed input never spends an approval or a once-grant.
   async function run(tool: string, input: unknown, valid: (input: Record<string, unknown>) => boolean, perform: (action: GatedAction, input: Record<string, unknown>) => string): Promise<ToolResult> {
     if (!isRecord(input) || !valid(input)) return fail('invalid_input')
@@ -105,7 +110,7 @@ export function createGatedTools(ctx: Pick<StartContext, 'tools'>, opts: { prote
       }),
 
     vo_grep: (input: unknown) =>
-      run('Grep', input, (i) => typeof i.pattern === 'string' && (i.path === undefined || typeof i.path === 'string'), (action, i) => {
+      run('Grep', input, (i) => typeof i.pattern === 'string' && (i.path === undefined || typeof i.path === 'string') && UNSUPPORTED_GREP_OPTIONS.every((k) => i[k] === undefined), (action, i) => {
         const t = target(action, str(i.path) !== undefined)
         const mode = i.output_mode === 'content' ? 'content' : 'files_with_matches'
         const found = grepFiles(t.workspacePath, baseOf(t), str(i.pattern)!, { glob: str(i.glob), ignoreCase: i['-i'] === true, mode }, t.signal, opts.protectedRoots)

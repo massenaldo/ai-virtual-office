@@ -3,7 +3,7 @@ import { isInside } from './workspaces'
 // Paths no tool may touch, whatever the workspace or the permission rules say. Matching is per path segment and
 // case-insensitive (the default macOS file system is), so `src/env.ts` and `gitignore.txt` are fine but `sub/.ENV` is not.
 
-const SENSITIVE_NAMES: ReadonlySet<string> = new Set(['.git', '.ssh', '.aws', '.npmrc', '.netrc', 'credentials.json'])
+const SENSITIVE_NAMES: ReadonlySet<string> = new Set(['.git', '.ssh', '.aws', '.npmrc', '.netrc', 'credentials.json', '.gnupg', '.kube', '.docker', '.pypirc', '.git-credentials', '.pgpass', '.htpasswd'])
 const SENSITIVE_PREFIXES: readonly string[] = ['.env', 'id_rsa', 'id_dsa', 'id_ecdsa', 'id_ed25519']
 const SENSITIVE_EXTENSIONS: readonly string[] = ['.pem', '.key', '.p12', '.pfx']
 

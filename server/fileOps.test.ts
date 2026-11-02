@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { REVIEW_MAX_BYTES } from '../src/workforce/types'
-import { FILE_READ_MAX_BYTES, FileOpFailure, GLOB_MAX_RESULTS, GREP_MAX_FILE_BYTES, GREP_MAX_MATCHES, GREP_MAX_TOTAL_BYTES, TRAVERSAL_MAX_ENTRIES, editTextFile, globFiles, grepFiles, openInside, readTextFile, writeTextFile, type FileOpError } from './fileOps'
+import { FILE_READ_MAX_BYTES, FileOpFailure, GLOB_MAX_RESULTS, GREP_MAX_FILE_BYTES, GREP_MAX_MATCHES, GREP_MAX_TOTAL_BYTES, SEARCH_MAX_MS, TRAVERSAL_MAX_ENTRIES, editTextFile, globFiles, grepFiles, openInside, readTextFile, writeTextFile, type FileOpError } from './fileOps'
 
 let base: string
 let ws: string
@@ -562,5 +562,29 @@ describe('globFiles and grepFiles', () => {
     put('a.txt', 'x'.repeat(199) + '\u{1F600}tail')
     const text = gr('tail').matches[0]!.text
     expect(text).toBe('x'.repeat(199))
+  })
+  it('stops at a wall-clock deadline with a truncated result, never an error', () => {
+    put('a.txt', 'needle'); put('d/b.txt', 'needle')
+    expect(SEARCH_MAX_MS).toBe(2000)
+    expect(globFiles(ws, '', '**', live, [], { limits: { maxMs: 0 } })).toEqual({ paths: [], truncated: true })
+    expect(grepFiles(ws, '', 'needle', { ignoreCase: false, mode: 'content' }, live, [], { limits: { maxMs: 0 } })).toEqual({ matches: [], truncated: true })
+    expect(gl('**').truncated).toBe(false)
+  })
+  it('checks the deadline inside a long line scan', () => {
+    put('big.txt', 'x\n'.repeat(100000) + 'needle')
+    const r = grepFiles(ws, '', 'needle', { ignoreCase: false, mode: 'content' }, live, [], { limits: { maxMs: 0.0001 } })
+    expect(r).toEqual({ matches: [], truncated: true })
+  })
+  it('skips entries whose names contain control or line-separator characters', () => {
+    put('ok.txt', 'needle'); put('bad\nname.txt', 'needle'); put('bad\u2028x.txt', 'needle'); put('tab\there/f.txt', 'needle'); put('del\u007f.txt', 'needle')
+    expect(gl('**').paths).toEqual(['ok.txt'])
+    expect(gr('needle').matches.map((m) => m.path)).toEqual(['ok.txt'])
+  })
+  it('redacts only a window around the cut but still catches a secret straddling it', () => {
+    const key = 'AKIA' + 'ABCDEFGHIJKLMNOP'
+    put('s.txt', 'x'.repeat(189) + ' ' + key + ' needle ' + 'y'.repeat(900000))
+    const t = gr('needle').matches[0]!.text
+    expect(t).not.toContain('AKIA')
+    expect(t.length).toBeLessThanOrEqual(200)
   })
 })

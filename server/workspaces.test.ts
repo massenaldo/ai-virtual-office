@@ -116,6 +116,18 @@ describe('checkPathInWorkspace', () => {
     expect(checkPathInWorkspace(W, 'moved/out.txt')).toMatchObject({ ok: true, relative: 'moved/out.txt' })
   })
 
+  it('returns the resolved location in `real`, also for a missing file in a symlinked folder', () => {
+    mkdirSync(join(W, 'sub', 'deep'), { recursive: true })
+    writeFileSync(join(W, 'sub', 'deep', 'f.txt'), 'x')
+    symlinkSync(join(W, 'sub'), join(W, 'alias'))
+    expect(checkPathInWorkspace(W, 'notes.md')).toMatchObject({ relative: 'notes.md', real: 'notes.md' })
+    expect(checkPathInWorkspace(W, 'alias/deep/f.txt')).toMatchObject({ ok: true, relative: 'alias/deep/f.txt', real: 'sub/deep/f.txt' })
+    expect(checkPathInWorkspace(W, 'alias/deep/new.txt')).toMatchObject({ ok: true, relative: 'alias/deep/new.txt', real: 'sub/deep/new.txt' })
+    expect(checkPathInWorkspace(W, 'alias/missing/dir/new.txt')).toMatchObject({ ok: true, relative: 'alias/missing/dir/new.txt', real: 'sub/missing/dir/new.txt' })
+    expect(checkPathInWorkspace(W, 'alias')).toMatchObject({ ok: true, real: 'sub' })
+    expect(checkPathInWorkspace(W, '.')).toMatchObject({ ok: true, relative: '.', real: '.' })
+  })
+
   it('accepts paths inside', () => {
     expect(checkPathInWorkspace(W, 'notes.md')).toMatchObject({ ok: true, relative: 'notes.md' })
     expect(checkPathInWorkspace(W, join(W, 'notes.md'))).toMatchObject({ ok: true, relative: 'notes.md' })

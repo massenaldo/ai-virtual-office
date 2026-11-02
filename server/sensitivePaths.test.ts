@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { isProtectedAbsolute, isSensitiveRelative } from './sensitivePaths'
 
 describe('isSensitiveRelative', () => {
-  it.each(['.env', '.env.local', 'sub/.ENV', '.git/config', 'a/.git', 'key.pem', 'id_rsa', 'id_ed25519.pub', '.ssh/config', '.aws/credentials', '.npmrc', '.netrc', 'credentials.json', 'a/KEY.PEM', 'x.p12', 'x.pfx', 'x.key'])('refuses %s', (p) => {
+  it.each(['.env', '.env.local', 'sub/.ENV', '.git/config', 'a/.git', 'key.pem', 'id_rsa', 'id_ed25519.pub', '.ssh/config', '.aws/credentials', '.npmrc', '.netrc', 'credentials.json', 'a/KEY.PEM', 'x.p12', 'x.pfx', 'x.key', '.gnupg/pubring.kbx', 'home/.kube/config', '.docker/config.json', '.pypirc', '.git-credentials', 'a/.PGPASS', '.htpasswd'])('refuses %s', (p) => {
     expect(isSensitiveRelative(p)).toBe(true)
   })
-  it.each(['src/env.ts', 'environment.md', 'gitignore.txt', 'a/b.txt', 'notes.md'])('allows %s', (p) => {
+  it.each(['src/env.ts', 'environment.md', 'gitignore.txt', 'a/b.txt', 'notes.md', 'kube/config.yaml', 'docker/Dockerfile', 'pypirc.md'])('allows %s', (p) => {
     expect(isSensitiveRelative(p)).toBe(false)
   })
 })

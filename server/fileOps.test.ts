@@ -304,9 +304,8 @@ describe('writeTextFile', () => {
   it('two writers to one file leave one complete winner and no temp files', () => {
     writeFileSync(join(ws, 'a.txt'), 'original')
     writeTextFile(ws, 'a.txt', 'first first first', live, {
-      beforeRename: () => { writeTextFile(ws, 'a.txt', 'second', live) },
+      beforeRename: () => { writeTextFile(ws, 'a.txt', 'second', live); expect(readFileSync(join(ws, 'a.txt'), 'utf8')).toBe('second'); expect(tmps(ws).length).toBe(1) },
     })
-    expect(['first first first', 'second']).toContain(readFileSync(join(ws, 'a.txt'), 'utf8'))
     expect(readFileSync(join(ws, 'a.txt'), 'utf8')).toBe('first first first')
     expect(tmps(ws)).toEqual([])
   })
@@ -367,6 +366,49 @@ describe('editTextFile', () => {
     const c = new AbortController()
     expect(code(() => editTextFile(ws, 'a.txt', 'b', 'x', false, c.signal, { beforeRename: () => c.abort() }))).toBe('aborted')
     expect(get()).toBe('abc')
+    expect(tmps(ws)).toEqual([])
+  })
+  it('keeps a leading BOM through an edit', () => {
+    put('\uFEFFabc')
+    expect(readTextFile(ws, 'a.txt', live).text).toBe('\uFEFFabc')
+    edit('b', 'x')
+    expect(readFileSync(join(ws, 'a.txt')).subarray(0, 3)).toEqual(Buffer.from([0xef, 0xbb, 0xbf]))
+    expect(get()).toBe('\uFEFFaxc')
+  })
+  it('a lone surrogate is refused: no_match for old, not_text for new', () => {
+    put('abc')
+    expect(code(() => edit('\ud800', 'x'))).toBe('no_match')
+    expect(code(() => edit('b', '\udc00'))).toBe('not_text')
+    expect(get()).toBe('abc')
+  })
+})
+
+describe('writeTextFile hardening', () => {
+  it('never carries setuid, setgid or sticky bits', () => {
+    for (const m of [0o4755, 0o2755, 0o1755]) {
+      writeFileSync(join(ws, 'a.txt'), 'old')
+      chmodSync(join(ws, 'a.txt'), m)
+      writeTextFile(ws, 'a.txt', 'new', live)
+      expect(statSync(join(ws, 'a.txt')).mode & 0o7777).toBe(0o755)
+    }
+  })
+  it('a hard link to the temp file made after creation is unsafe_path', () => {
+    writeFileSync(join(ws, 'a.txt'), 'original')
+    const c = code(() => writeTextFile(ws, 'a.txt', 'new', live, { afterTempCreate: () => linkSync(join(ws, tmps(ws)[0]!), join(outside, 'l')) }))
+    expect(c).toBe('unsafe_path')
+    expect(readFileSync(join(ws, 'a.txt'), 'utf8')).toBe('original')
+    expect(tmps(ws)).toEqual([])
+  })
+  it('a hard link to the temp file made just before the rename is unsafe_path', () => {
+    writeFileSync(join(ws, 'a.txt'), 'original')
+    const c = code(() => writeTextFile(ws, 'a.txt', 'new', live, { beforeRename: () => linkSync(join(ws, tmps(ws)[0]!), join(outside, 'l')) }))
+    expect(c).toBe('unsafe_path')
+    expect(readFileSync(join(ws, 'a.txt'), 'utf8')).toBe('original')
+    expect(tmps(ws)).toEqual([])
+  })
+  it('a very long file name is bounded in the temp name and refused cleanly by the OS', () => {
+    const c = code(() => writeTextFile(ws, 'a'.repeat(300), 'x', live))
+    expect(['unsafe_path', 'no error']).toContain(c)
     expect(tmps(ws)).toEqual([])
   })
 })

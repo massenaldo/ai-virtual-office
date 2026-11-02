@@ -31,6 +31,7 @@ function mapErrno(error: unknown): FileOpFailure {
     case 'ENOENT': return new FileOpFailure('not_found')
     case 'EISDIR': return new FileOpFailure('not_a_file')
     case 'ENOTDIR': return new FileOpFailure('not_a_directory')
+    case 'ENAMETOOLONG': return new FileOpFailure('unsafe_path')
     case 'ELOOP': return new FileOpFailure('unsafe_path')
     default: return new FileOpFailure('failed')
   }
@@ -135,7 +136,7 @@ export function readTextFile(workspacePath: string, relative: string, signal: Ab
     const bytes = buf.subarray(0, end)
     if (bytes.includes(0)) throw new FileOpFailure('not_text')
     let text: string
-    try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes) } catch { throw new FileOpFailure('not_text') }
+    try { text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes) } catch { throw new FileOpFailure('not_text') }
     return { text, truncated, bytes: end }
   } catch (error) {
     throw mapErrno(error)
@@ -187,14 +188,14 @@ export function writeTextFile(workspacePath: string, relative: string, content: 
       if (st.isSymbolicLink()) throw new FileOpFailure('unsafe_path')
       if (!st.isFile()) throw new FileOpFailure('not_a_file')
       if (st.nlink !== 1) throw new FileOpFailure('unsafe_path')
-      mode = st.mode & 0o7777
+      mode = st.mode & 0o777 // never carry setuid, setgid or sticky
       created = false
     } catch (error) {
       if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error
     }
 
     checkAborted(signal)
-    tmpPath = join(parentPath, `.${name}.${randomBytes(8).toString('hex')}.tmp`)
+    tmpPath = join(parentPath, `.${name.slice(0, 64)}.${randomBytes(8).toString('hex')}.tmp`)
     // RESIDUAL: without openat, the parent can be swapped for a symlink between verifyParent() and this create (or
     // between the last check and the rename below); the create/rename would then land in the swapped-in directory.
     // The checks after it narrow but cannot close that window. It is a same-user race, accepted and listed for the final review.
@@ -202,9 +203,14 @@ export function writeTextFile(workspacePath: string, relative: string, content: 
     tmpStat = fstatSync(tmpFd)
     hooks?.afterTempCreate?.()
     verifyParent()
-    let onDisk: Stats
-    try { onDisk = lstatSync(tmpPath) } catch { throw new FileOpFailure('unsafe_path') }
-    if (!tmpStat.isFile() || tmpStat.nlink !== 1 || onDisk.isSymbolicLink() || onDisk.dev !== tmpStat.dev || onDisk.ino !== tmpStat.ino) throw new FileOpFailure('unsafe_path')
+    // Re-stat the descriptor after the hook: a hard link added to the temp file in the window shows as nlink !== 1.
+    const checkTemp = (): void => {
+      const fresh = fstatSync(tmpFd!)
+      let onDisk: Stats
+      try { onDisk = lstatSync(tmpPath!) } catch { throw new FileOpFailure('unsafe_path') }
+      if (!fresh.isFile() || fresh.nlink !== 1 || onDisk.isSymbolicLink() || onDisk.dev !== tmpStat!.dev || onDisk.ino !== tmpStat!.ino) throw new FileOpFailure('unsafe_path')
+    }
+    checkTemp()
     fchmodSync(tmpFd, mode)
 
     let off = 0
@@ -216,7 +222,8 @@ export function writeTextFile(workspacePath: string, relative: string, content: 
     hooks?.beforeRename?.()
     checkAborted(signal)
     verifyParent()
-    // RESIDUAL: a swap of the parent after verifyParent() and before this rename is not detectable (no openat/renameat).
+    checkTemp()
+    // RESIDUAL: a hard link added to the temp file, or a swap of the parent after verifyParent() and before this rename is not detectable (no openat/renameat).
     renameSync(tmpPath, target)
     renamed = true
     return { bytes: data.length, created }
@@ -226,8 +233,8 @@ export function writeTextFile(workspacePath: string, relative: string, content: 
     if (tmpFd !== undefined) { try { closeSync(tmpFd) } catch { /* nothing more to do */ } }
     if (tmpPath !== undefined && tmpStat !== undefined && !renamed) {
       // Remove only what we created: the path must still be the very file we made. If the parent was moved away
-      // (a swap), the temp file went with it and cannot be reached without openat; it stays inside the moved directory,
-      // never outside the workspace, and is a hidden .tmp file.
+      // (a swap), the temp file went with it and cannot be reached without openat; it stays in the moved directory as a
+      // hidden .tmp file. A same-user actor renaming the parent can move it anywhere they can write: residual.
       try {
         const now = lstatSync(tmpPath)
         if (now.dev === tmpStat.dev && now.ino === tmpStat.ino) unlinkSync(tmpPath)
@@ -237,12 +244,17 @@ export function writeTextFile(workspacePath: string, relative: string, content: 
   }
 }
 
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/
+
 /**
  * Replaces `oldString` with `newString` in a UTF-8 text file. The whole file is read (over FILE_READ_MAX_BYTES is
  * `too_large`, never truncated); an empty or absent `oldString` is `no_match`; several matches without `replaceAll` is
  * `not_unique`; a result over REVIEW_MAX_BYTES is `too_large`. The write goes through writeTextFile.
  */
 export function editTextFile(workspacePath: string, relative: string, oldString: string, newString: string, replaceAll: boolean, signal: AbortSignal, hooks?: WriteHooks): { replacements: number } {
+  // NOTE: this is read-modify-write without compare-and-swap: a change made between the read and the rename is overwritten.
+  if (LONE_SURROGATE.test(oldString)) throw new FileOpFailure('no_match')
+  if (LONE_SURROGATE.test(newString)) throw new FileOpFailure('not_text')
   const { text, truncated } = readTextFile(workspacePath, relative, signal)
   if (truncated) throw new FileOpFailure('too_large')
   if (oldString === '') throw new FileOpFailure('no_match')

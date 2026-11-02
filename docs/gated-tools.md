@@ -1,4 +1,4 @@
-**Design only. Not implemented.** No SDK is installed and no real tool runs. This is what 3B.2 must build before any real write.
+**Status: implemented on the backend as plain handlers (stage E of 3B.4; `server/tools/gatedTools.ts`, `server/fileOps.ts`, `server/sensitivePaths.ts`). Still no SDK, no real Claude execution and no sandbox; the mock runtime writes nothing.** The design below is the original; "Deviations from the design" at the end records what was built differently.
 
 # Gated in-process Write and Edit tools for the Claude Agent SDK
 
@@ -53,3 +53,16 @@ With the container from `docs/sandbox-architecture.md`, `perform` runs these ste
 - [ ] Add the tool names to `disallowedTools` and `allowedTools` as above; check every option name against the installed SDK version.
 - [ ] A test that the provider never passes a built-in `Write` or `Edit` to the SDK.
 - [ ] Run the same steps inside the sandbox once it exists.
+
+## As built (stage E)
+
+`Read`, `Glob` and `Grep` moved behind the same pattern as `Write` and `Edit`: the handlers are `vo_read`, `vo_glob`, `vo_grep`, `vo_write` and `vo_edit`, all in `server/tools/gatedTools.ts`, each going only through `ctx.tools.use`. `vo_run` exists and always refuses.
+
+### Deviations from the design
+
+- **Grep is fixed-string only.** There is no regex: a model-supplied regex cannot be made safe against catastrophic backtracking in Node without running it in a worker.
+- **No `openat`.** Node has none, so `server/fileOps.ts` checks each path component with `lstat` (no symlink, every parent a directory), opens the last component with `O_NOFOLLOW`, compares the descriptor with a fresh `lstat` by `dev` and `ino`, and requires the parent's `realpath` to equal the expected path exactly (strict equality, not just "inside the workspace").
+- **`openInside` is read- and directory-only.** It refuses mutating flags. A write creates its temp file by path inside the verified parent (`O_CREAT | O_EXCL | O_NOFOLLOW`, mode 0600), then re-verifies the parent and the temp file (identity and `nlink === 1`) before `rename`.
+- **Write caps.** Content and edit results over 32 KiB (`REVIEW_MAX_BYTES`) are refused before anything is created. Reads return at most 64 KiB. Glob returns at most 500 results, Grep at most 200 matches, 1 MiB per file and 32 MiB in total, and a traversal visits at most 10,000 entries.
+- **Sensitive-path denylist** (`server/sensitivePaths.ts`), matched per path segment, case-insensitively: the names `.git`, `.ssh`, `.aws`, `.npmrc`, `.netrc`, `credentials.json`; any segment starting with `.env`, `id_rsa`, `id_dsa`, `id_ecdsa` or `id_ed25519`; any segment ending in `.pem`, `.key`, `.p12` or `.pfx`; plus protected absolute roots (for example the server data directory). The policy (`server/toolPolicy.ts`) applies it to both the lexical relative path and the resolved path, and `fileOps` applies it again while Glob and Grep traverse (sensitive entries are skipped and sensitive directories pruned). The glob-pattern check in the policy is only a heuristic; the traversal filter is the enforcement.
+- **Redact before cutting.** Read and Grep redact secrets first and cut afterwards. Read reads a lookahead window of 8,192 bytes past the 64 KiB limit (73,728 bytes in all) so a secret that straddles the cut is matched whole; `offset` and `limit` apply within that window.

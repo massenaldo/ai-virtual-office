@@ -45,10 +45,10 @@ describe('ClaudeAgentRuntimeProvider', () => {
     expect(source).not.toContain('requestToolApproval')
   })
 
-  it('points at the gated Write/Edit design, which exists and says it is a design', () => {
+  it('points at the gated tools doc, which exists and says it is implemented without an SDK', () => {
     expect(source).toContain('docs/gated-tools.md')
     const doc = readFileSync(new URL('../../docs/gated-tools.md', import.meta.url), 'utf8')
-    expect(doc.startsWith('**Design only. Not implemented.**')).toBe(true)
+    expect(doc.startsWith('**Status: implemented on the backend as plain handlers')).toBe(true)
     expect(doc).toContain('vo_write')
     expect(doc).toContain('vo_edit')
     expect(doc).toContain('O_NOFOLLOW')

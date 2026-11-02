@@ -109,6 +109,8 @@ A small Node server (`server/`, no framework, no runtime dependencies) owns agen
 
 **Events.** Ids are `<boot>:<seq>`. Types: `task.queued`, `task.started`, `agent.status_changed`, `agent.message`, `task.progress`, `task.waiting_for_approval`, `task.completed`, `task.failed`, `task.cancelled`, `state.changed`, `state.reset`. Each change event carries a patch of the records it touched. `state.reset` means the client's id is too old, from another server run, or ahead of the server: reload `GET /api/state`.
 
+**Gated file tools.** `server/tools/gatedTools.ts` provides in-process handlers `vo_read`, `vo_glob`, `vo_grep` (fixed-string search only), `vo_write` and `vo_edit` on top of `server/fileOps.ts`, with a sensitive-path denylist (`.env*`, keys, `.git`, `.ssh` and similar) applied in the policy and while listing. They are reachable only through the tool gate and are covered by tests with a fake provider. They are not connected to anything real: there is no SDK, the runtime is the mock only, and nothing on the mock path writes files. See `docs/gated-tools.md` and `docs/milestone-3b4-stage-e-report.md`.
+
 **Security boundaries.** These are policy checks, not an OS sandbox.
 - Bound to loopback; `Host` and `Origin` allowlists (421 / 403); JSON-only mutations (415); CORS only for allowed origins; security headers.
 - API token: every route except health, including the event stream and requests with no `Origin`, needs the bearer token (401 otherwise). Compared in constant time; never accepted in a URL; never logged, audited, returned or compiled into the bundle (`check:secrets` looks for it).

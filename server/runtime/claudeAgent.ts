@@ -24,11 +24,12 @@ import type { ExecutionResult, ExecutionStatus, ServerRuntimeProvider, StartCont
  *      `canUseTool`; `disallowedTools` is every tool outside the catalogue plus Bash, WebFetch and WebSearch until the
  *      sandbox exists; `settingSources: []` (no user, project or local settings and no inherited allow rules); no MCP
  *      servers except the in-process ones below; no hooks that could approve; no additional directories.
- *    - KNOWN GAP, to close in 3B.2 before any real write: the SDK's built-in tools (Write, Edit, Read) run after
- *      `canUseTool` returns, so the gate's use-time check and the actual file access are still two steps. The fix is to
- *      disallow the built-in Write and Edit and offer in-process SDK MCP tools whose handler IS `perform`, so the change
- *      happens inside the gate, and to run the session inside the sandbox (docs/sandbox-architecture.md). The design of those
- *      tools is in docs/gated-tools.md (design only, not implemented).
+ *    - KNOWN GAP, to close before any real run: the SDK's built-in tools (Write, Edit, Read) run after `canUseTool`
+ *      returns, so the gate's use-time check and the actual file access would be two steps. The in-process SDK MCP handlers now
+ *      exist (vo_read, vo_glob, vo_grep, vo_write, vo_edit, and a vo_run that always refuses) in server/tools/gatedTools.ts,
+ *      each going through `ctx.tools.use`. The future provider must register only those tools, disallow every SDK built-in
+ *      tool, and still verify each option name against the installed SDK version. It must also run inside the sandbox
+ *      (docs/sandbox-architecture.md). SDK_INSTALLED stays false. See docs/gated-tools.md.
  * 4. Limits. Stream output only as RuntimeEvents, so the manager's caps, redaction, timeouts and approval timer apply.
  *    Never write files or logs directly.
  * 5. Termination. Pass an AbortController linked to `ctx.signal` to the SDK. On `cancel(taskId)`, abort and emit

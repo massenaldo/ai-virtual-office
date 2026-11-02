@@ -48,3 +48,27 @@ export function matchesPathPattern(pattern: string, relative: string, caseSensit
   }
   return go(0, 0)
 }
+
+/**
+ * True when `dir` is the pattern's own target or a directory-prefix of it: something at or below `dir` could match
+ * `pattern` (`.` and the empty path are the workspace root and are a prefix of every pattern). Used by deny rules so a
+ * search that starts at a parent folder cannot slip past a rule on a path below it. Conservative: a `**` segment, or
+ * any segment that fits, counts as able to match. Always case-insensitive.
+ */
+export function patternReachableFrom(pattern: string, dir: string): boolean {
+  const fold = (s: string) => s.normalize('NFC').toLowerCase()
+  const pat = fold(pattern).split('/')
+  const segs = fold(dir).split('/').filter((s) => s !== '' && s !== '.')
+  const memo = new Map<number, boolean>()
+  const go = (i: number, j: number): boolean => {
+    if (j === segs.length) return true
+    if (i === pat.length) return false
+    const key = i * (segs.length + 1) + j
+    const hit = memo.get(key)
+    if (hit !== undefined) return hit
+    const result = pat[i] === '**' ? go(i + 1, j) || go(i, j + 1) : segmentMatches(pat[i]!, segs[j]!) && go(i + 1, j + 1)
+    memo.set(key, result)
+    return result
+  }
+  return go(0, 0)
+}

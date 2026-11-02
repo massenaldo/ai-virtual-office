@@ -200,6 +200,29 @@ describe('policy refuses before any prompt', () => {
   })
 })
 
+describe('a path-scoped deny and searches from a parent folder', () => {
+  it('denies Grep and Glob started at the workspace root or a parent of the denied folder, and allows an unrelated folder', async () => {
+    mkdirSync(join(wsPath(), 'secrets'))
+    mkdirSync(join(wsPath(), 'src'))
+    mkdirSync(join(wsPath(), 'a', 'secrets'), { recursive: true })
+    writeFileSync(join(wsPath(), 'secrets', 'k.txt'), 'needle-in-secrets')
+    writeFileSync(join(wsPath(), 'a', 'secrets', 'k.txt'), 'needle-in-secrets')
+    writeFileSync(join(wsPath(), 'src', 'ok.txt'), 'needle-in-src')
+    for (const [tool, pathPattern] of [['Grep', 'secrets/**'], ['Grep', 'a/secrets/**'], ['Glob', 'secrets/**']] as const) {
+      expect(app.permissions.grant({ scope: 'global', effect: 'deny', tool, pathPattern }).ok).toBe(true)
+    }
+    const { tools } = await start()
+    const denied = { ok: false, error: 'denied_by_policy', text: RESULT_TEXT.denied_by_policy }
+    expect(await tools.vo_grep({ pattern: 'needle', path: '.' })).toEqual(denied)
+    expect(await tools.vo_grep({ pattern: 'needle', path: wsPath() })).toEqual(denied)
+    expect(await tools.vo_grep({ pattern: 'needle', path: 'a' })).toEqual(denied)
+    expect(await tools.vo_grep({ pattern: 'needle', path: 'secrets' })).toEqual(denied)
+    expect(await tools.vo_glob({ pattern: '**/*.txt', path: '.' })).toEqual(denied)
+    const ok = await tools.vo_grep({ pattern: 'needle', path: 'src' })
+    expect(ok).toEqual({ ok: true, text: 'src/ok.txt' })
+  })
+})
+
 describe('symlinks', () => {
   it('fails a write through ws/link -> outside, creates nothing outside, and leaks no path', async () => {
     symlinkSync(outside, join(wsPath(), 'link'))

@@ -80,6 +80,28 @@ describe('evaluate: path patterns', () => {
     expect(evaluate([rule({ effect: 'deny', pathPattern: 'secrets/**' })], q({ paths: ['SECRETS/k'] }), NOW).effect).toBe('deny')
     expect(evaluate([rule({ pathPattern: 'src/**' })], q({ paths: ['SRC/a.ts'] }), NOW).source).toBe('default')
   })
+  it('lets a deny cover a search that starts at a parent folder of the pattern', () => {
+    const d = (pattern: string, paths: string[]) => evaluate([rule(), rule({ effect: 'deny', pathPattern: pattern })], q({ paths }), NOW).effect
+    expect(d('secrets/**', ['.'])).toBe('deny')
+    expect(d('secrets/**', [''])).toBe('deny')
+    expect(d('a/secrets/**', ['a'])).toBe('deny')
+    expect(d('a/secrets/**', ['A'])).toBe('deny')
+    expect(d('a/secrets/**', ['a/secrets'])).toBe('deny')
+    expect(d('a/secrets/**', ['a/secrets/deep/er'])).toBe('deny')
+    expect(d('a/*/key.txt', ['a'])).toBe('deny')
+    expect(d('a/*/key.txt', ['a/x'])).toBe('deny')
+    expect(d('**/secrets/**', ['anywhere/at/all'])).toBe('deny')
+    expect(d('a/secrets/key.txt', ['a/secrets/key.txt'])).toBe('deny')
+    expect(d('a/secrets/key.txt', ['A/Secrets'])).toBe('deny')
+  })
+  it('does not let a deny cover a sibling or unrelated base', () => {
+    const d = (pattern: string, paths: string[]) => evaluate([rule(), rule({ effect: 'deny', pathPattern: pattern })], q({ paths }), NOW).effect
+    expect(d('a/secrets/**', ['b'])).toBe('allow')
+    expect(d('a/secrets/**', ['a/other'])).toBe('allow')
+    expect(d('secrets/**', ['src'])).toBe('allow')
+    expect(d('a/*/key.txt', ['b/x'])).toBe('allow')
+    expect(d('a/secrets/key.txt', ['a/secrets/key.txt/x'])).toBe('allow')
+  })
   it('lets a deny on secrets/** cover the folder path itself', () => {
     expect(evaluate([rule({ effect: 'deny', pathPattern: 'secrets/**' })], q({ paths: ['secrets'] }), NOW).effect).toBe('deny')
   })

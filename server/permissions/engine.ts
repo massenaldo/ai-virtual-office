@@ -1,5 +1,5 @@
 import { TOOL_CATALOGUE } from '../toolPolicy'
-import { isValidPathPattern, matchesPathPattern } from './pathPattern'
+import { isValidPathPattern, matchesPathPattern, patternReachableFrom } from './pathPattern'
 import { REASON_MAX_CHARS, type GrantError, type GrantInput, type PermissionDecision, type PermissionQuery, type PermissionRule, type PermissionScope, type PermissionState } from './types'
 
 // The pure part of the permission system: what a set of rules says about one request. It never reads a file or the clock
@@ -32,12 +32,12 @@ function appliesTo(rule: PermissionRule, q: PermissionQuery): boolean {
 /**
  * Allow and ask rules with a pattern match only when the call names paths and every one fits (case-sensitive). A deny rule
  * matches when the call names no path at all (a workspace-wide search), or any path fits (case-insensitive, because
- * macOS file systems ignore case). The `/_` probe makes `secrets/**` cover the folder `secrets` itself.
+ * macOS file systems ignore case). The `/_` probe makes `secrets/**` cover the folder `secrets` itself, and a path that is a directory-prefix of what the pattern can match (`.`, or `a` for `a/secrets/**`) also matches, so a search from a parent folder cannot slip past a deny.
  */
 function pathsMatch(rule: PermissionRule, paths: readonly string[]): boolean {
   const pattern = rule.pathPattern
   if (pattern === null) return true
-  if (rule.effect === 'deny') return paths.length === 0 || paths.some((p) => matchesPathPattern(pattern, p, false) || matchesPathPattern(pattern, `${p}/_`, false))
+  if (rule.effect === 'deny') return paths.length === 0 || paths.some((p) => matchesPathPattern(pattern, p, false) || matchesPathPattern(pattern, `${p}/_`, false) || patternReachableFrom(pattern, p))
   return paths.length > 0 && paths.every((p) => matchesPathPattern(pattern, p, true))
 }
 

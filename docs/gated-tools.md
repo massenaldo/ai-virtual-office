@@ -36,7 +36,7 @@ A short text result: "Wrote N bytes to <relative path>." or "Edited <relative pa
 
 ## Changes to the SDK options
 
-- `disallowedTools`: add `Write` and `Edit` to the existing list (everything outside the catalogue, plus `Bash`, `WebFetch`, `WebSearch` until the sandbox exists). `Read`, `Glob` and `Grep` also move to gated in-process tools in the same way before the sandbox is relied on, for the same two-step reason.
+- `disallowedTools`: add `Write` and `Edit` to the existing list (everything outside the catalogue, plus `Bash`, `WebFetch`, `WebSearch`; they stay disallowed in the first SDK version because the sandbox does not exist yet). `Read`, `Glob` and `Grep` also move to gated in-process tools in the same way before the sandbox is relied on, for the same two-step reason.
 - `allowedTools`: only our `vo_*` tools, never the built-in names.
 - Unchanged: `permissionMode: 'default'`, `settingSources: []`, no hooks that approve, no additional directories, no other MCP servers.
 
@@ -46,12 +46,14 @@ With the container from `docs/sandbox-architecture.md`, `perform` runs these ste
 
 ## 3B.2 checklist
 
-- [ ] Add `signal` to `GatedAction` and cancel on it.
-- [ ] A small file-operation module (`openat`-style walk, `nlink` check, same-directory temp file, `fsync`, `rename`) with tests for: symlink in the path, symlink swapped after the check, hard link to an outside file, file replaced by a directory, target too large, abort before rename, two writers.
-- [ ] `vo_write` and `vo_edit` handlers that call `ctx.tools.use`, with the fixed result texts.
-- [ ] Move `Read`, `Glob` and `Grep` behind the same pattern.
-- [ ] Add the tool names to `disallowedTools` and `allowedTools` as above; check every option name against the installed SDK version.
-- [ ] A test that the provider never passes a built-in `Write` or `Edit` to the SDK.
+This checklist is the original design; the ticked items are what stage E built, the open ones are for the SDK stage and the sandbox.
+
+- [x] Add `signal` to `GatedAction` and cancel on it (checked before each call starts; see the abort note below).
+- [x] A small file-operation module (`server/fileOps.ts`: per-component `lstat` walk, `nlink` check, same-directory temp file, `fsync`, `rename`) with tests for symlinks in the path, a symlink swapped after the check, a hard link to an outside file, a file replaced by a directory, a target too large, abort before rename and two writers.
+- [x] `vo_write` and `vo_edit` handlers that call `ctx.tools.use`, with the fixed result texts.
+- [x] Move `Read`, `Glob` and `Grep` behind the same pattern.
+- [ ] Add the tool names to `disallowedTools` and `allowedTools` as above; check every option name against the installed SDK version (SDK stage).
+- [ ] A test that the provider never passes a built-in `Write` or `Edit` to the SDK (SDK stage).
 - [ ] Run the same steps inside the sandbox once it exists.
 
 ## As built (stage E)
@@ -63,6 +65,15 @@ With the container from `docs/sandbox-architecture.md`, `perform` runs these ste
 - **Grep is fixed-string only.** There is no regex: a model-supplied regex cannot be made safe against catastrophic backtracking in Node without running it in a worker.
 - **No `openat`.** Node has none, so `server/fileOps.ts` checks each path component with `lstat` (no symlink, every parent a directory), opens the last component with `O_NOFOLLOW`, compares the descriptor with a fresh `lstat` by `dev` and `ino`, and requires the parent's `realpath` to equal the expected path exactly (strict equality, not just "inside the workspace").
 - **`openInside` is read- and directory-only.** It refuses mutating flags. A write creates its temp file by path inside the verified parent (`O_CREAT | O_EXCL | O_NOFOLLOW`, mode 0600), then re-verifies the parent and the temp file (identity and `nlink === 1`) before `rename`.
-- **Write caps.** Content and edit results over 32 KiB (`REVIEW_MAX_BYTES`) are refused before anything is created. Reads return at most 64 KiB. Glob returns at most 500 results, Grep at most 200 matches, 1 MiB per file and 32 MiB in total, and a traversal visits at most 10,000 entries.
-- **Sensitive-path denylist** (`server/sensitivePaths.ts`), matched per path segment, case-insensitively: the names `.git`, `.ssh`, `.aws`, `.npmrc`, `.netrc`, `credentials.json`; any segment starting with `.env`, `id_rsa`, `id_dsa`, `id_ecdsa` or `id_ed25519`; any segment ending in `.pem`, `.key`, `.p12` or `.pfx`; plus protected absolute roots (for example the server data directory). The policy (`server/toolPolicy.ts`) applies it to both the lexical relative path and the resolved path, and `fileOps` applies it again while Glob and Grep traverse (sensitive entries are skipped and sensitive directories pruned). The glob-pattern check in the policy is only a heuristic; the traversal filter is the enforcement.
-- **Redact before cutting.** Read and Grep redact secrets first and cut afterwards. Read reads a lookahead window of 8,192 bytes past the 64 KiB limit (73,728 bytes in all) so a secret that straddles the cut is matched whole; `offset` and `limit` apply within that window.
+- **Write caps.** Content and edit results over 32 KiB (`REVIEW_MAX_BYTES`) are refused before anything is created. Reads return at most 64 KiB. Glob returns at most 500 results, Grep at most 200 matches, 1 MiB per file and 32 MiB in total, a traversal visits at most 10,000 entries and runs at most 2 seconds.
+- **Sensitive-path denylist** (`server/sensitivePaths.ts`), matched per path segment, case-insensitively: the names `.git`, `.ssh`, `.aws`, `.npmrc`, `.netrc`, `credentials.json`, `.gnupg`, `.kube`, `.docker`, `.pypirc`, `.git-credentials`, `.pgpass`, `.htpasswd`; any segment starting with `.env`, `id_rsa`, `id_dsa`, `id_ecdsa` or `id_ed25519`; any segment ending in `.pem`, `.key`, `.p12` or `.pfx`; plus protected absolute roots (for example the server data directory). The policy (`server/toolPolicy.ts`) applies it to both the lexical relative path and the resolved path, and `fileOps` applies it again while Glob and Grep traverse (sensitive entries are skipped and sensitive directories pruned). The glob-pattern check in the policy is only a heuristic; the traversal filter is the enforcement.
+- **Redact before cutting.** Read and Grep redact secrets first and cut afterwards. Read reads a lookahead window of 8,192 bytes past the 64 KiB limit (73,728 bytes in all) so a secret that straddles the cut is matched whole; `offset` and `limit` apply within that 73,728-byte lookahead window, before the final 64 KiB cut.
+- **Grep and Glob take a directory `path` only** (default: the workspace root), never a file. `vo_grep` refuses with `invalid_input`, before the gate, any of `type`, `-n`, `-A`, `-B`, `-C`, `head_limit` and `multiline`. The policy accepts those names (they are Claude Code's), but this tool does not implement them, so a result never silently differs from what the model asked for.
+- **Search deadline.** Glob and Grep stop after `SEARCH_MAX_MS` (2,000 ms of wall-clock time, checked per directory, per file and every 256 lines of a grep scan) and return what they have with `[results truncated]`; this is never an error. Grep redacts a matched line only over its first 200 characters plus a 4,096-character lookahead, then cuts to 200.
+- **Abort semantics.** File operations are synchronous and run to completion. Cancel, revoke and timeout are honoured before a call starts and refuse every later call; a call already running is bounded only by the caps and the deadline, and the `checkAborted` calls inside the loops are reachable only from test seams. The event-loop stall of one call is therefore bounded by the caps and `SEARCH_MAX_MS`, not by an interrupt.
+- **Redaction is not a confidentiality boundary against the agent.** A fixed-string Grep (`files_with_matches`) answers "does this file contain X?" for any readable file, and `vo_edit` outcomes (`no_match` versus `not_unique` versus success) are yes/no oracles on file content. Only the sensitive-path denylist keeps a secret from the agent; redaction only limits what is echoed back.
+- **Entry names with control characters** (U+0000 to U+001F, U+007F, U+2028, U+2029) are skipped by Glob and Grep, like sensitive names, so a file name cannot forge extra output lines.
+- **`vo_run`.** A once-approved `vo_run` is prompted for and its once-grant is consumed, but nothing runs (outcome `not_supported`); `permission.used` is audited even though nothing ran.
+- **File modes and ownership.** New files are mode 0600 regardless of the umask. A rewrite goes through a temp file and `rename`, so extended attributes and ACLs of the old file are dropped and the new file belongs to the server's user.
+- **Empty `protectedRoots`.** `createGatedTools` throws when given no protected roots, so a mis-wired provider fails loudly instead of protecting nothing.
+- **Path-scoped deny rules and parent folders.** A deny rule with a path pattern also matches a search whose base folder is a directory-prefix of what the pattern can match (`.` or `a` for `a/secrets/**`), so `deny Grep secrets/**` cannot be bypassed by searching from the workspace root. This can over-deny (for example `a/*/key.txt` blocks a search from `a`); it never under-denies. Allow and ask rules still need every path to match.

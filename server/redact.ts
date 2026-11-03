@@ -49,6 +49,7 @@ const mysqlPassword = (_match: string, head: string, _value: string): string => 
 
 const PATTERNS: Array<[RegExp, string | ((...groups: string[]) => string)]> = [
   [URL_PATTERN, urlCredential],
+  [/\bxoxe(?:\.xox[abposr])?-[A-Za-z0-9-]{10,200}/g, REDACTED],
   [/\bxox[abposr]-[A-Za-z0-9-]{10,200}/g, REDACTED],
   [/\bxapp-\d-[A-Za-z0-9-]{10,200}/g, REDACTED],
   [/\bAIza[A-Za-z0-9_-]{35}(?![A-Za-z0-9_-])/g, REDACTED],
@@ -57,6 +58,10 @@ const PATTERNS: Array<[RegExp, string | ((...groups: string[]) => string)]> = [
   [/\bgh[pousr]_[A-Za-z0-9]{36,255}/g, REDACTED],
   [/\bgithub_pat_[A-Za-z0-9_]{22,255}/g, REDACTED],
   [/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, REDACTED],
+  [/\b[sr]k_(?:live|test)_[A-Za-z0-9]{16,255}/g, REDACTED],
+  [/\bglpat-[A-Za-z0-9_-]{20,255}/g, REDACTED],
+  [/\bnpm_[A-Za-z0-9]{36}(?![A-Za-z0-9])/g, REDACTED],
+  [/(\baws_secret_access_key\b"?\s{0,16}[=:]\s{0,16})("[^"]{0,256}"|'[^']{0,256}'|[^\s"',;&]{1,256})/gi, `$1${REDACTED}`],
   // curl -u user:password and --user user:password
   [/(\s(?:-u|--user)\s+)[^\s:]{1,128}:[^\s]{1,256}/g, `$1${REDACTED}`],
   [/\b(Basic)\s+([A-Za-z0-9+/]{8,512}={0,2})/gi, basicCredential],

@@ -423,6 +423,14 @@ describe('globFiles and grepFiles', () => {
   const gr = (pattern: string, o: { glob?: string; ignoreCase?: boolean; mode?: 'content' | 'files_with_matches' } = {}, baseRel = '', roots: string[] = []) =>
     grepFiles(ws, baseRel, pattern, { ignoreCase: false, mode: 'content', ...o }, live, roots)
 
+  it('grep matches and returns the redacted text, so a key body can be neither found nor shown', () => {
+    put('deploy_ident', 'head\n-----BEGIN RSA PRIVATE KEY-----\nMIIEbodyone\nQqzbodytwo\n-----END RSA PRIVATE KEY-----\ntail needle\n')
+    expect(gr('bodytwo').matches).toEqual([])
+    expect(gr('bodytwo', { mode: 'files_with_matches' }).matches).toEqual([])
+    expect(gr('MII').matches).toEqual([])
+    expect(gr('needle').matches.map((m) => m.text)).toEqual(['tail needle'])
+    expect(gr('head').matches.map((m) => m.text)).toEqual(['head'])
+  })
   it('glob returns sorted workspace-relative files, relative to the base', () => {
     put('b.ts'); put('a.ts'); put('src/z.ts'); put('src/deep/y.ts'); put('src/n.md')
     expect(gl('**/*.ts').paths).toEqual(['a.ts', 'b.ts', 'src/deep/y.ts', 'src/z.ts'])

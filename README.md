@@ -30,6 +30,37 @@ To use the backend with a separately started frontend, run `npm run server`, the
 
 **Pairing (no proxy).** Start the backend (`npm run server`), then the frontend with `VITE_WORKFORCE_API_URL=http://127.0.0.1:8787 npm run dev` and open the app at the same host name as the backend: with `http://127.0.0.1:8787` only `http://127.0.0.1:5173` works (`http://localhost:5173` can pair but the browser will not keep the session, and the form says so); use the same host name for both. The AI agents panel asks for the API token: paste the contents of `data/api-token` (or your `API_TOKEN`). The server answers with an HttpOnly session cookie, valid 8 hours; the page never keeps the token. Sessions are lost on a backend restart, and the pairing form returns after one. The proxy flow (`dev:full`, or `VITE_WORKFORCE_API_URL=/`) is unchanged and never asks. Details: `docs/browser-auth.md`.
 
+## Open it from a browser (InstaBox)
+
+`npm run start:public` starts the backend and a small password gateway in one process. The gateway serves the built app and forwards `/api/*` (including the live event stream) to the backend, so the whole app is reachable through one address.
+
+1. Build once: `npm run build:public`. It builds the app to call the same-origin `/api` (`VITE_WORKFORCE_API_URL=/`), and writes `dist/`.
+2. Pick a password of at least 12 characters. Do not put it in a file you commit.
+3. Run it inside tmux, so it keeps running when you close the terminal:
+   ```bash
+   tmux new -s vo
+   VO_PASSWORD='your-long-password' npm run start:public
+   ```
+   Detach with Ctrl-b d. Come back with `tmux attach -t vo`.
+4. In the InstaBox dashboard, publish port 3000. Open the address InstaBox gives you.
+5. The browser shows a username and password prompt. Type any username and the password.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `VO_PASSWORD` | none, required | The password. At least 12 characters. Read from the environment (or `.env`) only; never printed or logged |
+| `PUBLIC_PORT` | `3000` | Port the gateway listens on. If you change it, publish that port instead |
+| `PUBLIC_HOST` | `0.0.0.0` | Address the gateway listens on |
+| `VO_ALLOW_PUBLIC_CLAUDE` | unset | `yes` allows `RUNTIME=claude` on the public address (see below) |
+| `WORKSPACE_ROOT`, `WORKSPACES`, `DATA_DIR` | as in "Backend" | Passed to the backend, which still reads them as before |
+
+The backend keeps listening on `127.0.0.1:8787` (`HOST`/`PORT`); only the gateway listens on `PUBLIC_HOST:PUBLIC_PORT`. The gateway adds the API token on the server side, so the token never reaches the browser.
+
+**What it protects.** Every request needs the password, including the app files, `/api/health` and the event stream. The comparison is constant-time. Live updates use server-sent events through the same URL, so nothing else needs to be published. `/api/*` requests are only forwarded when the browser marks them same-origin.
+
+**What it does not.** There is one shared password and no per-user accounts or roles: anyone who has it can do everything the app can. Wrong passwords are throttled globally, not per visitor, so anyone can lock the owner out for 5 minutes just by guessing; wait it out. HTTPS comes from InstaBox; the gateway itself speaks plain HTTP, so do not expose its port by other means.
+
+**`RUNTIME=claude` is refused on the public address by default.** The entry script exits with an error. A public page would mean real model spend and file writes reachable from the internet, while the security prerequisites in `docs/milestone-3b5-3-report.md` (a real-key run, an independent review, the OS-user decision) are still open. Set `VO_ALLOW_PUBLIC_CLAUDE=yes` only once they are met.
+
 ## Open with Claude Code `/vo`
 
 1. Open a terminal and enter this project folder.

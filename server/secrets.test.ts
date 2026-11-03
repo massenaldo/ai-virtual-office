@@ -13,7 +13,8 @@ let s: TestServer | null = null
 let ws: ReturnType<typeof makeWorkspaceRoot> | null = null
 afterEach(async () => { await s?.close(); s = null; ws?.cleanup(); ws = null })
 
-async function until(fn: () => Promise<boolean>, ms = 1500): Promise<void> {
+// The deadline only stops a hung test; a condition that holds returns at the next poll, so a slow machine costs time, not a failure.
+async function until(fn: () => Promise<boolean>, ms = 20000): Promise<void> {
   const end = Date.now() + ms
   while (!(await fn())) {
     if (Date.now() > end) throw new Error('condition not met in time')

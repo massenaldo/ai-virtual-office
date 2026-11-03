@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createPasswordCheck } from './auth'
 
 const PASSWORD = 'correct-horse-battery'
@@ -86,5 +86,24 @@ describe('password check', () => {
     const { check } = setup({ failureLimit: 1 })
     const results = [check(basic('u', 'bad')), check(basic('u', PASSWORD))]
     expect(JSON.stringify(results)).not.toContain(PASSWORD)
+  })
+
+  it('accepts the Basic scheme in any letter case (RFC 7617)', () => {
+    const { check } = setup()
+    expect(check(basic('u', PASSWORD).replace('Basic', 'basic'))).toEqual({ ok: true })
+    expect(check(basic('u', PASSWORD).replace('Basic', 'BASIC'))).toEqual({ ok: true })
+  })
+
+  it('keeps its lockout when the wall clock jumps (default clock is monotonic)', () => {
+    const wall = vi.spyOn(Date, 'now')
+    try {
+      const c = createPasswordCheck({ password: PASSWORD, failureLimit: 2 })
+      c.check(basic('u', 'x'))
+      c.check(basic('u', 'x'))
+      wall.mockReturnValue(Date.now() + 3_600_000)
+      expect(c.check(basic('u', PASSWORD))).toMatchObject({ ok: false, status: 429 })
+    } finally {
+      wall.mockRestore()
+    }
   })
 })

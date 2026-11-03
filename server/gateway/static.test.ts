@@ -27,6 +27,9 @@ beforeAll(async () => {
   writeFileSync(join(root, 'p.jpg'), 'j')
   writeFileSync(join(root, 'favicon.ico'), 'i')
   writeFileSync(join(root, 'weird.bin'), 'b')
+  writeFileSync(join(root, '.env'), SECRET)
+  mkdirSync(join(root, '.git'))
+  writeFileSync(join(root, '.git', 'config'), SECRET)
   writeFileSync(join(base, 'package.json'), SECRET)
   writeFileSync(join(base, 'outside.txt'), SECRET)
   symlinkSync(join(base, 'outside.txt'), join(root, 'link.txt'))
@@ -129,6 +132,10 @@ describe('static handler', () => {
     '/link.txt',
     '/linkdir/package.json',
     '/linkdir/outside.txt',
+    '/.env',
+    '/.git/config',
+    '/assets/.hidden',
+    '/%2eenv',
   ])('never returns outside content for %s', async (path) => {
     const r = await raw('GET', path)
     expect(r.status).toBe(404)
@@ -146,5 +153,26 @@ describe('static handler', () => {
 
   it('refuses a malformed percent escape', async () => {
     expect((await raw('GET', '/%E0%A4%A')).status).toBe(404)
+  })
+
+  it('answers 404 instead of crashing when the root is missing', async () => {
+    const handle = createStaticHandler({ root: join(base, 'no-such-dist') })
+    const srv = createServer((req, res) => { if (!handle(req, res)) res.end() })
+    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r))
+    const unhandled: unknown[] = []
+    const on = (e: unknown) => { unhandled.push(e) }
+    process.on('unhandledRejection', on)
+    try {
+      // Let a rejection created at construction time surface before any request arrives.
+      await new Promise((r) => setTimeout(r, 50))
+      const status = await new Promise<number>((resolve, reject) => {
+        request({ host: '127.0.0.1', port: (srv.address() as AddressInfo).port, path: '/' }, (res) => { res.resume(); resolve(res.statusCode ?? 0) }).on('error', reject).end()
+      })
+      expect(status).toBe(404)
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off('unhandledRejection', on)
+      await new Promise((r) => srv.close(r))
+    }
   })
 })

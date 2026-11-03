@@ -35,16 +35,17 @@ function safeSegments(url: string): string[] | null {
   let decoded: string
   try { decoded = decodeURIComponent(raw) } catch { return null }
   if (decoded.includes('\\') || decoded.includes('\0') || decoded.includes('..')) return null
-  return decoded.split('/').filter((s) => s !== '' && s !== '.')
+  const segments = decoded.split('/').filter((s) => s !== '' && s !== '.')
+  // Dotfiles (.env, .git/...) are never part of the built app.
+  return segments.some((s) => s.startsWith('.')) ? null : segments
 }
 
 export function createStaticHandler(opts: { root: string }): (req: IncomingMessage, res: ServerResponse) => boolean {
-  const rootReal = realpath(opts.root)
-
   /** The real path of a regular file inside the root, or null. */
   async function resolveFile(segments: string[]): Promise<string | null> {
-    const root = await rootReal
     try {
+      // Resolved per request: a missing root is a 404 here, not an unhandled rejection at startup.
+      const root = await realpath(opts.root)
       const real = await realpath(join(root, ...segments))
       if (real !== root && !real.startsWith(root + sep)) return null
       return (await stat(real)).isFile() ? real : null

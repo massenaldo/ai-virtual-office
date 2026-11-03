@@ -11,7 +11,7 @@ const digest = (text: string) => createHash('sha256').update(text).digest()
 
 /** The password part of `Basic base64(user:password)`, or null if the header is not that. The username is ignored. */
 function basicPassword(header: string | undefined): string | null {
-  const match = /^Basic ([A-Za-z0-9+/]+={0,2})$/.exec(header ?? '')
+  const match = /^basic ([A-Za-z0-9+/]+={0,2})$/i.exec(header ?? '')
   if (match === null) return null
   const text = Buffer.from(match[1], 'base64').toString('utf8')
   const colon = text.indexOf(':')
@@ -19,7 +19,7 @@ function basicPassword(header: string | undefined): string | null {
 }
 
 export function createPasswordCheck(opts: PasswordCheckOptions): { check(authorizationHeader: string | undefined): PasswordResult } {
-  const now = opts.now ?? Date.now
+  const now = opts.now ?? (() => performance.now())
   const failureLimit = opts.failureLimit ?? 8
   const windowMs = opts.windowMs ?? 5 * 60_000
   const lockoutMs = opts.lockoutMs ?? 5 * 60_000

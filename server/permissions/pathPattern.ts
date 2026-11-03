@@ -1,3 +1,4 @@
+import { foldName } from '../sensitivePaths'
 import { PATTERN_MAX_CHARS } from './types'
 
 // Patterns are workspace-relative globs: `*` and `?` stay inside one segment, a whole segment `**` matches zero or more
@@ -30,7 +31,7 @@ function segmentMatches(pattern: string, text: string): boolean {
 }
 
 export function matchesPathPattern(pattern: string, relative: string, caseSensitive: boolean): boolean {
-  const fold = (s: string) => (caseSensitive ? s.normalize('NFC') : s.normalize('NFC').toLowerCase())
+  const fold = (s: string) => (caseSensitive ? s.normalize('NFC') : foldName(s))
   const pat = fold(pattern).split('/')
   const path = fold(relative).split('/')
   const memo = new Map<number, boolean>()
@@ -56,7 +57,7 @@ export function matchesPathPattern(pattern: string, relative: string, caseSensit
  * any segment that fits, counts as able to match. Always case-insensitive.
  */
 export function patternReachableFrom(pattern: string, dir: string): boolean {
-  const fold = (s: string) => s.normalize('NFC').toLowerCase()
+  const fold = foldName
   const pat = fold(pattern).split('/')
   const segs = fold(dir).split('/').filter((s) => s !== '' && s !== '.')
   const memo = new Map<number, boolean>()

@@ -20,6 +20,10 @@ export type HostFacts = {
   dataDirMode: number | null
   /** The application's own folder (the repository), as a real path. */
   projectDir: string
+  /** The server user's home folder, as a real path. */
+  home: string
+  /** WORKSPACE_ROOT as a real path, or null when none is set. */
+  workspaceRoot: string | null
   /** Each workspace's id and real path. */
   workspaces: Array<{ id: string; path: string }>
   /** Names of credential folders and files found in the server user's home, for example `.ssh`. */
@@ -44,6 +48,23 @@ export function checkHost(f: HostFacts): HostCheck {
       refuse.push(`Workspace "${w.id}" contains the application's own folder, so the agent could change the server's code and settings. Point the workspace at a folder that does not contain this project.`)
     }
   }
+  for (const w of f.workspaces) {
+    if (isInside(w.path, f.home)) {
+      refuse.push(`Workspace "${w.id}" contains the server user's home folder, which holds personal files and credentials. Use a folder made for the agent.`)
+    }
+    if (f.workspaceRoot !== null && w.path === f.workspaceRoot) {
+      refuse.push(`Workspace "${w.id}" is the whole workspace root. Give each workspace its own folder under WORKSPACE_ROOT.`)
+    }
+  }
+  for (let i = 0; i < f.workspaces.length; i++) {
+    for (let j = i + 1; j < f.workspaces.length; j++) {
+      const a = f.workspaces[i]!
+      const b = f.workspaces[j]!
+      if (isInside(a.path, b.path) || isInside(b.path, a.path)) {
+        refuse.push(`Workspaces "${a.id}" and "${b.id}" overlap, so a grant or a change in one reaches the other. Give each its own folder.`)
+      }
+    }
+  }
   if (f.dataDirMode !== null && (f.dataDirMode & 0o077) !== 0) {
     warn.push(`The data folder is readable by other users (mode ${(f.dataDirMode & 0o777).toString(8)}). It holds the API token, the audit log and the agent's state: run chmod 700 on it.`)
   }
@@ -64,9 +85,11 @@ export function readHostFacts(config: ServerConfig, env: Record<string, string |
     const resolved = resolveWorkspace(config, entry.id)
     if (resolved.ok) workspaces.push({ id: resolved.workspace.id, path: resolved.workspace.path })
   }
-  const home = env.HOME ?? homedir()
+  const homeRaw = env.HOME ?? homedir()
+  let home = homeRaw
+  try { home = realpathSync(homeRaw) } catch { /* keep the given path */ }
   const homeCredentials = HOME_CREDENTIALS.filter((name) => existsSync(join(home, name)))
-  return { runtime: config.runtime, uid: typeof process.getuid === 'function' ? process.getuid() : null, allowRoot: env.VO_ALLOW_ROOT === 'yes', dataDir: config.dataDir, dataDirMode, projectDir, workspaces, homeCredentials: [...homeCredentials] }
+  return { runtime: config.runtime, uid: typeof process.getuid === 'function' ? process.getuid() : null, allowRoot: env.VO_ALLOW_ROOT === 'yes', dataDir: config.dataDir, dataDirMode, projectDir, home, workspaceRoot: config.workspaceRoot, workspaces, homeCredentials: [...homeCredentials] }
 }
 
 /** For the entry points: logs every finding and returns false when the server must not start. */

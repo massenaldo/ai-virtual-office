@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -6,7 +6,7 @@ import { parseConfig } from './config'
 import { checkHost, enforceHostSafety, readHostFacts, type HostFacts } from './hostSafety'
 import { recordingLogger } from './log'
 
-const base: HostFacts = { runtime: 'claude', uid: 1000, allowRoot: false, dataDir: '/srv/vo/data', dataDirMode: 0o700, projectDir: '/srv/vo/app', workspaces: [{ id: 'sandbox', path: '/srv/vo/workspaces/sandbox' }], homeCredentials: [] }
+const base: HostFacts = { runtime: 'claude', uid: 1000, allowRoot: false, dataDir: '/srv/vo/data', dataDirMode: 0o700, projectDir: '/srv/vo/app', home: '/home/vo', workspaceRoot: '/srv/vo/workspaces', workspaces: [{ id: 'sandbox', path: '/srv/vo/workspaces/sandbox' }], homeCredentials: [] }
 
 describe('checkHost', () => {
   it('has nothing to say about a dedicated user with a private data folder and a separate workspace', () => {
@@ -27,10 +27,33 @@ describe('checkHost', () => {
     ['is the filesystem root', '/'],
   ])('refuses a workspace that %s, because the agent could then change the server code', (_n, path) => {
     const r = checkHost({ ...base, workspaces: [{ id: 'big', path }] })
-    expect(r.refuse).toEqual([expect.stringContaining('Workspace "big" contains the application')])
+    expect(r.refuse[0]).toContain('Workspace "big" contains the application')
   })
   it('accepts a workspace inside the project folder or next to it', () => {
     expect(checkHost({ ...base, workspaces: [{ id: 'a', path: '/srv/vo/app/sandbox' }, { id: 'b', path: '/srv/vo/appendix' }] }).refuse).toEqual([])
+  })
+
+  it.each([
+    ['equals the home folder', '/home/vo'],
+    ['is a parent of the home folder', '/home'],
+  ])('refuses a workspace that %s', (_n, path) => {
+    expect(checkHost({ ...base, workspaces: [{ id: 'h', path }] }).refuse).toEqual([`Workspace "h" contains the server user's home folder, which holds personal files and credentials. Use a folder made for the agent.`])
+  })
+  it('accepts a workspace inside the home folder', () => {
+    expect(checkHost({ ...base, workspaces: [{ id: 'h', path: '/home/vo/agent' }] }).refuse).toEqual([])
+  })
+  it.each([
+    ['equal', '/srv/vo/workspaces/a', '/srv/vo/workspaces/a'],
+    ['nested', '/srv/vo/workspaces/a', '/srv/vo/workspaces/a/b'],
+    ['nested the other way', '/srv/vo/workspaces/a/b', '/srv/vo/workspaces/a'],
+  ])('refuses workspaces that are %s', (_n, pa, pb) => {
+    expect(checkHost({ ...base, workspaces: [{ id: 'a', path: pa }, { id: 'b', path: pb }] }).refuse).toEqual([`Workspaces "a" and "b" overlap, so a grant or a change in one reaches the other. Give each its own folder.`])
+  })
+  it('accepts separate sibling folders, even with a shared name prefix', () => {
+    expect(checkHost({ ...base, workspaces: [{ id: 'a', path: '/srv/vo/workspaces/a' }, { id: 'b', path: '/srv/vo/workspaces/ab' }] })).toEqual({ refuse: [], warn: [] })
+  })
+  it('refuses a workspace that is the workspace root itself', () => {
+    expect(checkHost({ ...base, workspaces: [{ id: 'dot', path: '/srv/vo/workspaces' }] }).refuse).toEqual([`Workspace "dot" is the whole workspace root. Give each workspace its own folder under WORKSPACE_ROOT.`])
   })
 
   it.each([[0o755, '755'], [0o770, '770'], [0o707, '707'], [0o775, '775']])('warns about a data folder with mode %s', (mode, text) => {
@@ -45,7 +68,7 @@ describe('checkHost', () => {
   })
   it('reports every problem at once', () => {
     const r = checkHost({ ...base, uid: 0, dataDirMode: 0o777, workspaces: [{ id: 'big', path: '/' }] })
-    expect(r.refuse).toHaveLength(2)
+    expect(r.refuse).toHaveLength(3) // root user, contains the project, contains the home folder
     expect(r.warn).toHaveLength(1)
   })
 })
@@ -70,6 +93,18 @@ describe('reading the facts and enforcing them', () => {
     expect(facts).toMatchObject({ runtime: 'claude', allowRoot: false, dataDirMode: 0o700, homeCredentials: ['.ssh', '.netrc'] })
     expect(facts.workspaces).toEqual([{ id: 'sandbox', path: expect.stringContaining('sandbox') }])
     expect(facts.uid === null || typeof facts.uid === 'number').toBe(true)
+  })
+  it('reads the home folder as a real path and the workspace root', () => {
+    const s = setup({})
+    const facts = readHostFacts(s.config, { HOME: s.home }, join(dir, 'app'))
+    expect(facts.home).toBe(realpathSync(s.home))
+    expect(facts.workspaceRoot).toBe(realpathSync(s.root))
+  })
+  it('stops a setup whose workspace is the workspace root', () => {
+    const s = setup({ WORKSPACES: 'dot:.' })
+    const log = recordingLogger()
+    expect(enforceHostSafety(s.config, log, { HOME: s.home }, join(dir, 'app'))).toBe(false)
+    expect(log.lines.join('\n')).toContain('whole workspace root')
   })
   it('reads VO_ALLOW_ROOT only when it is exactly "yes"', () => {
     const s = setup({})

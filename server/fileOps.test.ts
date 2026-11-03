@@ -447,6 +447,13 @@ describe('globFiles and grepFiles', () => {
     expect(gr('SECRET', {}, '', roots).matches.map((m) => m.path)).toEqual(['ok.txt'])
     expect(gl('**', '.git').paths).toEqual([])
   })
+  it('leaves the widened denylist and folded Unicode names out of glob and grep', () => {
+    const hidden = ['.claude/.credentials.json', '.vault-token', '.s3cfg', '.boto', 'kubeconfig', '.config/gh/hosts.yml', '.config/gcloud/a.db', '.azure/x', 'a.tfstate', 'a.tfstate.backup', 'a.tfvars', '.bash_history', 'secrets.yml', '.\u017Fsh/config', 'credential\u017F.json']
+    for (const p of hidden) put(p, 'SECRET')
+    put('ok.txt', 'SECRET'); put('.config/other/x.txt', 'SECRET')
+    expect(gl('**').paths).toEqual(['.config/other/x.txt', 'ok.txt'])
+    expect(gr('SECRET').matches.map((m) => m.path).sort()).toEqual(['.config/other/x.txt', 'ok.txt'])
+  })
   it('skips symlinked files and directories', () => {
     put('real/a.txt', 'needle'); writeFileSync(join(outside, 'o.txt'), 'needle')
     symlinkSync(join(outside, 'o.txt'), join(ws, 'link.txt'))

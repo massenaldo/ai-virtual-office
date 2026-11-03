@@ -1,4 +1,5 @@
 /// <reference types="vitest/config" />
+import { resolve } from 'node:path'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { apiProxyFor } from './scripts/apiProxy'
@@ -14,7 +15,8 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       strictPort: true,
       // The data folder holds the API token, the audit log and the whole workforce state: never serve it (Vite serves every file under the root).
-      fs: { deny: ['.env', '.env.*', '*.{crt,pem}', '**/.git/**', '**/data/**', '**/api-token*'] },
+      // The data pattern is anchored to this project: an unanchored `**/data/**` also matches a checkout that itself lives under a folder named data.
+      fs: { deny: ['.env', '.env.*', '*.{crt,pem}', '**/.git/**', `${resolve(process.cwd(), 'data').replace(/\\/g, '/')}/**`, '**/api-token*'] },
       // The proxy rewrites Host for the backend, so this is the only Host check proxied requests get. Keep it explicit.
       allowedHosts: ['localhost', '127.0.0.1'],
       ...(api ? { proxy: api.proxy } : {}),

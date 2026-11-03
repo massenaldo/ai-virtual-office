@@ -28,7 +28,7 @@ import type { ExecutionResult, ExecutionStatus, ServerRuntimeProvider, StartCont
  *  2. `allowedTools` pre-approves exactly our five tools (the gate decides inside them); `dontAsk` denies everything else.
  *  3. The session's own `init` message must list exactly those tools, exactly our server, and the `dontAsk` mode, or the task
  *     fails before it starts.
- *  4. A `PreToolUse` hook and `canUseTool` deny any tool that is not ours; an assistant message that calls one ends the task.
+ *  4. A `PreToolUse` hook denies any tool that is not ours; an assistant message that calls one ends the task.
  * See docs/milestone-3b5-planning.md section 8.
  *
  * Process: the SDK starts its bundled Claude Code binary as a child process; this file never starts a process itself. The child
@@ -100,7 +100,6 @@ async function loadSdk(): Promise<{ query: QueryFn; api: SdkToolApi }> {
   return { query: sdk.query as unknown as QueryFn, api: sdk }
 }
 
-/** Passed to the child so the SDK's own approval step has nothing to decide for our tools and denies everything else. */
 const DENY_UNKNOWN_TOOL = 'That tool is not available.'
 
 export class ClaudeAgentRuntimeProvider implements ServerRuntimeProvider {
@@ -171,8 +170,8 @@ export class ClaudeAgentRuntimeProvider implements ServerRuntimeProvider {
       mcpServers: { [VO_SERVER_NAME]: server },
       strictMcpConfig: true,
       permissionMode: 'dontAsk',
-      // Backstop: with dontAsk and exactly these allowed tools nothing should ever reach here.
-      canUseTool: () => Promise.resolve({ behavior: 'deny', message: DENY_UNKNOWN_TOOL }),
+      // No canUseTool: under dontAsk the SDK denies anything not pre-approved without asking, so a callback would never run (and the SDK
+      // warns that it will not). The PreToolUse hook below is the backstop, and it runs before every other step.
       hooks: { PreToolUse: [{ hooks: [(input) => Promise.resolve(isOurTool(input) ? {} : { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: DENY_UNKNOWN_TOOL } })] }] },
       settingSources: [],
       persistSession: false,
@@ -329,9 +328,10 @@ export class ClaudeAgentRuntimeProvider implements ServerRuntimeProvider {
   }
 
   async dispose(): Promise<void> {
-    const running = [...this.records.values()].filter((r) => r.outcome === 'running')
-    for (const rec of running) { rec.cancelled = true; this.stop(rec) }
-    await Promise.allSettled(running.map((r) => r.done))
+    const all = [...this.records.values()]
+    for (const rec of all) if (rec.outcome === 'running') { rec.cancelled = true; this.stop(rec) }
+    // Every session, also the ones that already ended: their scratch folder is removed when the SDK's output ends.
+    await Promise.allSettled(all.map((r) => r.done))
     this.listeners.clear()
   }
 }

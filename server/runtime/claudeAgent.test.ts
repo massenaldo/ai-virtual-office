@@ -118,10 +118,10 @@ describe('the session it asks for', () => {
     expect(session.options).not.toHaveProperty('model')
     expect(session.options.env).not.toHaveProperty('ANTHROPIC_BASE_URL')
   })
-  it('denies every tool that is not ours through the permission callback and the PreToolUse hook, and lets ours through to the gate', async () => {
+  it('denies every tool that is not ours through the PreToolUse hook, lets ours through to the gate, and sets no permission callback the SDK would never call', async () => {
     const s = setup()
     const { session } = await started(s)
-    await expect(session.options.canUseTool!('Bash', {}, {} as never)).resolves.toMatchObject({ behavior: 'deny' })
+    expect(session.options.canUseTool).toBeUndefined()
     const hook = session.options.hooks!.PreToolUse![0].hooks[0]
     const call = (input: unknown) => hook(input as never, undefined, { signal: new AbortController().signal })
     for (const bad of ['Bash', 'Write', 'Edit', 'mcp__vo__vo_run', 'mcp__vo__vo_delete', 'mcp__other__vo_write']) await expect(call({ tool_name: bad })).resolves.toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })

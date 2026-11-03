@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { startServer } from '../server/app'
 import { formatConfigErrors, loadConfig, mergeEnv } from '../server/config'
+import { enforceHostSafety } from '../server/hostSafety'
 import { startGateway } from '../server/gateway/gateway'
 import { readPublicConfig } from '../server/gateway/publicConfig'
 import { consoleLogger } from '../server/log'
@@ -16,6 +17,8 @@ if (!parsed.ok) {
   log.error(formatConfigErrors(parsed.errors))
   process.exit(1)
 }
+// The claude runtime shares one operating-system user with the server: refuse the worst setups, warn about the rest.
+if (!enforceHostSafety(parsed.config, log)) process.exit(1)
 
 // Same .env handling as loadConfig, so VO_PASSWORD and PUBLIC_* can live in .env too.
 let envText: string | null = null

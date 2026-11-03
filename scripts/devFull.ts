@@ -1,6 +1,7 @@
 import { createServer } from 'vite'
 import { startServer } from '../server/app'
 import { formatConfigErrors, loadConfig } from '../server/config'
+import { enforceHostSafety } from '../server/hostSafety'
 import { consoleLogger } from '../server/log'
 import { redactingLogger } from '../server/redact'
 
@@ -12,6 +13,8 @@ if (!parsed.ok) {
   log.error(formatConfigErrors(parsed.errors))
   process.exit(1)
 }
+// The claude runtime shares one operating-system user with the server: refuse the worst setups, warn about the rest.
+if (!enforceHostSafety(parsed.config, log)) process.exit(1)
 
 let backend
 try {

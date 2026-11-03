@@ -113,7 +113,7 @@ describe('security-related config', () => {
   it('.env.example lists exactly the config variables', () => {
     const text = readFileSync(new URL('../.env.example', import.meta.url), 'utf8')
     const names = new Set(text.split('\n').flatMap((l) => (/^([A-Z0-9_]+)=/.exec(l) ? [/^([A-Z0-9_]+)=/.exec(l)![1]] : [])))
-    expect(names).toEqual(new Set([...CONFIG_VARIABLES, 'VITE_WORKFORCE_API_URL']))
+    expect(names).toEqual(new Set([...CONFIG_VARIABLES, 'VITE_WORKFORCE_API_URL', 'VO_PASSWORD', 'PUBLIC_HOST', 'PUBLIC_PORT', 'VO_ALLOW_PUBLIC_CLAUDE']))
   })
 })
 

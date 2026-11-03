@@ -87,7 +87,7 @@ describe('PermissionsBody', () => {
   })
 
   it('lists a task that is waiting for a decision, on the global tab and on its agent tab', () => {
-    const waiting = { ...demo, tasks: [{ ...(demo.tasks[0] ?? ({} as never)), id: 'tk', agentId: agent.id, status: 'waiting_for_approval' as const, pendingApproval: { id: 'ap', tool: 'Write', summary: 'Write src/a.ts', requestedAt: NOW, digest: null, review: null } }] }
+    const waiting = { ...demo, tasks: [{ ...(demo.tasks[0] ?? ({} as never)), id: 'tk', agentId: agent.id, status: 'waiting_for_approval' as const, pendingApproval: { id: 'ap', tool: 'Write', summary: 'Write src/a.ts', requestedAt: NOW, digest: null, review: null, onceOnly: false } }] }
     const p = withLists(emptyPermissions(), [], [])
     for (const tab of ['global', agent.id]) expect(body(p, tab, null, waiting)).toContain('Pending')
     expect(body(p, demo.agents[1].id, null, waiting)).not.toContain('Pending')

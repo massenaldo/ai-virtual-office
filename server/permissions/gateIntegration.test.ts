@@ -354,15 +354,32 @@ describe('concurrent requests in one task', () => {
     await expect(p2).resolves.toMatchObject({ behavior: 'allow', value: 'b' })
   })
 
-  it('allow for this task also answers a queued write to another file, with no second prompt', async () => {
+  it('allow for this task does not answer a write that was already waiting: a person is asked again', async () => {
     const { id, ctx } = await run()
     const perform1 = vi.fn(() => 'a')
     const perform2 = vi.fn(() => 'b')
     const p1 = ctx.tools.use(write('sub/a.txt'), perform1)
     const p2 = ctx.tools.use(write('sub/b.txt'), perform2)
     decide(id, 'allow_task')
-    await expect(Promise.all([p1, p2])).resolves.toMatchObject([{ behavior: 'allow', value: 'a' }, { behavior: 'allow', value: 'b' }])
+    await expect(p1).resolves.toMatchObject({ behavior: 'allow', value: 'a' })
+    await vi.waitFor(() => expect(task(id).status).toBe('waiting_for_approval'))
+    expect(perform2).not.toHaveBeenCalled()
+    decide(id, 'allow_once')
+    await expect(p2).resolves.toMatchObject({ behavior: 'allow', value: 'b' })
     expect(task(id).status).toBe('running')
+  })
+
+  it('refuses a change to a file that tools run when a standing rule replaces the once grant before use, and does not write', async () => {
+    const { id, ctx } = await run()
+    const perform = vi.fn(() => 'x')
+    const p = ctx.tools.use(write('package.json'), perform)
+    expect(task(id).pendingApproval).toMatchObject({ onceOnly: true })
+    decide(id, 'allow_once')
+    for (const rule of permissions.rules.filter((r) => r.scope === 'once')) permissions.revoke(rule.id)
+    agentAllow()
+    await expect(p).resolves.toMatchObject({ behavior: 'deny' })
+    expect(perform).not.toHaveBeenCalled()
+    expect(events.find((e) => e.action === 'permission.denied')).toMatchObject({ reason: 'exec_sensitive' })
   })
 
   it('a queued identical request cannot reuse a one-time permission, and perform runs once for the pair', async () => {

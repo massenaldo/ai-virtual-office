@@ -62,7 +62,7 @@ export async function stop(): Promise<void> {
 export const srv = (): TestServer => server!
 export const workspaceRoot = (): string => wsHandle!.root
 export const api = (method: string, path: string, body?: unknown) => server!.api(method, path, body)
-export type TaskView = { id: string; status: string; pendingApproval: { id: string; tool: string; digest: string | null; review: { kind: string; path: string; content?: string; oldString?: string; newString?: string; workspaceId: string; digest: string } | null } | null }
+export type TaskView = { id: string; status: string; pendingApproval: { id: string; tool: string; digest: string | null; onceOnly?: boolean; review: { kind: string; path: string; content?: string; oldString?: string; newString?: string; workspaceId: string; digest: string } | null } | null }
 export const tasks = async () => (await api('GET', '/api/state')).body.state.tasks as TaskView[]
 export const audit = (): AuditRecord[] => readFileSync(join(server!.dataDir, AUDIT_FILE), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
 

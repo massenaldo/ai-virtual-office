@@ -31,7 +31,7 @@ export type ToolReviewBody = { path: string; bytes: number; lines: number } & ({
 export type ToolReview = ToolReviewBody & { workspaceId: string; digest: string }
 
 /** digest: the server's SHA-256 of the exact action (task, workspace, tool, input) the approval is for; null for a simulated approval. */
-export type PendingApproval = { id: string; tool: string; summary: string; requestedAt: string; digest: string | null; review: ToolReview | null }
+export type PendingApproval = { id: string; tool: string; summary: string; requestedAt: string; digest: string | null; review: ToolReview | null; /** Write or Edit of a file that tools run on their own: the server only accepts "allow once". */ onceOnly: boolean }
 
 export type RuntimeMode = 'mock' | 'real'
 

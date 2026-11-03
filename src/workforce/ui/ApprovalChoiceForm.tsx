@@ -10,6 +10,8 @@ export type ApprovalChoiceFormProps = {
   tool: string
   /** The pending approval's action digest; null for a simulated approval. */
   digest: string | null
+  /** The server only accepts Once for this approval (a file that tools run on their own). */
+  onceOnly?: boolean
   agentName: string
   scope: Scope
   onScope(scope: Scope): void
@@ -21,8 +23,8 @@ export type ApprovalChoiceFormProps = {
 }
 
 /** The backend's way to answer an approval: how far the allow reaches, then Allow or Reject. The server checks the digest, the scope and the tool's ceiling again. */
-export default function ApprovalChoiceForm({ approvalId, tool, digest, agentName, scope, onScope, canAllow, busy, onAllow, onReject }: ApprovalChoiceFormProps) {
-  const scopes = allowedScopes(tool, digest)
+export default function ApprovalChoiceForm({ approvalId, tool, digest, onceOnly = false, agentName, scope, onScope, canAllow, busy, onAllow, onReject }: ApprovalChoiceFormProps) {
+  const scopes = allowedScopes(tool, digest, onceOnly)
   // A stale choice (from an earlier approval of a broader tool) never shows as selected.
   const chosen: Scope = scopes.includes(scope) ? scope : 'once'
   return <>
@@ -33,7 +35,7 @@ export default function ApprovalChoiceForm({ approvalId, tool, digest, agentName
         <span>{LABEL[s]}</span>
       </label>)}
     </fieldset>
-    {scopes.length === 1 && <small className="panel-hint">{digest === null ? 'A simulated request' : tool} can only be allowed once; the server refuses anything broader.</small>}
+    {scopes.length === 1 && <small className="panel-hint">{onceOnly ? 'Changes to files that tools run on their own (for example package.json, scripts, git hooks, editor and CI settings) can only be allowed once.' : digest === null ? 'A simulated request' : tool} can only be allowed once; the server refuses anything broader.</small>}
     <p className="scope-sentence" role="status">{scopeSentence(chosen, tool, agentName)}</p>
     <div className="panel-actions">
       <button type="button" className="panel-button primary" disabled={busy || !canAllow} onClick={onAllow}><Check size={13}/> Allow</button>

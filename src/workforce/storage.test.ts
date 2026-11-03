@@ -106,6 +106,16 @@ describe('loadWorkforce', () => {
 describe('parseWorkforce', () => {
   const valid = () => JSON.parse(serializeWorkforce(withRunningTask().state))
 
+  it('keeps onceOnly through a round trip and loads an approval saved without it as false', () => {
+    const { state, taskId } = withRunningTask()
+    const digest = 'cd'.repeat(32)
+    const waiting = applyRuntimeEvent(state, { type: 'approval_requested', taskId, approvalId: 'a1', tool: 'Write', summary: 's', digest, onceOnly: true }, NOW, 'mock')
+    expect(roundTrip(waiting)?.tasks[0].pendingApproval).toMatchObject({ id: 'a1', onceOnly: true })
+    const raw = JSON.parse(JSON.stringify(waiting))
+    delete raw.tasks[0].pendingApproval.onceOnly
+    expect(parseWorkforce(raw)?.tasks[0].pendingApproval).toMatchObject({ id: 'a1', onceOnly: false })
+  })
+
   it('keeps an approval digest through a round trip and loads an approval saved without one', () => {
     const { state, taskId } = withRunningTask()
     const digest = 'cd'.repeat(32)

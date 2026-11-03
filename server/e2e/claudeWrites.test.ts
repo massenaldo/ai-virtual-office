@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -341,5 +341,102 @@ describe('what is recorded, and what is not', () => {
     expect(everything).not.toContain(CANARY)
     expect(everything).not.toContain(p.digest!)
     expect(everything).not.toContain(workspaceRoot())
+  })
+})
+
+describe('files that tools run on their own are approved once, and the queue is asked again', () => {
+  const SENTENCE = 'Changes to files that tools run on their own can only be allowed once.'
+  const PATHS = ['package.json', '.husky/pre-commit', '.claude/settings.json', 'scripts/build.sh', 'bin/existing']
+
+  async function setupExec() {
+    await setup()
+    for (const d of ['scripts', 'bin', '.husky', '.claude']) mkdirSync(file(d), { recursive: true })
+    writeFileSync(file('bin/existing'), 'echo old\n')
+    chmodSync(file('bin/existing'), 0o755)
+  }
+
+  it.each(PATHS)('refuses a wider allow for %s, writes nothing, and writes it after "once"', async (path) => {
+    await setupExec()
+    const { id, call } = await session(h)
+    for (const choice of ['allow_task', 'allow_agent']) {
+      const pending = call('vo_write', { file_path: path, content: 'x\n' })
+      const p = await pendingApproval(id)
+      expect(p).toMatchObject({ onceOnly: true })
+      const r = await decide(id, p, choice)
+      expect(r.status).toBe(422)
+      expect(r.body.error).toBe(SENTENCE)
+      expect(existsSync(file(path)) && read(path) === 'x\n').toBe(false)
+      expect(await status(id)).toBe('waiting_for_approval')
+      await decide(id, p, 'reject')
+      expect((await pending).isError).toBe(true)
+      await until(async () => (await status(id)) === 'running')
+    }
+    const pending = call('vo_write', { file_path: path, content: 'x\n' })
+    expect((await decide(id, await pendingApproval(id))).status).toBe(200)
+    expect((await pending).isError).toBeUndefined()
+    expect(read(path)).toBe('x\n')
+  })
+
+  it('still asks for package.json under a global allow rule, but not for notes.txt', async () => {
+    await setupExec()
+    // In one scope an ask rule beats an allow rule, so the built-in ask for Write is revoked first.
+    expect((await api('DELETE', '/api/permissions/default-write')).status).toBe(200)
+    expect((await api('POST', '/api/permissions', { scope: 'global', effect: 'allow', tool: 'Write' })).status).toBe(201)
+    const { id, call } = await session(h)
+    expect((await call('vo_write', { file_path: 'notes.txt', content: 'free\n' })).isError).toBeUndefined()
+    expect(read('notes.txt')).toBe('free\n')
+    const pending = call('vo_write', { file_path: 'package.json', content: '{}\n' })
+    const p = await pendingApproval(id)
+    expect(p.onceOnly).toBe(true)
+    expect(existsSync(file('package.json'))).toBe(false)
+    await decide(id, p, 'reject')
+    await pending
+  })
+
+  it('asks again for package.json after "this task" was given for notes.txt', async () => {
+    await setupExec()
+    const { id, call } = await session(h)
+    const first = call('vo_write', { file_path: 'notes.txt', content: '1\n' })
+    const p1 = await pendingApproval(id)
+    expect(p1.onceOnly).toBe(false)
+    await decide(id, p1, 'allow_task')
+    await first
+    expect((await call('vo_write', { file_path: 'other.txt', content: '2\n' })).isError).toBeUndefined()
+    const pending = call('vo_write', { file_path: 'package.json', content: '{}\n' })
+    const p = await pendingApproval(id)
+    expect(p.onceOnly).toBe(true)
+    expect(existsSync(file('package.json'))).toBe(false)
+    await decide(id, p, 'reject')
+    await pending
+  })
+
+  it('asks again for a write that was already waiting when "this task" was granted', async () => {
+    await setupExec()
+    const { id, call } = await session(h)
+    const a = call('vo_write', { file_path: 'a.txt', content: 'a\n' })
+    const pa = await pendingApproval(id)
+    const b = call('vo_write', { file_path: 'b.txt', content: 'b\n' })
+    await new Promise((r) => setTimeout(r, 50))
+    await decide(id, pa, 'allow_task')
+    await a
+    const pb = await pendingApproval(id)
+    expect(pb.id).not.toBe(pa.id)
+    expect(pb.review).toMatchObject({ path: 'b.txt' })
+    expect(existsSync(file('b.txt'))).toBe(false)
+    expect((await decide(id, pb)).status).toBe(200)
+    expect((await b).isError).toBeUndefined()
+    expect(read('b.txt')).toBe('b\n')
+    // Requests made after the decision are allowed by the rule as before.
+    expect((await call('vo_write', { file_path: 'c.txt', content: 'c\n' })).isError).toBeUndefined()
+  })
+
+  it('carries onceOnly false for an ordinary file', async () => {
+    await setupExec()
+    const { id, call } = await session(h)
+    const pending = call('vo_write', { file_path: 'plain.txt', content: 'x' })
+    const p = await pendingApproval(id)
+    expect(p.onceOnly).toBe(false)
+    await decide(id, p, 'reject')
+    await pending
   })
 })

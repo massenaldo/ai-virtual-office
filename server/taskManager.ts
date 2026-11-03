@@ -13,6 +13,7 @@ import { redactSecrets } from './redact'
 import { sourceFor, type DemoProvider, type ServerRuntimeProvider, type ToolGateResult, type ToolRequest } from './runtime/types'
 import type { WorkforceStore } from './store'
 import { actionHash, createToolGate } from './toolGate'
+import { isExecSensitive } from './execSensitive'
 import { decideToolUse, sanitizeSummary, toolDeniedMessage, type DenyReason, type ToolPolicy } from './toolPolicy'
 import { resolveWorkspace, WORKSPACE_ID_RE, type ResolvedWorkspace, type WorkspaceReason } from './workspaces'
 
@@ -65,8 +66,9 @@ export const unavailableMessage = (kind: TaskRuntime, reason: string) => `The ${
 type Timer = ReturnType<typeof setTimeout>
 
 /** Everything the manager holds for one task while it is active; deleted when the task ends. */
-type Run = { abort: AbortController; taskTimer: Timer | null; approvalTimer: Timer | null; approvalId: string | null; graceTimer: Timer | null; outputBytes: number; outputClosed: boolean; launched: boolean; workspace: ResolvedWorkspace | null; toolWaiter: { approvalId: string; tool: string; digest: string; actionHash: string; resolve: (r: ToolGateResult) => void } | null; toolQueue: Array<{ request: ToolRequest; digest: string; resolve: (r: ToolGateResult) => void }> }
+type Run = { abort: AbortController; taskTimer: Timer | null; approvalTimer: Timer | null; approvalId: string | null; graceTimer: Timer | null; outputBytes: number; outputClosed: boolean; launched: boolean; workspace: ResolvedWorkspace | null; toolWaiter: { approvalId: string; tool: string; digest: string; actionHash: string; onceOnly: boolean; resolve: (r: ToolGateResult) => void } | null; toolQueue: Array<{ request: ToolRequest; digest: string; /** Rules granted while this request waited: they do not answer it, a person does. */ skipRules: ReadonlySet<string>; resolve: (r: ToolGateResult) => void }> }
 
+const ONCE_ONLY_SENTENCE = 'Changes to files that tools run on their own can only be allowed once.'
 const CANCELLED: ToolGateResult = { behavior: 'deny', outcome: 'cancelled', message: 'The task is no longer running.' }
 
 const isDemo = (p: ServerRuntimeProvider): p is DemoProvider => 'requestApproval' in p && 'forceError' in p
@@ -328,12 +330,15 @@ export class TaskManager {
     const run = this.runs.get(taskId)
     const waiter = run?.toolWaiter?.approvalId === approvalId ? run.toolWaiter : null
     if (!waiter && decision === 'approve' && scope !== 'once') return { ok: false, code: 'invalid', error: 'That approval can only be allowed once.' }
+    if (waiter?.onceOnly && decision === 'approve' && scope !== 'once') return { ok: false, code: 'invalid', error: ONCE_ONLY_SENTENCE }
     // The permission is recorded before the decision and before the runtime is answered: if it cannot be, the approval stays pending.
     let granted: { ruleId?: string } = {}
     if (waiter && decision === 'approve') {
       const g = this.permissions.grant({ scope, effect: 'allow', tool: waiter.tool, agentId: task.agentId, ...(scope === 'agent' ? {} : { taskId }), ...(scope === 'once' ? { digest: waiter.digest } : {}) })
       if (!g.ok) return g.error === 'scope_not_allowed_for_tool' ? { ok: false, code: 'invalid', error: 'That tool can only be allowed once.' } : { ok: false, code: 'unavailable', error: 'The permission could not be recorded.' }
       granted = { ruleId: g.rule.id }
+      // Requests already waiting were not part of this question: the new rule must not answer them.
+      if (scope !== 'once' && run) for (const q of run.toolQueue) q.skipRules = new Set([...q.skipRules, g.rule.id])
     }
     this.store.commit(recordDecision(this.state, taskId, approvalId, decision, this.now(), this.source))
     if (run) this.clearApproval(run)
@@ -380,7 +385,7 @@ export class TaskManager {
       const task = this.task(taskId)
       if (!task || task.status !== 'running') return
       const next = run.toolQueue.shift()!
-      void this.approveTool(taskId, next.request, next.digest).then(next.resolve)
+      void this.approveTool(taskId, next.request, next.digest, next.skipRules).then(next.resolve)
     }
   }
 
@@ -397,7 +402,7 @@ export class TaskManager {
    * ceiling; then the permission rules say allow, ask or deny. An `ask` becomes the existing waiting_for_approval state,
    * approval timer and approval endpoint. Every state change happens before this returns.
    */
-  private approveTool(taskId: string, request: ToolRequest, digest: string): Promise<ToolGateResult> {
+  private approveTool(taskId: string, request: ToolRequest, digest: string, skipRules: ReadonlySet<string> = new Set()): Promise<ToolGateResult> {
     const run = this.runs.get(taskId)
     const task = this.task(taskId)
     if (!run || !task || (task.status !== 'running' && task.status !== 'waiting_for_approval')) return Promise.resolve(CANCELLED)
@@ -411,7 +416,12 @@ export class TaskManager {
     }
     if (d.decision === 'deny') return refuse(d.reason)
 
-    const p = this.permissions.evaluate({ agentId: task.agentId, taskId, tool, digest, paths: d.paths?.map((x) => x.relative) ?? [] })
+    const evaluated = this.permissions.evaluate({ agentId: task.agentId, taskId, tool, digest, paths: d.paths?.map((x) => x.relative) ?? [] })
+    const onceOnly = this.isOnceOnly(tool, d.paths, run.workspace)
+    // A standing rule never answers a change to a file that tools run, nor a request that was already waiting when the rule was granted.
+    const p = evaluated.effect === 'allow' && evaluated.source !== 'once' && (onceOnly || (evaluated.ruleId !== null && skipRules.has(evaluated.ruleId)))
+      ? { ...evaluated, effect: 'ask' as const }
+      : evaluated
     const ruleId = p.ruleId === null ? {} : { ruleId: p.ruleId }
     if (p.effect === 'deny') {
       this.report('permission.denied', task, { actor: 'runtime', tool, decision: 'deny', reason: p.source, ...ruleId, ...ids })
@@ -424,15 +434,25 @@ export class TaskManager {
     if (task.status === 'waiting_for_approval' || run.toolWaiter) {
       // One person decision at a time per task; the others wait their turn, up to a limit.
       if (run.toolQueue.length >= MAX_QUEUED_APPROVALS) return refuse('approval_pending')
-      return new Promise<ToolGateResult>((resolve) => { run.toolQueue.push({ request, digest, resolve }) })
+      return new Promise<ToolGateResult>((resolve) => { run.toolQueue.push({ request, digest, skipRules, resolve }) })
     }
 
     this.report('tool.asked', task, { actor: 'runtime', tool, decision: 'ask', reason: 'needs_approval', detail: d.summary, ...ids })
     const approvalId = createId('approval')
-    const promise = new Promise<ToolGateResult>((resolve) => { run.toolWaiter = { approvalId, tool, digest, actionHash: ids.actionHash, resolve } })
-    this.onEvent({ type: 'approval_requested', taskId, approvalId, tool, summary: d.summary, digest, ...(d.decision === 'ask' && d.review && run.workspace ? { review: { ...d.review, workspaceId: run.workspace.id, digest } } : {}) })
+    const promise = new Promise<ToolGateResult>((resolve) => { run.toolWaiter = { approvalId, tool, digest, actionHash: ids.actionHash, onceOnly, resolve } })
+    this.onEvent({ type: 'approval_requested', taskId, approvalId, tool, summary: d.summary, digest, onceOnly, ...(d.decision === 'ask' && d.review && run.workspace ? { review: { ...d.review, workspaceId: run.workspace.id, digest } } : {}) })
     this.report('approval.requested', task, { actor: 'runtime', tool, detail: `approvalId=${approvalId}`, ...ids })
     return promise
+  }
+
+  /** Write and Edit of a file that tools run on their own. Fail closed: no checked path, or any error, counts as sensitive. */
+  private isOnceOnly(tool: string, paths: ReadonlyArray<{ readonly relative: string }> | undefined, workspace: ResolvedWorkspace | null): boolean {
+    if (tool !== 'Write' && tool !== 'Edit') return false
+    try {
+      return !workspace || !paths || paths.length === 0 || paths.some((x) => isExecSensitive(x.relative, workspace.path))
+    } catch {
+      return true
+    }
   }
 
   /** A call's own signal: it aborts with the task's, or when the rule that allowed it is revoked (task and once rules only). */
@@ -486,6 +506,10 @@ export class TaskManager {
     const ruleId = p.ruleId === null ? {} : { ruleId: p.ruleId }
     if (p.effect !== 'allow') {
       this.report('permission.denied', task, { actor: 'runtime', tool, decision: 'deny', reason: 'revoked_or_changed', ...ruleId, ...ids })
+      return { ok: false }
+    }
+    if (p.source !== 'once' && this.isOnceOnly(tool, paths, this.runs.get(taskId)?.workspace ?? null)) {
+      this.report('permission.denied', task, { actor: 'runtime', tool, decision: 'deny', reason: 'exec_sensitive', ...ruleId, ...ids })
       return { ok: false }
     }
     if (p.source === 'once' && !(p.ruleId !== null && this.permissions.consumeOnce(p.ruleId))) {

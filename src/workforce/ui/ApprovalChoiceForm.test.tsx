@@ -23,6 +23,13 @@ describe('ApprovalChoiceForm', () => {
     expect(h).toContain('can only be allowed once')
   })
 
+  it('offers Once only for a file that tools run on their own, with the reason', () => {
+    const h = html({ onceOnly: true, scope: 'task' })
+    expect(h.match(/type="radio"/g)).toHaveLength(1)
+    expect(checkedValues(h)).toEqual(['once'])
+    expect(h).toContain('Changes to files that tools run on their own (for example package.json, scripts, git hooks, editor and CI settings) can only be allowed once.')
+  })
+
   it('offers Once only for a simulated approval (no digest), whatever the tool', () => {
     const h = html({ digest: null })
     expect(h.match(/type="radio"/g)).toHaveLength(1)

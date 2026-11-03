@@ -183,7 +183,7 @@ export const approveEnabled = (review: unknown, opened: boolean): boolean => rev
  * The scopes a person may give an allow for an approval. Execute and network tools are Once only, and so is an approval without a
  * digest (a simulated one: there is no exact action to grant from); the server refuses anything broader in both cases.
  */
-export const allowedScopes = (tool: string, digest: string | null): Array<'once' | 'task' | 'agent'> => digest === null || ['Bash', 'WebFetch', 'WebSearch'].includes(tool) ? ['once'] : ['once', 'task', 'agent']
+export const allowedScopes = (tool: string, digest: string | null, onceOnly = false): Array<'once' | 'task' | 'agent'> => onceOnly || digest === null || ['Bash', 'WebFetch', 'WebSearch'].includes(tool) ? ['once'] : ['once', 'task', 'agent']
 
 export type PermissionIcon = 'allowed' | 'denied' | 'ask' | 'expired' | 'revoked' | 'used' | 'ended'
 /** The word and icon shown for a rule; colour only adds to them. */
@@ -224,8 +224,8 @@ export const choiceFor = (scope: 'once' | 'task' | 'agent'): 'allow_once' | 'all
 /** What an allow of this scope grants, in the server's terms. The tool and agent come from the pending approval, never from the person's typing. */
 export function scopeSentence(scope: 'once' | 'task' | 'agent', tool: string, agentName: string): string {
   if (scope === 'once') return `Allow ${tool} once, for exactly this action.`
-  const checked = 'Each call is still checked and recorded.'
-  return scope === 'task' ? `Allow ${tool} for the rest of this task. ${checked}` : `Allow ${tool} for ${agentName} on every task until you revoke it. ${checked}`
+  const unseen = 'Later changes under it are not shown to you again.'
+  return scope === 'task' ? `Allow ${tool} for the rest of this task. ${unseen}` : `Allow ${tool} for ${agentName} on every task until you revoke it. ${unseen}`
 }
 
 /** The chip in an agent's header: null in browser mode and before the first load, otherwise the pending state or the rule count. */

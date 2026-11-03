@@ -186,3 +186,8 @@ textarea.field-input{resize:vertical;min-height:54px;font-family:inherit}
 .permission-facts div{display:flex;gap:6px;font-size:10px;line-height:1.4}
 .permission-facts dt{color:#8e9bad;min-width:48px}
 .permission-facts dd{margin:0;color:#c3ccd9;overflow-wrap:anywhere}
+.scope-choice{border:0;margin:6px 0 4px;padding:0;display:flex;flex-wrap:wrap;gap:4px 12px}
+.scope-choice legend{color:#e5cfa7;font-size:9px;letter-spacing:.04em;margin-bottom:4px;padding:0}
+.scope-option{display:flex;align-items:center;gap:5px;color:#f1d6a6;font-size:10px}
+.scope-option input:focus-visible,.panel-button:focus-visible{outline:2px solid #a89af5;outline-offset:2px}
+.scope-sentence{margin:4px 0 8px}

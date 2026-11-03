@@ -5,7 +5,7 @@ import type { OfficeLayout } from '../layout/types'
 import { createDemoWorkforce } from './demo'
 import type { PermissionRuleView } from './api'
 import { addActivity, assignTask, cancelTask } from './operations'
-import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskClickTarget, deskMarkers, shortDigest, environmentBadge, environmentNote, connectionLabel, agentStatusText, workforceNotice, TASK_RUNTIME_LABEL, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, allowedScopes, permissionStateText, rulesForTab, revokePrompt, revokeAgentPrompt, waitingApprovals, removalPrompt, TASK_STATUS_LABEL } from './view'
+import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskClickTarget, deskMarkers, shortDigest, environmentBadge, environmentNote, connectionLabel, agentStatusText, workforceNotice, TASK_RUNTIME_LABEL, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, allowedScopes, permissionStateText, rulesForTab, scopeSentence, choiceFor, agentPermissionChip, revokePrompt, revokeAgentPrompt, waitingApprovals, removalPrompt, TASK_STATUS_LABEL } from './view'
 
 const NOW = '2026-10-30T09:00:00.000Z'
 const layout = createDefaultLayout()
@@ -282,4 +282,38 @@ describe('waitingApprovals', () => {
     expect(waitingApprovals({ ...s, tasks: [waiting] })).toEqual([{ agentId: agent.id, agentName: agent.name, taskId: 'tk-w', tool: 'Write', summary: 'Write src/a.ts' }])
     expect(waitingApprovals({ ...s, tasks: [{ ...waiting, status: 'running', pendingApproval: null }] })).toEqual([])
   })
+})
+
+describe('scopeSentence', () => {
+  it('says exactly what each scope grants', () => {
+    expect(scopeSentence('once', 'Write', 'Nova')).toBe('Allow Write once, for exactly this action.')
+    expect(scopeSentence('task', 'Write', 'Nova')).toBe('Allow Write for the rest of this task. Each call is still checked and recorded.')
+    expect(scopeSentence('agent', 'Write', 'Nova')).toBe('Allow Write for Nova on every task until you revoke it. Each call is still checked and recorded.')
+  })
+})
+
+describe('choiceFor', () => {
+  it('maps a scope to the value the server takes', () => {
+    expect(choiceFor('once')).toBe('allow_once')
+    expect(choiceFor('task')).toBe('allow_task')
+    expect(choiceFor('agent')).toBe('allow_agent')
+  })
+})
+
+describe('agentPermissionChip', () => {
+  const perms = (rules: PermissionRuleView[]) => ({ active: rules, history: [], loaded: true, error: null })
+  const waitingState = (agentId: string) => ({ ...demo, tasks: [{ ...demo.tasks[0], id: 'tk', agentId, status: 'waiting_for_approval' as const, pendingApproval: { id: 'ap', tool: 'Write', summary: 's', requestedAt: NOW, digest: null, review: null } }] })
+  it('is absent without a backend', () => expect(agentPermissionChip(null, demo, 'a')).toBeNull())
+  it('counts the active rules that name the agent', () => {
+    const rules = [prule({ id: '1', scope: 'agent', agentId: 'a' }), prule({ id: '2', scope: 'task', agentId: 'a', taskId: 't' }), prule({ id: '3', scope: 'agent', agentId: 'b' }), prule({ id: '4' })]
+    expect(agentPermissionChip(perms(rules), demo, 'a')).toBe('2 permission rules')
+    expect(agentPermissionChip(perms(rules.slice(0, 1)), demo, 'a')).toBe('1 permission rule')
+    expect(agentPermissionChip(perms([]), demo, 'a')).toBe('No permission rules')
+  })
+  it('says an approval is required while the agent waits for one', () => {
+    const [one, two] = demo.agents
+    expect(agentPermissionChip(perms([]), waitingState(one.id), one.id)).toBe('Approval required')
+    expect(agentPermissionChip(perms([]), waitingState(one.id), two.id)).toBe('No permission rules')
+  })
+  it('says nothing before the first load', () => expect(agentPermissionChip({ active: [], history: [], loaded: false, error: null }, demo, 'a')).toBeNull())
 })

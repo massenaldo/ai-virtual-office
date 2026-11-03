@@ -35,7 +35,7 @@ export default function ApprovalChoiceForm({ approvalId, tool, digest, onceOnly 
         <span>{LABEL[s]}</span>
       </label>)}
     </fieldset>
-    {scopes.length === 1 && <small className="panel-hint">{onceOnly ? 'Changes to files that tools run on their own (for example package.json, scripts, git hooks, editor and CI settings) can only be allowed once.' : digest === null ? 'A simulated request' : tool} can only be allowed once; the server refuses anything broader.</small>}
+    {scopes.length === 1 && <small className="panel-hint">{onceOnly ? 'Changes to files that tools run on their own (for example package.json, scripts, git hooks, editor and CI settings) can only be allowed once.' : `${digest === null ? 'A simulated request' : tool} can only be allowed once; the server refuses anything broader.`}</small>}
     <p className="scope-sentence" role="status">{scopeSentence(chosen, tool, agentName)}</p>
     <div className="panel-actions">
       <button type="button" className="panel-button primary" disabled={busy || !canAllow} onClick={onAllow}><Check size={13}/> Allow</button>

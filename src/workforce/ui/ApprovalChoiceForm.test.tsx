@@ -27,7 +27,8 @@ describe('ApprovalChoiceForm', () => {
     const h = html({ onceOnly: true, scope: 'task' })
     expect(h.match(/type="radio"/g)).toHaveLength(1)
     expect(checkedValues(h)).toEqual(['once'])
-    expect(h).toContain('Changes to files that tools run on their own (for example package.json, scripts, git hooks, editor and CI settings) can only be allowed once.')
+    expect(h).toContain('<small class="panel-hint">Changes to files that tools run on their own (for example package.json, scripts, git hooks, editor and CI settings) can only be allowed once.</small>')
+    expect(h).not.toContain('once. can only')
   })
 
   it('offers Once only for a simulated approval (no digest), whatever the tool', () => {

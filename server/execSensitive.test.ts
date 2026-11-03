@@ -12,7 +12,7 @@ const NAMES = [
   'package.json', 'package-lock.json', 'npm-shrinkwrap.json', '.npmrc', '.yarnrc', '.yarnrc.yml', '.pnpmfile.cjs', 'pnpm-workspace.yaml', 'Makefile', 'GNUmakefile', 'rules.mk',
   'justfile', 'Taskfile.yml', 'Taskfile.yaml', 'Dockerfile', 'docker-compose.yml', 'docker-compose.dev.yaml', 'conftest.py', 'setup.py', 'setup.cfg', 'pyproject.toml',
   'tox.ini', 'noxfile.py', 'build.gradle', 'build.gradle.kts', 'pom.xml', 'Cargo.toml', 'build.rs', 'go.mod', 'a.sh', 'a.bash', 'a.zsh', 'a.ps1', 'a.bat', 'a.cmd',
-  '.gitlab-ci.yml', '.mcp.json', 'CLAUDE.md', 'AGENTS.md',
+  '.gitlab-ci.yml', '.mcp.json', '.pre-commit-config.yaml', '.envrc', '.gitattributes', 'vite.config.ts', 'vitest.config.mts', 'eslint.config.js', 'jest.config.cjs', 'webpack.config.mjs', 'x.config.cts', 'CLAUDE.md', 'AGENTS.md',
 ]
 const DIRS = ['.husky', '.githooks', '.claude', '.vscode', '.idea', '.github', '.gitlab', '.circleci', '.devcontainer']
 
@@ -34,7 +34,7 @@ describe('isExecSensitive', () => {
   it('ordinary files are not', () => {
     writeFileSync(join(ws, 'notes.txt'), 'x')
     chmodSync(join(ws, 'notes.txt'), 0o644)
-    for (const p of ['notes.txt', 'docs/plan.md', 'src/index.ts', 'new/file.txt', 'package.jsonx', 'shell.txt']) expect(isExecSensitive(p, ws)).toBe(false)
+    for (const p of ['notes.txt', 'docs/plan.md', 'src/index.ts', 'new/file.txt', 'package.jsonx', '.editorconfig', 'config.txt', 'shell.txt']) expect(isExecSensitive(p, ws)).toBe(false)
   })
   it('an existing file with an execute bit is sensitive whatever its name', () => {
     writeFileSync(join(ws, 'run'), '#!/bin/sh\n')

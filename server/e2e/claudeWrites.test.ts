@@ -410,24 +410,52 @@ describe('files that tools run on their own are approved once, and the queue is 
     await pending
   })
 
-  it('asks again for a write that was already waiting when "this task" was granted', async () => {
+  // The queue has no outside signal, so let the in-memory transport and the gate's async steps run to rest before deciding (event-loop turns, not wall-clock time).
+  const flush = async () => { for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r)) }
+
+  it('asks again for each write that was already waiting when "this task" was granted', async () => {
     await setupExec()
     const { id, call } = await session(h)
     const a = call('vo_write', { file_path: 'a.txt', content: 'a\n' })
     const pa = await pendingApproval(id)
     const b = call('vo_write', { file_path: 'b.txt', content: 'b\n' })
-    await new Promise((r) => setTimeout(r, 50))
+    const c = call('vo_write', { file_path: 'c.txt', content: 'c\n' })
+    await flush()
     await decide(id, pa, 'allow_task')
-    await a
+    expect((await a).isError).toBeUndefined()
+    expect(read('a.txt')).toBe('a\n')
     const pb = await pendingApproval(id)
     expect(pb.id).not.toBe(pa.id)
     expect(pb.review).toMatchObject({ path: 'b.txt' })
+    expect(existsSync(file('b.txt')) || existsSync(file('c.txt'))).toBe(false)
+    await decide(id, pb, 'reject')
+    expect((await b).isError).toBe(true)
+    await until(async () => (await tasks()).find((t) => t.id === id)?.pendingApproval?.review?.path === 'c.txt')
+    const pc = await pendingApproval(id)
+    expect(existsSync(file('c.txt'))).toBe(false)
+    expect((await decide(id, pc)).status).toBe(200)
+    expect((await c).isError).toBeUndefined()
+    expect(read('c.txt')).toBe('c\n')
     expect(existsSync(file('b.txt'))).toBe(false)
-    expect((await decide(id, pb)).status).toBe(200)
-    expect((await b).isError).toBeUndefined()
-    expect(read('b.txt')).toBe('b\n')
-    // Requests made after the decision are allowed by the rule as before.
-    expect((await call('vo_write', { file_path: 'c.txt', content: 'c\n' })).isError).toBeUndefined()
+    // Requests made after the decisions are allowed by the rule as before.
+    expect((await call('vo_write', { file_path: 'd.txt', content: 'd\n' })).isError).toBeUndefined()
+    expect(read('d.txt')).toBe('d\n')
+  })
+
+  it.each([['allow_task'], ['allow_agent']])('refuses %s for a vo_edit of package.json and leaves it unchanged; allow_once edits it', async (choice) => {
+    await setupExec()
+    writeFileSync(file('package.json'), '{"name":"a"}\n')
+    const { id, call } = await session(h)
+    const pending = call('vo_edit', { file_path: 'package.json', old_string: '"a"', new_string: '"b"' })
+    const p = await pendingApproval(id)
+    expect(p.onceOnly).toBe(true)
+    const r = await decide(id, p, choice)
+    expect(r.status).toBe(422)
+    expect(r.body.error).toBe(SENTENCE)
+    expect(read('package.json')).toBe('{"name":"a"}\n')
+    expect((await decide(id, p)).status).toBe(200)
+    expect((await pending).isError).toBeUndefined()
+    expect(read('package.json')).toBe('{"name":"b"}\n')
   })
 
   it('carries onceOnly false for an ordinary file', async () => {

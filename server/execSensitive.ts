@@ -9,9 +9,9 @@ const NAMES: ReadonlySet<string> = new Set([
   'package.json', 'package-lock.json', 'npm-shrinkwrap.json', '.npmrc', '.yarnrc', '.yarnrc.yml', '.pnpmfile.cjs', 'pnpm-workspace.yaml',
   'makefile', 'gnumakefile', 'justfile', 'taskfile.yml', 'taskfile.yaml', 'dockerfile', 'conftest.py', 'setup.py', 'setup.cfg', 'pyproject.toml',
   'tox.ini', 'noxfile.py', 'build.gradle', 'build.gradle.kts', 'pom.xml', 'cargo.toml', 'build.rs', 'go.mod',
-  '.gitlab-ci.yml', '.mcp.json', 'claude.md', 'agents.md',
+  '.gitlab-ci.yml', '.mcp.json', '.pre-commit-config.yaml', '.envrc', '.gitattributes', 'claude.md', 'agents.md',
 ])
-const EXTENSIONS: readonly string[] = ['.mk', '.sh', '.bash', '.zsh', '.ps1', '.bat', '.cmd']
+const EXTENSIONS: readonly string[] = ['.config.js', '.config.ts', '.config.mjs', '.config.cjs', '.config.mts', '.config.cts', '.mk', '.sh', '.bash', '.zsh', '.ps1', '.bat', '.cmd']
 const DIRECTORIES: ReadonlySet<string> = new Set(['.husky', '.githooks', '.claude', '.vscode', '.idea', '.github', '.gitlab', '.circleci', '.devcontainer'])
 
 function sensitiveName(segment: string): boolean {

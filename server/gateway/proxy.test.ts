@@ -170,6 +170,59 @@ describe('proxy against a stub upstream', () => {
     await new Promise<void>((resolve) => stub.listen(0, '127.0.0.1', resolve))
   })
 
+  it.each([['non-latin1 characters', 'tok€ñ'], ['a control character', 'tok\u0001en'], ['a newline', 'tok\nen']])('answers 503 and keeps running when the token has %s', async (_name, bad) => {
+    token = bad
+    const r = await viaGateway('/api/state')
+    expect(r.status).toBe(503)
+    expect(JSON.parse(r.body)).toEqual({ error: 'The backend token is not available. Is the backend running?' })
+    expect(seen).toEqual([])
+    token = STUB_TOKEN
+    expect((await viaGateway('/api/state')).status).toBe(200)
+  })
+
+  it('answers a fixed 502 and keeps running when node rejects the request path', async () => {
+    // Node's own server already refuses such a path (400) before the proxy sees it; the proxy's try/catch covers any that slip through.
+    const r = await viaGateway('/api/caf\u00e9')
+    expect([400, 404, 502]).toContain(r.status)
+    expect((await viaGateway('/api/state')).status).toBe(200)
+  })
+
+  it('maps a backend 401 to the 503 sentence and drops its cookies, challenge and CORS headers', async () => {
+    stub.removeAllListeners('request')
+    stub.on('request', (_req, res) => {
+      res.writeHead(401, { 'www-authenticate': 'Bearer realm="x"', 'set-cookie': 'sid=1', 'access-control-allow-origin': '*', 'content-type': 'application/json' })
+      res.end('{"error":"Unauthorized"}')
+    })
+    const r = await viaGateway('/api/state')
+    expect(r.status).toBe(503)
+    expect(JSON.parse(r.body)).toEqual({ error: 'The backend token is not available. Is the backend running?' })
+    expect(r.headers['www-authenticate']).toBeUndefined()
+    stub.removeAllListeners('request')
+    stub.on('request', (_req, res) => {
+      res.writeHead(200, { 'set-cookie': 'sid=1', 'access-control-allow-origin': '*', 'content-type': 'application/json' })
+      res.end('{}')
+    })
+    const ok = await viaGateway('/api/state')
+    expect(ok.status).toBe(200)
+    expect(ok.headers['set-cookie']).toBeUndefined()
+    expect(ok.headers['access-control-allow-origin']).toBeUndefined()
+  })
+
+  it('does not log a warning when the client leaves before the backend answers', async () => {
+    stub.removeAllListeners('request')
+    let reached!: () => void
+    const arrived = new Promise<void>((r) => { reached = r })
+    stub.on('request', (req) => { reached(); req.socket.on('close', () => {}) })
+    const before = log.lines.length
+    const req = request({ hostname: '127.0.0.1', port: new URL(gw.url).port, path: '/api/state', headers: { authorization: BASIC, ...SAME } })
+    req.on('error', () => {})
+    req.end()
+    await arrived
+    req.destroy()
+    await new Promise((r) => setTimeout(r, 100))
+    expect(log.lines.slice(before)).toEqual([])
+  })
+
   it('still serves the app and keeps no-store on /api answers', async () => {
     expect((await call(gw.url, { path: '/', headers: { authorization: BASIC } })).body).toBe('<html>app</html>')
     expect((await viaGateway('/api/state')).headers['cache-control']).toBe('no-store')

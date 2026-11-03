@@ -23,7 +23,11 @@ describe('parseApproval', () => {
 
 describe('parseCreatePermission', () => {
   it('fills the optional fields with null', () => {
-    expect(parseCreatePermission({ scope: 'global', effect: 'deny', tool: 'Read' })).toEqual({ scope: 'global', effect: 'deny', tool: 'Read', agentId: null, pathPattern: null, expiresAt: null, reason: null })
+    expect(parseCreatePermission({ scope: 'global', effect: 'deny', tool: 'Read' })).toEqual({ scope: 'global', effect: 'deny', tool: 'Read', agentId: null, pathPattern: null, workspaceId: null, expiresAt: null, reason: null })
+  })
+  it('keeps a workspaceId and refuses a non-string one', () => {
+    expect(parseCreatePermission({ scope: 'agent', effect: 'allow', tool: 'Write', agentId: 'a', workspaceId: 'sandbox' })).toMatchObject({ workspaceId: 'sandbox' })
+    expect(() => parseCreatePermission({ scope: 'global', effect: 'allow', tool: 'Read', workspaceId: 5 })).toThrow('"workspaceId" must be a string or null.')
   })
   it('keeps what was sent', () => {
     expect(parseCreatePermission({ scope: 'agent', effect: 'allow', tool: 'Write', agentId: 'a', pathPattern: 'src/**', expiresAt: '2030-01-01T00:00:00.000Z', reason: 'ok' })).toMatchObject({ agentId: 'a', pathPattern: 'src/**', reason: 'ok' })

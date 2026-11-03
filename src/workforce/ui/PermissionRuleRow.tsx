@@ -21,12 +21,13 @@ export default function PermissionRuleRow({ rule, agentName, onRevoke }: { rule:
     </div>
     <dl className="permission-facts">
       <div><dt>Covers</dt><dd>{PERMISSION_SCOPE_LABEL[rule.scope]}{agentName && rule.scope !== 'global' ? ` · ${agentName}` : ''}</dd></div>
+      {rule.workspaceId && <div><dt>Workspace</dt><dd>{rule.workspaceId}</dd></div>}
       {rule.pathPattern && <div><dt>Paths</dt><dd>{rule.pathPattern}</dd></div>}
       <div><dt>Created</dt><dd>{when(rule.createdAt)} · {rule.createdBy === 'default' ? 'built-in default' : rule.createdBy === 'user' ? 'by you' : 'by the system'}</dd></div>
       {rule.expiresAt && <div><dt>Expires</dt><dd>{when(rule.expiresAt)}</dd></div>}
       {ended && rule.state !== 'active' && <div><dt>Ended</dt><dd>{when(ended)}</dd></div>}
       {rule.reason && <div><dt>Reason</dt><dd>{rule.reason}</dd></div>}
     </dl>
-    {onRevoke && <button type="button" className="panel-button danger" onClick={onRevoke} aria-label={`Revoke ${rule.tool} ${PERMISSION_SCOPE_LABEL[rule.scope].toLowerCase()}${rule.pathPattern ? ` on ${rule.pathPattern}` : ''}`}><Ban size={13}/> Revoke</button>}
+    {onRevoke && <button type="button" className="panel-button danger" onClick={onRevoke} aria-label={`Revoke ${rule.tool} ${PERMISSION_SCOPE_LABEL[rule.scope].toLowerCase()}${rule.pathPattern ? ` on ${rule.pathPattern}` : ''}${rule.workspaceId ? ` in workspace ${rule.workspaceId}` : ''}`}><Ban size={13}/> Revoke</button>}
   </li>
 }

@@ -33,7 +33,7 @@ function build(allowed: readonly string[] = DEFAULT_ALLOWED_TOOLS, limits?: { ma
   permissions = openPermissionStore({ dataDir: dir, now, log: silentLogger, writeFile: () => {}, limits })
   manager = new TaskManager({
     store, provider: fake, permissions, policy: { allowedTools: new Set(allowed), protectedRoots: [] },
-    config: { ...CONFIG, workspaceRoot: ws.root, workspaces: [{ id: 'sandbox', relativePath: 'sandbox' }] },
+    config: { ...CONFIG, workspaceRoot: ws.root, workspaces: [{ id: 'sandbox', relativePath: 'sandbox' }, { id: 'docs', relativePath: 'docs' }] },
     now, log: silentLogger, onLifecycle: (e) => events.push(e),
   })
 }
@@ -42,7 +42,7 @@ beforeEach(() => {
   vi.useFakeTimers()
   clock = Date.parse(NOW)
   dir = mkdtempSync(join(tmpdir(), 'vo-perm-gate-'))
-  ws = makeWorkspaceRoot(['sandbox'])
+  ws = makeWorkspaceRoot(['sandbox', 'docs'])
   mkdirSync(join(ws.path('sandbox'), 'sub'))
   mkdirSync(join(ws.path('sandbox'), 'secrets'))
   writeFileSync(join(ws.path('sandbox'), 'sub', 'notes.md'), 'hi')
@@ -249,6 +249,28 @@ describe('scoped approval decisions', () => {
     const next = await run(FORGE, 1)
     await expect(next.ctx.tools.use(write(), vi.fn(() => 'ok'))).resolves.toMatchObject({ behavior: 'allow', value: 'ok' })
     expect(task(next.id).status).toBe('running')
+  })
+
+  it('allow_agent is bound to the workspace it was made in: another workspace asks, the same one does not', async () => {
+    fake.confirmCancel = true
+    const { id, ctx } = await run()
+    const p1 = ctx.tools.use(write(), vi.fn())
+    expect(decide(id, 'allow_agent').ok).toBe(true)
+    await p1
+    expect(userRules().map((r) => [r.scope, r.workspaceId])).toEqual([['agent', 'sandbox']])
+    manager.cancelTask(id)
+    const other = manager.startTask(FORGE, { title: 'T', description: '' }, { workspaceId: 'docs' })
+    if (!other.ok) throw new Error(other.error)
+    await tick()
+    fake.emit({ type: 'started', taskId: other.task.id, executionId: 'e1' })
+    const perform = vi.fn(() => 'no')
+    void fake.starts[1].ctx.tools.use(write(), perform)
+    expect(task(other.task.id).status).toBe('waiting_for_approval')
+    expect(perform).not.toHaveBeenCalled()
+    manager.cancelTask(other.task.id)
+    const again = await run(FORGE, 2)
+    await expect(again.ctx.tools.use(write(), vi.fn(() => 'ok'))).resolves.toMatchObject({ behavior: 'allow', value: 'ok' })
+    expect(task(again.id).status).toBe('running')
   })
 
   it('reject denies, creates no rule and records a deny', async () => {

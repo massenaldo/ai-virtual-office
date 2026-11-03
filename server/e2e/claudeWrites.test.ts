@@ -468,3 +468,63 @@ describe('files that tools run on their own are approved once, and the queue is 
     await pending
   })
 })
+
+describe('permissions made from an approval belong to one workspace', () => {
+  const inDocs = (rel: string) => join(workspaceRoot(), 'docs', rel)
+  // An agent has one task at a time, so each is ended before the next starts.
+  const cancel = async (id: string) => { expect((await api('POST', `/api/tasks/${id}/cancel`)).status).toBe(202); await until(async () => (await status(id)) === 'cancelled') }
+
+  it('after "allow for this agent" in sandbox, a write in docs asks, and a write in sandbox still runs freely', async () => {
+    h = await start({}, undefined, ['docs'])
+    const a = await session(h, 'agent-demo-backend', 0, 'sandbox')
+    const first = a.call('vo_write', { file_path: 'one.txt', content: '1\n' })
+    await decide(a.id, await pendingApproval(a.id), 'allow_agent')
+    expect((await first).isError).toBeUndefined()
+    expect((await a.call('vo_write', { file_path: 'two.txt', content: '2\n' })).isError).toBeUndefined()
+    const rule = (await api('GET', '/api/permissions')).body.rules.find((r: { scope: string }) => r.scope === 'agent')
+    expect(rule).toMatchObject({ tool: 'Write', workspaceId: 'sandbox' })
+    await cancel(a.id)
+
+    const b = await session(h, 'agent-demo-backend', 1, 'docs')
+    const other = b.call('vo_write', { file_path: 'other.txt', content: 'x\n' })
+    const p = await pendingApproval(b.id)
+    expect(p.tool).toBe('Write')
+    expect(existsSync(inDocs('other.txt'))).toBe(false)
+    await decide(b.id, p, 'reject')
+    expect((await other).isError).toBe(true)
+    expect(existsSync(inDocs('other.txt'))).toBe(false)
+  })
+
+  it('refuses a rule created through the API for an unknown workspace, with a fixed sentence', async () => {
+    h = await start({}, undefined, ['docs'])
+    const bad = await api('POST', '/api/permissions', { scope: 'agent', effect: 'allow', tool: 'Write', agentId: 'agent-demo-backend', workspaceId: 'ghost' })
+    expect(bad.status).toBe(422)
+    expect(bad.body.error).toBe('Unknown workspace.')
+    expect(JSON.stringify(bad.body)).not.toContain(workspaceRoot())
+    expect((await api('GET', '/api/permissions')).body.rules.some((r: { workspaceId?: string }) => r.workspaceId === 'ghost')).toBe(false)
+  })
+
+  it('accepts a rule for a registered workspace, shows it, and applies it there only', async () => {
+    h = await start({}, undefined, ['docs'])
+    const ok = await api('POST', '/api/permissions', { scope: 'agent', effect: 'allow', tool: 'Write', agentId: 'agent-demo-backend', workspaceId: 'sandbox' })
+    expect(ok.status).toBe(201)
+    expect(ok.body.rule).toMatchObject({ workspaceId: 'sandbox', scope: 'agent' })
+    expect((await api('GET', '/api/permissions')).body.rules.find((r: { id: string }) => r.id === ok.body.rule.id)).toMatchObject({ workspaceId: 'sandbox' })
+    // The built-in ask rule for Write is global; an agent rule beats it in its own workspace only.
+    const a = await session(h, 'agent-demo-backend', 0, 'sandbox')
+    expect((await a.call('vo_write', { file_path: 'free.txt', content: 'ok\n' })).isError).toBeUndefined()
+    expect(read('free.txt')).toBe('ok\n')
+    await cancel(a.id)
+    const b = await session(h, 'agent-demo-pm', 1, 'docs')
+    const pm = b.call('vo_write', { file_path: 'pm.txt', content: 'x\n' })
+    await decide(b.id, await pendingApproval(b.id), 'reject')
+    await pm
+    await cancel(b.id)
+    const c = await session(h, 'agent-demo-backend', 2, 'docs')
+    const docs = c.call('vo_write', { file_path: 'd.txt', content: 'x\n' })
+    const p = await pendingApproval(c.id)
+    expect(existsSync(inDocs('d.txt'))).toBe(false)
+    await decide(c.id, p, 'reject')
+    await docs
+  })
+})

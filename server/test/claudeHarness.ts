@@ -27,8 +27,8 @@ const clients: Client[] = []
 export type Harness = { query: ReturnType<typeof fakeQuery>; log: ReturnType<typeof recordingLogger>; dir: string; root: string }
 
 /** A server on the claude runtime with a fake session, and a workspace `sandbox` seeded with a few files (or with `seed`). */
-export async function start(env: Record<string, string> = {}, seed?: (root: string) => void): Promise<Harness> {
-  wsHandle = makeWorkspaceRoot(['sandbox'])
+export async function start(env: Record<string, string> = {}, seed?: (root: string) => void, extraWorkspaces: string[] = []): Promise<Harness> {
+  wsHandle = makeWorkspaceRoot(['sandbox', ...extraWorkspaces])
   const root = wsHandle.path('sandbox')
   if (seed) seed(root)
   else {
@@ -74,8 +74,8 @@ export async function until(fn: () => Promise<boolean>, ms = 3000): Promise<void
 export type ToolCall = { isError?: boolean; content: Array<{ text: string }> }
 
 /** Starts a task, answers the session's init, and returns an MCP client on the session's own tool server. */
-export async function session(h: Harness, agent = FORGE, index = 0) {
-  const r = await api('POST', `/api/agents/${agent}/tasks`, { title: 'Work on the notes', workspaceId: 'sandbox' })
+export async function session(h: Harness, agent = FORGE, index = 0, workspaceId = 'sandbox') {
+  const r = await api('POST', `/api/agents/${agent}/tasks`, { title: 'Work on the notes', workspaceId })
   expect(r.status).toBe(202)
   await until(async () => h.query.sessions.length > index)
   const fake = h.query.sessions[index]

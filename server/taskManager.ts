@@ -334,7 +334,7 @@ export class TaskManager {
     // The permission is recorded before the decision and before the runtime is answered: if it cannot be, the approval stays pending.
     let granted: { ruleId?: string } = {}
     if (waiter && decision === 'approve') {
-      const g = this.permissions.grant({ scope, effect: 'allow', tool: waiter.tool, agentId: task.agentId, ...(scope === 'agent' ? {} : { taskId }), ...(scope === 'once' ? { digest: waiter.digest } : {}) })
+      const g = this.permissions.grant({ scope, effect: 'allow', tool: waiter.tool, agentId: task.agentId, workspaceId: run?.workspace?.id ?? null, ...(scope === 'agent' ? {} : { taskId }), ...(scope === 'once' ? { digest: waiter.digest } : {}) })
       if (!g.ok) return g.error === 'scope_not_allowed_for_tool' ? { ok: false, code: 'invalid', error: 'That tool can only be allowed once.' } : { ok: false, code: 'unavailable', error: 'The permission could not be recorded.' }
       granted = { ruleId: g.rule.id }
       // Requests already waiting were not part of this question: the new rule must not answer them.
@@ -416,7 +416,7 @@ export class TaskManager {
     }
     if (d.decision === 'deny') return refuse(d.reason)
 
-    const evaluated = this.permissions.evaluate({ agentId: task.agentId, taskId, tool, digest, paths: d.paths?.map((x) => x.relative) ?? [] })
+    const evaluated = this.permissions.evaluate({ agentId: task.agentId, taskId, tool, digest, workspaceId: run.workspace?.id ?? null, paths: d.paths?.map((x) => x.relative) ?? [] })
     const onceOnly = this.isOnceOnly(tool, d.paths, run.workspace)
     // A standing rule never answers a change to a file that tools run, nor a request that was already waiting when the rule was granted.
     const p = evaluated.effect === 'allow' && evaluated.source !== 'once' && (onceOnly || (evaluated.ruleId !== null && skipRules.has(evaluated.ruleId)))
@@ -502,7 +502,7 @@ export class TaskManager {
     if (!task) return { ok: false }
     const tool = request.tool
     const ids = { digest: digest.slice(0, 12), actionHash: actionHash(tool, request.input) }
-    const p = this.permissions.evaluate({ agentId: task.agentId, taskId, tool, digest, paths: paths.map((x) => x.relative) })
+    const p = this.permissions.evaluate({ agentId: task.agentId, taskId, tool, digest, workspaceId: this.runs.get(taskId)?.workspace?.id ?? null, paths: paths.map((x) => x.relative) })
     const ruleId = p.ruleId === null ? {} : { ruleId: p.ruleId }
     if (p.effect !== 'allow') {
       this.report('permission.denied', task, { actor: 'runtime', tool, decision: 'deny', reason: 'revoked_or_changed', ...ruleId, ...ids })

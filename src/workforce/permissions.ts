@@ -21,6 +21,7 @@ function isRule(v: unknown): v is PermissionRuleView {
   const r = v as Record<string, unknown>
   return text(r.id) && SCOPES.includes(r.scope as string) && EFFECTS.includes(r.effect as string) && text(r.tool) && text(r.createdAt) && STATES.includes(r.state as string)
     && ['agentId', 'taskId', 'pathPattern', 'expiresAt', 'revokedAt', 'usedAt', 'endedAt', 'reason'].every((k) => textOrNull(r[k]))
+    && (r.workspaceId === undefined || textOrNull(r.workspaceId))
     && ['default', 'user', 'system'].includes(r.createdBy as string)
 }
 

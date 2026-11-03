@@ -70,6 +70,16 @@ describe('PermissionsBody', () => {
     expect(html).toContain('aria-label="Revoke Write all agents on src/**"')
   })
 
+  it('shows the workspace of a bound rule and names it on the revoke button; an unbound rule shows none', () => {
+    const bound = body(withLists(emptyPermissions(), [rule('a', { scope: 'agent', agentId: agent.id, tool: 'Write', workspaceId: 'sandbox' })], []), agent.id)
+    expect(bound).toContain('<dt>Workspace</dt>')
+    expect(bound).toContain('sandbox')
+    expect(bound).toContain('aria-label="Revoke Write one agent in workspace sandbox"')
+    const free = body(withLists(emptyPermissions(), [rule('b', { tool: 'Write' })], []))
+    expect(free).not.toContain('<dt>Workspace</dt>')
+    expect(free).toContain('aria-label="Revoke Write all agents"')
+  })
+
   it('shows rule text as text, never as markup', () => {
     const p = withLists(emptyPermissions(), [rule('x', { reason: '<img src=x onerror=alert(1)>', pathPattern: '<script>1</script>', tool: '<b>T</b>' })], [])
     const html = body(p)

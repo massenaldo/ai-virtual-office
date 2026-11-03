@@ -62,7 +62,7 @@ export function parseApproval(b: Body): { approvalId: string; decision: Approval
   return { approvalId: b.approvalId, decision: b.decision as ApprovalChoice, digest: b.digest }
 }
 
-export type CreatePermissionRequest = { scope: 'global' | 'agent'; effect: 'allow' | 'deny' | 'ask'; tool: string; agentId: string | null; pathPattern: string | null; expiresAt: string | null; reason: string | null }
+export type CreatePermissionRequest = { scope: 'global' | 'agent'; effect: 'allow' | 'deny' | 'ask'; tool: string; agentId: string | null; pathPattern: string | null; workspaceId: string | null; expiresAt: string | null; reason: string | null }
 
 const optionalText = (b: Body, key: string): string | null => {
   const v = b[key]
@@ -73,7 +73,7 @@ const optionalText = (b: Body, key: string): string | null => {
 
 /** Task and once permissions come from approvals, so only global and agent rules can be created here. */
 export function parseCreatePermission(b: Body): CreatePermissionRequest {
-  allow(b, ['scope', 'effect', 'tool', 'agentId', 'pathPattern', 'expiresAt', 'reason'])
+  allow(b, ['scope', 'effect', 'tool', 'agentId', 'pathPattern', 'workspaceId', 'expiresAt', 'reason'])
   if (b.scope !== 'global' && b.scope !== 'agent') throw bad('"scope" must be "global" or "agent".')
-  return { scope: b.scope, effect: text(b, 'effect') as CreatePermissionRequest['effect'], tool: text(b, 'tool'), agentId: optionalText(b, 'agentId'), pathPattern: optionalText(b, 'pathPattern'), expiresAt: optionalText(b, 'expiresAt'), reason: optionalText(b, 'reason') }
+  return { scope: b.scope, effect: text(b, 'effect') as CreatePermissionRequest['effect'], tool: text(b, 'tool'), agentId: optionalText(b, 'agentId'), pathPattern: optionalText(b, 'pathPattern'), workspaceId: optionalText(b, 'workspaceId'), expiresAt: optionalText(b, 'expiresAt'), reason: optionalText(b, 'reason') }
 }

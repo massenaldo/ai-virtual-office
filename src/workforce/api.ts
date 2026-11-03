@@ -33,6 +33,8 @@ export type PermissionRuleView = {
   agentId: string | null
   taskId: string | null
   pathPattern: string | null
+  /** The workspace the rule is bound to; missing or null means every workspace. */
+  workspaceId?: string | null
   createdAt: string
   createdBy: 'default' | 'user' | 'system'
   expiresAt: string | null
@@ -100,4 +102,4 @@ export type PermissionsResponse = { rules: PermissionRuleView[] }
 export type PermissionResponse = { rule: PermissionRuleView }
 export type AgentPermissionsRevokedResponse = { revoked: PermissionRuleView[] }
 /** Only global and agent rules are created by hand; task and once rules come from approvals. */
-export type CreatePermissionBody = { scope: 'global' | 'agent'; effect: 'allow' | 'deny' | 'ask'; tool: string; agentId?: string | null; pathPattern?: string | null; expiresAt?: string | null; reason?: string | null }
+export type CreatePermissionBody = { scope: 'global' | 'agent'; effect: 'allow' | 'deny' | 'ask'; tool: string; agentId?: string | null; pathPattern?: string | null; workspaceId?: string | null; expiresAt?: string | null; reason?: string | null }

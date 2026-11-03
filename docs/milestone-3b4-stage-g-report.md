@@ -33,6 +33,23 @@ No production code changed; the tests found no defect.
 
 ## Limits
 
-- **No browser run in this stage.** Playwright is not installed here. The last real-browser check is stage F's (`docs/screenshots/3b4-f/`). The cookie pairing screen (stage D) has only component tests and has not been clicked through in a browser.
+- The cookie pairing screen (stage D) has only component tests; the dev proxy skips pairing, so the browser check below did not exercise it.
 - Revoking a task rule while the task is still running was checked only in the quick window the mock's 1.5 s of work allows.
 - Everything still runs on the mock runtime; no real tool touches a file.
+
+## Browser check (added after Playwright became available)
+
+Run against `npm run dev:full` (real backend, mock runtime, dev proxy) with headless Chromium driven by `playwright-core`; screenshots in `docs/screenshots/3b4-g/`.
+
+| Step | Result |
+|---|---|
+| Open AI Agents, then Permissions | Panel loads from the backend: 8 default rules under Global, History empty, status Live |
+| Start a task on an agent, "Simulate approval request" | Approval card shows, with only the **Once** choice; Allow once completes it |
+| Create a global deny rule for Grep through the API while the panel is open | The rule appears without a reload |
+| Revoke it from the panel | A confirm dialog opens; after confirming the rule moves to History as Revoked |
+| Rule reason `<img src=x onerror=alert(1)> browser check` | Shown as plain text; no `img` element was created |
+| Console | Only the known favicon 404 |
+
+**Finding:** a task started from the UI has no workspace, so its approval has no digest and offers Once only. The scope choice (this task, this agent) cannot be reached from the UI by a person today; it works over the API (stage G tests) and was seen in the browser only in stage F's screenshots. It becomes reachable when the UI can pick a workspace for a task (3B.5).
+
+Not done: pairing without the proxy; the narrow layout; keyboard-only use.

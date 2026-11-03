@@ -84,8 +84,22 @@ describe('TaskForm workspace choice', () => {
     expect(form(null)).not.toContain('Workspace')
     expect(form([])).not.toContain('Workspace')
   })
+  it('calls a task simulated only on the mock runtime', () => {
+    const label = (real: boolean) => renderToStaticMarkup(<TaskForm workspaces={null} real={real} onStart={() => null}/>)
+    expect(label(false)).toContain('Start simulated task')
+    expect(label(true)).toContain('Start task')
+    expect(label(true)).not.toContain('simulated')
+  })
   it('names the task\'s workspace on its card', () => {
     const s = { ...demo, tasks: [{ ...waiting('Write', review).tasks[0], status: 'running' as const, pendingApproval: null, workspaceId: 'sandbox' }], agents: demo.agents.map((a) => (a.id === agent.id ? { ...a, currentTaskId: 'tk', status: 'working' as const } : a)) }
     expect(view(s, loaded())).toContain('Workspace sandbox')
+  })
+})
+
+describe('demo controls', () => {
+  const running = (runtime: 'mock' | 'claude') => ({ ...demo, tasks: [{ ...waiting('Write', review).tasks[0], status: 'running' as const, pendingApproval: null, runtime }], agents: demo.agents.map((a) => (a.id === agent.id ? { ...a, currentTaskId: 'tk', status: 'working' as const } : a)) })
+  it('are offered for a mock task and never for a Claude task', () => {
+    expect(view(running('mock'), loaded())).toContain('Demo controls')
+    expect(view(running('claude'), loaded())).not.toContain('Demo controls')
   })
 })

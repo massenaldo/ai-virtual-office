@@ -162,14 +162,15 @@ describe('runtime indicator and lifecycle labels', () => {
 
   it('environmentBadge names each environment', () => {
     expect(environmentBadge({ kind: 'browser' })).toEqual({ label: 'Mock · browser', title: 'Tasks are simulated in the browser. No AI is run.', tone: 'browser' })
-    expect(environmentBadge(mock)).toMatchObject({ label: 'Local backend · mock runtime', tone: 'backend', title: "Tasks run on the local backend's mock runtime. No Claude SDK is installed and no AI is run." })
+    expect(environmentBadge(mock)).toMatchObject({ label: 'Local backend · mock runtime', tone: 'backend', title: "Tasks run on the local backend's mock runtime. No AI is run." })
     expect(environmentBadge({ kind: 'backend', runtime: 'claude', available: false, reason: 'Claude Agent SDK not installed' })).toEqual({ label: 'Local backend · Claude (not available)', title: 'Claude Agent SDK not installed. Tasks are refused.', tone: 'unavailable' })
+    expect(environmentBadge({ kind: 'backend', runtime: 'claude', available: true, reason: null })).toEqual({ label: 'Local backend · Claude', title: 'Tasks run on the Claude Agent SDK. In this version the agent has no tools: it can only answer in text.', tone: 'backend' })
     expect(environmentBadge({ kind: 'backend', runtime: 'claude', available: false, reason: null }).title).toBe('Claude Agent SDK not installed. Tasks are refused.')
     expect(environmentBadge({ kind: 'backend', runtime: null, available: null, reason: null }).label).toBe('Local backend')
   })
 
   it('environmentNote says mock runtime only for the backend mock', () => {
-    expect(environmentNote(mock)).toBe('Mock runtime only; no Claude SDK.')
+    expect(environmentNote(mock)).toBe('Mock runtime only; no AI is run.')
     expect(environmentNote({ kind: 'browser' })).toBeNull()
     expect(environmentNote({ kind: 'backend', runtime: 'claude', available: false, reason: null })).toBeNull()
   })

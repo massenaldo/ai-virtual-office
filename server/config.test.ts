@@ -6,8 +6,10 @@ import { Secret } from './secret'
 import { CONFIG_VARIABLES, formatConfigErrors, mergeEnv, parseConfig } from './config'
 import { makeWorkspaceRoot } from './test/workspaces'
 
-const DEFAULTS = { host: '127.0.0.1', port: 8787, dataDir: '/repo/data', runtime: 'mock', taskTimeoutMs: 600000, cancelGraceMs: 5000, approvalTimeoutMs: 300000, maxMessageBytes: 32768, maxTaskOutputBytes: 262144, eventBufferSize: 500, auditLogMaxBytes: 5242880, workspaceRoot: null, workspaces: [], allowedTools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'], allowedOrigins: ['http://localhost:5173', 'http://127.0.0.1:5173'], credentialsConfigured: false, apiToken: null }
+const DEFAULTS = { host: '127.0.0.1', port: 8787, dataDir: '/repo/data', runtime: 'mock', taskTimeoutMs: 600000, cancelGraceMs: 5000, approvalTimeoutMs: 300000, maxMessageBytes: 32768, maxTaskOutputBytes: 262144, eventBufferSize: 500, auditLogMaxBytes: 5242880, workspaceRoot: null, workspaces: [], allowedTools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'], allowedOrigins: ['http://localhost:5173', 'http://127.0.0.1:5173'], credentialsConfigured: false, anthropicApiKey: null, claude: { model: null, maxTurns: 12, maxBudgetUsd: 0.5 }, apiToken: null }
 const NAMES = CONFIG_VARIABLES
+
+const KEY = 'sk-ant-api03-abcdefghijklmnop'
 
 describe('parseConfig', () => {
   it('uses the defaults for an empty environment', () => {
@@ -19,9 +21,11 @@ describe('parseConfig', () => {
   })
 
   it('reads every variable', () => {
-    const r = parseConfig({ HOST: 'localhost', PORT: '9000', DATA_DIR: 'tmp/x', RUNTIME: 'claude', TASK_TIMEOUT_MS: '1000', CANCEL_GRACE_MS: '200', APPROVAL_TIMEOUT_MS: '3000', MAX_MESSAGE_BYTES: '100', MAX_TASK_OUTPUT_BYTES: '1000', EVENT_BUFFER_SIZE: '20', AUDIT_LOG_MAX_BYTES: '65536', ANTHROPIC_API_KEY: 'k', API_TOKEN: 't'.repeat(40) }, '/repo')
-    expect(r).toEqual({ ok: true, config: { host: 'localhost', port: 9000, dataDir: '/repo/tmp/x', runtime: 'claude', taskTimeoutMs: 1000, cancelGraceMs: 200, approvalTimeoutMs: 3000, maxMessageBytes: 100, maxTaskOutputBytes: 1000, eventBufferSize: 20, auditLogMaxBytes: 65536, workspaceRoot: null, workspaces: [], allowedTools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'], allowedOrigins: ['http://localhost:5173', 'http://127.0.0.1:5173'], credentialsConfigured: true, apiToken: expect.any(Secret) } })
+    const r = parseConfig({ CLAUDE_MODEL: 'claude-sonnet-5-5', CLAUDE_MAX_TURNS: '7', CLAUDE_MAX_BUDGET_USD: '1.25', HOST: 'localhost', PORT: '9000', DATA_DIR: 'tmp/x', RUNTIME: 'claude', TASK_TIMEOUT_MS: '1000', CANCEL_GRACE_MS: '200', APPROVAL_TIMEOUT_MS: '3000', MAX_MESSAGE_BYTES: '100', MAX_TASK_OUTPUT_BYTES: '1000', EVENT_BUFFER_SIZE: '20', AUDIT_LOG_MAX_BYTES: '65536', ANTHROPIC_API_KEY: 'k', API_TOKEN: 't'.repeat(40) }, '/repo')
+    expect(r).toEqual({ ok: true, config: { host: 'localhost', port: 9000, dataDir: '/repo/tmp/x', runtime: 'claude', taskTimeoutMs: 1000, cancelGraceMs: 200, approvalTimeoutMs: 3000, maxMessageBytes: 100, maxTaskOutputBytes: 1000, eventBufferSize: 20, auditLogMaxBytes: 65536, workspaceRoot: null, workspaces: [], allowedTools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'], allowedOrigins: ['http://localhost:5173', 'http://127.0.0.1:5173'], credentialsConfigured: true, anthropicApiKey: expect.any(Secret), claude: { model: 'claude-sonnet-5-5', maxTurns: 7, maxBudgetUsd: 1.25 }, apiToken: expect.any(Secret) } })
     expect(r.ok && r.config.apiToken?.reveal()).toBe('t'.repeat(40))
+    expect(r.ok && String(r.config.anthropicApiKey)).toBe('[REDACTED]')
+    expect(JSON.stringify(r)).not.toContain(KEY)
   })
 
   it('collects every error with readable copy', () => {
@@ -207,3 +211,22 @@ describe('ALLOWED_ORIGINS', () => {
   })
 })
 
+describe('claude settings', () => {
+  it('keeps the API key out of every printed form and exposes it only through reveal()', () => {
+    const r = parseConfig({ ANTHROPIC_API_KEY: KEY }, '/repo')
+    expect(r.ok && r.config.credentialsConfigured).toBe(true)
+    expect(r.ok && r.config.anthropicApiKey?.reveal()).toBe(KEY)
+    expect(JSON.stringify(r)).not.toContain(KEY)
+  })
+  it.each([
+    ['CLAUDE_MODEL', 'bad model!', 'CLAUDE_MODEL must be a model name'],
+    ['CLAUDE_MAX_TURNS', '0', 'CLAUDE_MAX_TURNS must be an integer from 1 to 100 (got "0").'],
+    ['CLAUDE_MAX_TURNS', '101', 'CLAUDE_MAX_TURNS must be an integer from 1 to 100 (got "101").'],
+    ['CLAUDE_MAX_BUDGET_USD', '0', 'CLAUDE_MAX_BUDGET_USD must be a number above 0'],
+    ['CLAUDE_MAX_BUDGET_USD', '1e3', 'CLAUDE_MAX_BUDGET_USD must be a number above 0'],
+    ['CLAUDE_MAX_BUDGET_USD', '101', 'CLAUDE_MAX_BUDGET_USD must be a number above 0'],
+  ])('refuses %s=%s', (name, value, message) => {
+    const r = parseConfig({ [name]: value }, '/repo')
+    expect(!r.ok && r.errors[0]).toContain(message)
+  })
+})

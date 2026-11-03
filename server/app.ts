@@ -87,7 +87,7 @@ export function createApp(config: ServerConfig, deps: AppDeps = {}): App {
     // The store opens first: it creates DATA_DIR, where the audit log lives.
     const audit = deps.audit ?? openAuditLog({ dataDir: config.dataDir, maxBytes: config.auditLogMaxBytes, now, log, hide: config.workspaceRoot ? [config.workspaceRoot] : [] })
     const apiToken = resolveApiToken({ configured: config.apiToken?.reveal() ?? null, dataDir: config.dataDir })
-    const provider = deps.provider ?? (config.runtime === 'mock' ? new ServerMockProvider({ timings: deps.mockTimings }) : new ClaudeAgentRuntimeProvider({ credentialsConfigured: config.credentialsConfigured }))
+    const provider = deps.provider ?? (config.runtime === 'mock' ? new ServerMockProvider({ timings: deps.mockTimings }) : new ClaudeAgentRuntimeProvider({ apiKey: config.anthropicApiKey, settings: config.claude, dataDir: config.dataDir, log }))
     const permissions = deps.permissions ?? openPermissionStore({ dataDir: config.dataDir, now, log, onChange: (change) => { const record = permissionAudit(change); if (record) audit.write(record); events.appendPermission(change.kind, toRuleView(change.rule, now())) } })
     // Nothing is running yet at boot, so no task rule may survive from before: a task that was interrupted never ended its rules.
     // Rules of agents that no longer exist go too. Agent and global rules of existing agents are kept, as documented.

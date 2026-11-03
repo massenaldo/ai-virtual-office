@@ -36,6 +36,8 @@ A short text result: "Wrote N bytes to <relative path>." or "Edited <relative pa
 
 ## Changes to the SDK options
 
+> **Updated by milestone 3B.5 (`docs/milestone-3b5-planning.md` §8, built in stage 3B.5.1).** The gate is enforced in the tool handlers, not in the SDK's `canUseTool`: the SDK is set up with `tools: []`, `permissionMode: 'dontAsk'`, a deny-everything `canUseTool` and `PreToolUse` hook, and the child process gets an empty scratch folder as its working directory, not the workspace. The list below is the earlier design; where it differs, the planning document and `server/runtime/claudeAgent.ts` are the current statement.
+
 - `disallowedTools`: add `Write` and `Edit` to the existing list (everything outside the catalogue, plus `Bash`, `WebFetch`, `WebSearch`; they stay disallowed in the first SDK version because the sandbox does not exist yet). `Read`, `Glob` and `Grep` also move to gated in-process tools in the same way before the sandbox is relied on, for the same two-step reason.
 - `allowedTools`: only our `vo_*` tools, never the built-in names.
 - Unchanged: `permissionMode: 'default'`, `settingSources: []`, no hooks that approve, no additional directories, no other MCP servers.

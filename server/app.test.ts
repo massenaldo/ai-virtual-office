@@ -18,11 +18,18 @@ describe('app', () => {
     expect(res.body).toMatchObject({ ok: true, runtime: 'mock', available: true, reason: null, credentialsConfigured: false, version: '0.1.0', audit: { ok: true, error: null } })
   })
 
-  it('reports the claude runtime as unavailable without the SDK', async () => {
+  it('reports the claude runtime as unavailable without credentials', async () => {
+    const s = await startTestServer({ RUNTIME: 'claude' })
+    running = s
+    const res = await s.api('GET', '/api/health')
+    expect(res.body).toMatchObject({ runtime: 'claude', available: false, reason: 'credentials not configured', credentialsConfigured: false })
+  })
+
+  it('reports the claude runtime as available with the SDK installed and a key, and never shows the key', async () => {
     const s = await startTestServer({ RUNTIME: 'claude', ANTHROPIC_API_KEY: 'sk-test-123' })
     running = s
     const res = await s.api('GET', '/api/health')
-    expect(res.body).toMatchObject({ runtime: 'claude', available: false, reason: 'Claude Agent SDK not installed', credentialsConfigured: true })
+    expect(res.body).toMatchObject({ runtime: 'claude', available: true, credentialsConfigured: true })
     expect(JSON.stringify(res.body)).not.toContain('sk-test-123')
   })
 

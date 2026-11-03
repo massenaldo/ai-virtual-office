@@ -82,7 +82,7 @@ describe('start and the full mock lifecycle', () => {
   it('refuses when the provider is unavailable', () => {
     const m = make(new ClaudeAgentRuntimeProvider())
     const before = store.state
-    expect(m.startTask(FORGE, INPUT)).toEqual({ ok: false, code: 'unavailable', error: 'The claude runtime is not available: Claude Agent SDK not installed.' })
+    expect(m.startTask(FORGE, INPUT)).toEqual({ ok: false, code: 'unavailable', error: 'The claude runtime is not available: credentials not configured.' })
     expect(store.state).toBe(before)
   })
 

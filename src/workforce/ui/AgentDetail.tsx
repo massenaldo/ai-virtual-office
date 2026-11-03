@@ -15,7 +15,7 @@ import { StatusDot } from './AgentList'
 export type AgentDetailProps = { workforce: Workforce; layout: OfficeLayout; agent: Agent; onBack(): void; onEdit(): void; onRemove(): void; onFocusDesk(): void }
 
 /** The server registers the workspaces and checks every id again; this list only saves the person from typing one. */
-export function TaskForm({ workspaces, onStart }: { workspaces: string[] | null; onStart(input: TaskInput, opts?: { workspaceId?: string | null }): Awaitable<string | null> }) {
+export function TaskForm({ workspaces, real = false, onStart }: { workspaces: string[] | null; /** The backend runs tasks on the real Claude runtime: the button must not call them simulated. */ real?: boolean; onStart(input: TaskInput, opts?: { workspaceId?: string | null }): Awaitable<string | null> }) {
   const [input, setInput] = useState<TaskInput>({ title: '', description: '' })
   const [workspaceId, setWorkspaceId] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -41,7 +41,7 @@ export function TaskForm({ workspaces, onStart }: { workspaces: string[] | null;
       <p className="panel-hint">A workspace is a folder the backend was set up with. The task's file requests are checked against it, and an approval is tied to it.</p>
     </>}
     {error && <p className="form-error" role="alert">{error}</p>}
-    <div className="panel-actions"><button type="submit" className="panel-button primary" disabled={busy}><Play size={13}/> Start simulated task</button></div>
+    <div className="panel-actions"><button type="submit" className="panel-button primary" disabled={busy}><Play size={13}/> {real ? 'Start task' : 'Start simulated task'}</button></div>
   </form>
 }
 
@@ -136,14 +136,14 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
     {active ? <>
       {task.status !== 'cancelling' && <div className="panel-actions"><button className="panel-button" disabled={cancel.busy} onClick={cancelTask}><Square size={13}/> Cancel task</button></div>}
       {actionError && task.status !== 'waiting_for_approval' && <p className="form-error" role="alert">{actionError}</p>}
-      {task.status === 'running' && <>
+      {task.status === 'running' && task.runtime === 'mock' && <>
         <div className="field-group-label">Demo controls</div>
         <div className="panel-actions">
           <button className="panel-button" onClick={() => actions.requestApproval(task.id)}><ShieldQuestion size={13}/> Simulate approval request</button>
           <button className="panel-button danger" onClick={() => actions.forceError(task.id)}><OctagonX size={13}/> Simulate error</button>
         </div>
       </>}
-    </> : <TaskForm workspaces={workforce.workspaces} onStart={start}/>}
+    </> : <TaskForm workspaces={workforce.workspaces} real={workforce.environment?.kind === 'backend' && workforce.environment.runtime === 'claude'} onStart={start}/>}
 
     <div className="field-group-label section">Activity</div>
     {timeline.length === 0 ? <p className="panel-hint">No activity yet.</p> : <ol className="activity-list">{timeline.map((a) => <li key={a.id}>

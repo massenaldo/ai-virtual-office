@@ -1,7 +1,7 @@
 import { DEPARTMENTS } from '../layout/catalog'
 import { createDemoWorkforce } from './demo'
 import { emptyWorkforce, isActiveTask, recoverInterruptedTasks } from './operations'
-import { ACTIVITY_LIMIT, REVIEW_MAX_BYTES, WORKFORCE_SCHEMA_VERSION, type ActivityType, type Agent, type AgentActivity, type AgentStatus, type AgentTask, type PendingApproval, type ToolReview, type TaskEndReason, type TaskRuntime, type TaskStatus, type WorkforceState } from './types'
+import { ACTIVITY_LIMIT, REVIEW_MAX_BYTES, WORKFORCE_SCHEMA_VERSION, type ActivityType, type Agent, type AgentActivity, type AgentStatus, type AgentTask, type PendingApproval, type ToolReview, type TaskEndReason, type TaskRuntime, type TaskStatus, type WorkforceState, validUsage } from './types'
 
 // Kept apart from the layout key so agent changes can never overwrite the saved office.
 export const WORKFORCE_STORAGE_KEY = 'ai-virtual-office:workforce:v2'
@@ -31,7 +31,7 @@ export function serializeWorkforce(s: WorkforceState): string {
   return JSON.stringify({
     schemaVersion: s.schemaVersion,
     agents: s.agents.map((a) => ({ id: a.id, name: a.name, role: a.role, department: a.department, deskId: a.deskId, status: a.status, currentTaskId: a.currentTaskId, runtimeMode: a.runtimeMode, demo: a.demo, createdAt: a.createdAt, lastActivityAt: a.lastActivityAt })),
-    tasks: s.tasks.map((t) => ({ id: t.id, agentId: t.agentId, title: t.title, description: t.description, status: t.status, createdAt: t.createdAt, startedAt: t.startedAt, completedAt: t.completedAt, resultSummary: t.resultSummary, errorMessage: t.errorMessage, executionId: t.executionId, timeoutMs: t.timeoutMs, runtime: t.runtime, workspaceId: t.workspaceId, sessionId: t.sessionId, endedReason: t.endedReason, pendingApproval: t.pendingApproval && { id: t.pendingApproval.id, tool: t.pendingApproval.tool, summary: t.pendingApproval.summary, requestedAt: t.pendingApproval.requestedAt, digest: t.pendingApproval.digest, review: t.pendingApproval.review, onceOnly: t.pendingApproval.onceOnly } })),
+    tasks: s.tasks.map((t) => ({ id: t.id, agentId: t.agentId, title: t.title, description: t.description, status: t.status, createdAt: t.createdAt, startedAt: t.startedAt, completedAt: t.completedAt, resultSummary: t.resultSummary, errorMessage: t.errorMessage, executionId: t.executionId, timeoutMs: t.timeoutMs, runtime: t.runtime, workspaceId: t.workspaceId, sessionId: t.sessionId, endedReason: t.endedReason, usage: t.usage && { turns: t.usage.turns, costUsd: t.usage.costUsd }, pendingApproval: t.pendingApproval && { id: t.pendingApproval.id, tool: t.pendingApproval.tool, summary: t.pendingApproval.summary, requestedAt: t.pendingApproval.requestedAt, digest: t.pendingApproval.digest, review: t.pendingApproval.review, onceOnly: t.pendingApproval.onceOnly } })),
     activities: s.activities.slice(-ACTIVITY_LIMIT).map((a) => ({
       id: a.id, agentId: a.agentId, taskId: a.taskId, type: a.type, message: a.message, timestamp: a.timestamp, source: a.source,
       ...(a.type === 'desk-assigned' ? { deskId: a.deskId } : {}),
@@ -83,6 +83,9 @@ function parseTask(v: unknown): AgentTask | null {
   // Saved before workspaces existed: no field means no workspace.
   const workspaceId = v.workspaceId === undefined ? null : v.workspaceId
   if (!isTextOrNull(workspaceId)) return null
+  // Saved before usage existed: no field means none reported. Otherwise exactly the two numbers, in bounds.
+  const usage = v.usage === undefined || v.usage === null ? null : validUsage(v.usage)
+  if (v.usage !== undefined && v.usage !== null && (usage === null || Object.keys(v.usage as object).length !== 2)) return null
   const status = v.status
   const active = status === 'queued' || status === 'starting' || status === 'running' || status === 'waiting_for_approval' || status === 'cancelling'
   // An end reason exactly when the task has ended; a pending approval exactly while it waits for one.
@@ -92,7 +95,7 @@ function parseTask(v: unknown): AgentTask | null {
   return {
     id: v.id, agentId: v.agentId, title: v.title, description: v.description, status, createdAt: v.createdAt, startedAt: v.startedAt, completedAt: v.completedAt,
     resultSummary: v.resultSummary, errorMessage: v.errorMessage, executionId: v.executionId, timeoutMs: v.timeoutMs as number | null, runtime: v.runtime, workspaceId, sessionId: v.sessionId,
-    endedReason: v.endedReason as TaskEndReason | null, pendingApproval,
+    endedReason: v.endedReason as TaskEndReason | null, usage, pendingApproval,
   }
 }
 

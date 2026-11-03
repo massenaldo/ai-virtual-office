@@ -6,7 +6,7 @@ import type { PermissionsState } from './permissions'
 import type { ConnectionStatus, RuntimeEnvironment, WorkforceSnapshot } from './controller'
 import { activeTaskFor, agentAtDesk } from './operations'
 import type { Preserved, WorkforceLoadProblem } from './storage'
-import type { Agent, AgentActivity, AgentDepartment, AgentStatus, AgentTask, TaskRuntime, TaskStatus, WorkforceState } from './types'
+import type { Agent, AgentActivity, AgentDepartment, AgentStatus, AgentTask, TaskRuntime, TaskStatus, TaskUsage, WorkforceState } from './types'
 
 // Pure helpers for the workforce panel, so the components only render.
 
@@ -70,6 +70,15 @@ export function removalPrompt(s: WorkforceState, agentId: string): { title: stri
 }
 
 /** Local 24-hour HH:MM:SS. en-GB pins the digits and separators; the time zone stays the viewer's. */
+/** `About $0.0123 (estimate) · 3 steps`; the cost has up to 4 decimals with trailing zeros trimmed to at least 2. */
+export function formatUsage(usage: TaskUsage | null): string | null {
+  if (!usage) return null
+  const steps = `${usage.turns} ${usage.turns === 1 ? 'step' : 'steps'}`
+  if (usage.costUsd > 0 && usage.costUsd < 0.0001) return `Less than $0.0001 (estimate) · ${steps}`
+  const [whole, fraction = ''] = usage.costUsd.toFixed(4).split('.')
+  return `About $${whole}.${fraction.replace(/0+$/, '').padEnd(2, '0')} (estimate) · ${steps}`
+}
+
 export function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 }

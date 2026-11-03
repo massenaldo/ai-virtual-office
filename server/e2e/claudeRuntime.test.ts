@@ -32,7 +32,7 @@ async function boot(env: Record<string, string> = {}) {
   streams.push(stream)
   return { query, stream, log, dir }
 }
-const tasks = async () => (await s!.api('GET', '/api/state')).body.state.tasks as Array<{ id: string; agentId: string; status: string; runtime: string; sessionId: string | null; executionId: string | null; resultSummary: string | null; errorMessage: string | null; endedReason: string | null }>
+const tasks = async () => (await s!.api('GET', '/api/state')).body.state.tasks as Array<{ id: string; agentId: string; status: string; runtime: string; sessionId: string | null; executionId: string | null; resultSummary: string | null; errorMessage: string | null; endedReason: string | null; usage: { turns: number; costUsd: number } | null }>
 async function until(fn: () => Promise<boolean>, ms = 3000) {
   const end = Date.now() + ms
   while (!(await fn())) { if (Date.now() > end) throw new Error('condition not met in time'); await new Promise((r) => setTimeout(r, 10)) }
@@ -56,10 +56,11 @@ describe('the claude runtime in the whole server', () => {
     await until(async () => (await tasks())[0].status === 'running')
     expect((await tasks())[0]).toMatchObject({ sessionId: 'sess-42', runtime: 'claude' })
     session.send(textMessage('Plan: ship it.'))
-    session.send(resultMessage({ result: 'Plan: ship it.' }))
+    session.send(resultMessage({ result: 'Plan: ship it.', num_turns: 4, total_cost_usd: 0.0456 }))
     session.end()
-    await stream.until((e) => e.type === 'task.completed', 3000)
-    expect((await tasks())[0]).toMatchObject({ id, status: 'completed', resultSummary: 'Plan: ship it.', endedReason: 'completed' })
+    const seen = await stream.until((e) => e.type === 'task.completed', 3000)
+    expect((await tasks())[0]).toMatchObject({ id, status: 'completed', resultSummary: 'Plan: ship it.', endedReason: 'completed', usage: { turns: 4, costUsd: 0.0456 } })
+    expect((seen.at(-1) as { patch: { tasks: unknown[] } }).patch.tasks[0]).toMatchObject({ id, usage: { turns: 4, costUsd: 0.0456 } })
     const state = (await s!.api('GET', '/api/state')).body.state
     expect(state.agents.find((a: { id: string }) => a.id === FORGE).status).toBe('completed')
     expect(JSON.stringify(state.activities)).toContain('Plan: ship it.')

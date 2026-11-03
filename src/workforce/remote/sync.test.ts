@@ -13,7 +13,7 @@ const stateAt = (lastEventId: string, state = demo): StateResponse => ({ state, 
 const flush = () => vi.advanceTimersByTimeAsync(0)
 const calls = (b: { calls: { method: string; url: string }[] }, path: string) => b.calls.filter((c) => c.method === 'GET' && c.url === `${BASE}${path}`).length
 
-const task = (id: string, agentId: string): AgentTask => ({ id, agentId, title: 'T', description: '', status: 'queued', createdAt: NOW, startedAt: null, completedAt: null, resultSummary: null, errorMessage: null, executionId: null, timeoutMs: null, runtime: 'mock', workspaceId: null, sessionId: null, endedReason: null, pendingApproval: null })
+const task = (id: string, agentId: string): AgentTask => ({ id, agentId, title: 'T', description: '', status: 'queued', createdAt: NOW, startedAt: null, completedAt: null, resultSummary: null, errorMessage: null, executionId: null, timeoutMs: null, runtime: 'mock', workspaceId: null, sessionId: null, endedReason: null, usage: null, pendingApproval: null })
 const change = (id: string, patch: Partial<ChangeEvent['patch']> = {}): ChangeEvent => ({ id, type: 'state.changed', at: NOW, agentId: null, taskId: null, patch: { agents: [], tasks: [], activities: [], removedAgentIds: [], ...patch } })
 const reset = (id: string) => ({ id, type: 'state.reset' as const, at: NOW, reason: 'gap' as const })
 

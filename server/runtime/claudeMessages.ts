@@ -1,5 +1,6 @@
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { RuntimeEvent } from '../../src/workforce/runtime/types'
+import { validUsage, type TaskUsage } from '../../src/workforce/types'
 
 // SDK message -> RuntimeEvent, as a pure function. Nothing from the SDK is forwarded as is: text a person sees comes from
 // the model's own text blocks (which the task manager redacts and caps) or from the fixed sentences below. The SDK's error
@@ -97,12 +98,14 @@ export function createMessageMapper(taskId: string, toolLabels: Readonly<Record<
           return { events }
         }
         case 'result': {
+          const counted = validUsage({ turns: m.num_turns, costUsd: m.total_cost_usd })
+          const carried: { usage?: TaskUsage } = counted ? { usage: counted } : {}
           const usage = `turns=${typeof m.num_turns === 'number' ? m.num_turns : 0} cost_usd=${typeof m.total_cost_usd === 'number' ? m.total_cost_usd : 0}`
           if (m.subtype === 'success' && m.is_error !== true) {
             const text = typeof m.result === 'string' ? m.result.trim() : ''
-            return { events: [{ type: 'completed', taskId, summary: text === '' ? COPY.noText : text }], terminal: true, usage }
+            return { events: [{ type: 'completed', taskId, summary: text === '' ? COPY.noText : text, ...carried }], terminal: true, usage }
           }
-          return { events: [{ type: 'failed', taskId, error: failure(m) }], terminal: true, usage }
+          return { events: [{ type: 'failed', taskId, error: failure(m), ...carried }], terminal: true, usage }
         }
         case 'user': {
           const content = (m.message as { content?: unknown } | undefined)?.content

@@ -106,6 +106,47 @@ describe('loadWorkforce', () => {
 describe('parseWorkforce', () => {
   const valid = () => JSON.parse(serializeWorkforce(withRunningTask().state))
 
+  describe('task usage', () => {
+    const finished = () => {
+      const { state, taskId } = withRunningTask()
+      return applyRuntimeEvent(state, { type: 'completed', taskId, summary: 'x', usage: { turns: 3, costUsd: 0.0123 } }, NOW, 'mock')
+    }
+
+    it('survives a round trip', () => {
+      expect(roundTrip(finished())?.tasks[0].usage).toEqual({ turns: 3, costUsd: 0.0123 })
+    })
+
+    it('loads null for state saved without the field', () => {
+      const raw = JSON.parse(serializeWorkforce(finished()))
+      delete raw.tasks[0].usage
+      expect(parseWorkforce(raw)?.tasks[0].usage).toBeNull()
+    })
+
+    it.each([
+      ['a string', 'lots'],
+      ['an array', [3, 0.1]],
+      ['no cost', { turns: 1 }],
+      ['string numbers', { turns: '1', costUsd: '0.1' }],
+      ['negative cost', { turns: 1, costUsd: -0.01 }],
+      ['negative turns', { turns: -1, costUsd: 0 }],
+      ['fractional turns', { turns: 1.5, costUsd: 0 }],
+      ['absurd turns', { turns: 1001, costUsd: 0 }],
+      ['absurd cost', { turns: 1, costUsd: 1000.5 }],
+      ['null cost (a serialized NaN)', { turns: 1, costUsd: null }],
+      ['an extra key', { turns: 1, costUsd: 0, note: 'x' }],
+    ])('rejects the whole state for %s', (_n, bad) => {
+      const raw = JSON.parse(serializeWorkforce(finished()))
+      raw.tasks[0].usage = bad
+      expect(parseWorkforce(raw)).toBeNull()
+    })
+
+    it('accepts the upper bounds', () => {
+      const raw = JSON.parse(serializeWorkforce(finished()))
+      raw.tasks[0].usage = { turns: 1000, costUsd: 1000 }
+      expect(parseWorkforce(raw)?.tasks[0].usage).toEqual({ turns: 1000, costUsd: 1000 })
+    })
+  })
+
   it('keeps onceOnly through a round trip and loads an approval saved without it as false', () => {
     const { state, taskId } = withRunningTask()
     const digest = 'cd'.repeat(32)

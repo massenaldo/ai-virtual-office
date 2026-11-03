@@ -103,3 +103,23 @@ describe('demo controls', () => {
     expect(view(running('claude'), loaded())).not.toContain('Demo controls')
   })
 })
+
+describe('AgentDetail task usage', () => {
+  const done = (usage: { turns: number; costUsd: number } | null) => ({
+    ...demo,
+    tasks: [{ ...demo.tasks[0], id: 'tk', agentId: agent.id, title: 'T', description: '', status: 'completed' as const, resultSummary: 'All done.', usage }],
+    agents: demo.agents.map((a) => (a.id === agent.id ? { ...a, currentTaskId: 'tk', status: 'completed' as const } : a)),
+  })
+
+  it('shows the steps and estimated cost under the result', () => {
+    const h = view(done({ turns: 3, costUsd: 0.0123 }), null)
+    expect(h).toContain('About $0.0123 (estimate) · 3 steps')
+    expect(h.indexOf('All done.')).toBeLessThan(h.indexOf('About $0.0123'))
+  })
+
+  it('shows nothing about cost when there is no usage', () => {
+    const h = view(done(null), null)
+    expect(h).toContain('All done.')
+    expect(h).not.toContain('(estimate)')
+  })
+})

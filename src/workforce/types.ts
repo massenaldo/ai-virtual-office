@@ -42,7 +42,22 @@ export type AgentDepartment = Exclude<DepartmentId, 'meeting'>
 /** deskId is a desk furniture ID and may point at a desk the layout no longer has. currentTaskId is the latest task, active or finished. */
 export type Agent = { id: string; name: string; role: string; department: AgentDepartment; deskId: string | null; status: AgentStatus; currentTaskId: string | null; runtimeMode: RuntimeMode; demo: boolean; createdAt: string; lastActivityAt: string | null }
 
-export type AgentTask = { id: string; agentId: string; title: string; description: string; status: TaskStatus; createdAt: string; startedAt: string | null; completedAt: string | null; resultSummary: string | null; errorMessage: string | null; executionId: string | null; timeoutMs: number | null; runtime: TaskRuntime; workspaceId: string | null; sessionId: string | null; endedReason: TaskEndReason | null; pendingApproval: PendingApproval | null }
+/** Steps and the runtime's own cost estimate for a finished task. Numbers only. */
+export type TaskUsage = { turns: number; costUsd: number }
+/** Above either bound a value is treated as corrupt, not as a real run. */
+export const USAGE_MAX_TURNS = 1000
+export const USAGE_MAX_COST_USD = 1000
+
+/** The two numbers when both are within bounds (extra keys are dropped), otherwise null. */
+export function validUsage(v: unknown): TaskUsage | null {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return null
+  const { turns, costUsd } = v as { turns?: unknown; costUsd?: unknown }
+  if (typeof turns !== 'number' || !Number.isInteger(turns) || turns < 0 || turns > USAGE_MAX_TURNS) return null
+  if (typeof costUsd !== 'number' || !Number.isFinite(costUsd) || costUsd < 0 || costUsd > USAGE_MAX_COST_USD) return null
+  return { turns, costUsd }
+}
+
+export type AgentTask = { id: string; agentId: string; title: string; description: string; status: TaskStatus; createdAt: string; startedAt: string | null; completedAt: string | null; resultSummary: string | null; errorMessage: string | null; executionId: string | null; timeoutMs: number | null; runtime: TaskRuntime; workspaceId: string | null; sessionId: string | null; endedReason: TaskEndReason | null; usage: TaskUsage | null; pendingApproval: PendingApproval | null }
 
 type ActivityBase = { id: string; agentId: string; taskId: string | null; message: string; timestamp: string; source: ActivitySource }
 

@@ -1,7 +1,7 @@
 import { DEPARTMENTS } from '../layout/catalog'
 import { createId } from '../layout/operations'
 import type { RuntimeEvent } from './runtime/types'
-import { ACTIVITY_LIMIT, WORKFORCE_SCHEMA_VERSION, type ActivitySource, type Agent, type AgentActivity, type AgentDepartment, type AgentStatus, type AgentTask, type ApprovalDecision, type RuntimeMode, type TaskRuntime, type TaskStatus, type WorkforceState } from './types'
+import { ACTIVITY_LIMIT, WORKFORCE_SCHEMA_VERSION, type ActivitySource, type Agent, type AgentActivity, type AgentDepartment, type AgentStatus, type AgentTask, type ApprovalDecision, type RuntimeMode, type TaskRuntime, type TaskStatus, type WorkforceState, validUsage } from './types'
 
 // Every operation returns a new state, or the same reference when nothing changed.
 
@@ -126,7 +126,7 @@ export function assignTask(s: WorkforceState, agentId: string, input: TaskInput,
   if (error) return { ok: false, error }
   if (activeTaskFor(s, agentId)) return { ok: false, error: `${agent.name} already has an active task.` }
   const taskId = createId('task', new Set(s.tasks.map((t) => t.id)))
-  const task: AgentTask = { id: taskId, agentId, title: input.title.trim(), description: input.description.trim(), status: 'queued', createdAt: now, startedAt: null, completedAt: null, resultSummary: null, errorMessage: null, executionId: null, timeoutMs: opts.timeoutMs ?? null, runtime: opts.runtime ?? 'mock', workspaceId: opts.workspaceId ?? null, sessionId: null, endedReason: null, pendingApproval: null }
+  const task: AgentTask = { id: taskId, agentId, title: input.title.trim(), description: input.description.trim(), status: 'queued', createdAt: now, startedAt: null, completedAt: null, resultSummary: null, errorMessage: null, executionId: null, timeoutMs: opts.timeoutMs ?? null, runtime: opts.runtime ?? 'mock', workspaceId: opts.workspaceId ?? null, sessionId: null, endedReason: null, usage: null, pendingApproval: null }
   const next = replaceAgent({ ...s, tasks: [...s.tasks, task] }, { ...agent, currentTaskId: taskId })
   const state = addActivity(next, { type: 'task-assigned', agentId, taskId, message: `Assigned "${task.title}"`, timestamp: now, source: sourceOfTask(task) })
   return { ok: true, state, taskId }
@@ -162,10 +162,10 @@ function transitionFor(event: RuntimeEvent, task: AgentTask, now: string, source
     case 'approval_requested':
       return { task: { status: 'waiting_for_approval', pendingApproval: { id: event.approvalId, tool: event.tool, summary: event.summary, requestedAt: now, digest: event.digest ?? null, review: event.review ?? null, onceOnly: event.onceOnly === true } }, agentStatus: 'waiting', activity: { ...base, type: 'task-approval-requested', approvalId: event.approvalId, message: `Approval needed: ${event.summary}` } }
     case 'completed':
-      return { task: { status: 'completed', completedAt: now, resultSummary: event.summary || null, endedReason: 'completed', pendingApproval: null }, agentStatus: 'completed', activity: { ...base, type: 'task-completed', message: event.summary } }
+      return { task: { status: 'completed', completedAt: now, resultSummary: event.summary || null, endedReason: 'completed', usage: validUsage(event.usage), pendingApproval: null }, agentStatus: 'completed', activity: { ...base, type: 'task-completed', message: event.summary } }
     case 'failed': {
       const error = event.error || UNKNOWN_ERROR
-      return { task: { status: 'failed', completedAt: now, errorMessage: error, endedReason: 'failed', pendingApproval: null }, agentStatus: 'error', activity: { ...base, type: 'task-failed', message: error } }
+      return { task: { status: 'failed', completedAt: now, errorMessage: error, endedReason: 'failed', usage: validUsage(event.usage), pendingApproval: null }, agentStatus: 'error', activity: { ...base, type: 'task-failed', message: error } }
     }
     case 'cancelled':
       return { task: { status: 'cancelled', completedAt: now, endedReason: 'cancelled', pendingApproval: null }, agentStatus: 'idle', activity: { ...base, type: 'task-cancelled', message: `Cancelled "${task.title}"` } }

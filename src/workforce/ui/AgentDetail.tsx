@@ -9,7 +9,7 @@ import ApprovalReview from './ApprovalReview'
 import { useBusy } from './useBusy'
 import { DESCRIPTION_MAX, TITLE_MAX, isActiveTask, type TaskInput } from '../operations'
 import type { Agent } from '../types'
-import { TASK_RUNTIME_LABEL, TASK_STATUS_LABEL, agentStatusText, agentTimeline, agentPermissionChip, approveEnabled, choiceFor, shortDigest, deskOptions, deskStatus, formatTime } from '../view'
+import { TASK_RUNTIME_LABEL, TASK_STATUS_LABEL, agentStatusText, agentTimeline, agentPermissionChip, approveEnabled, choiceFor, shortDigest, deskOptions, deskStatus, formatTime, formatUsage } from '../view'
 import { StatusDot } from './AgentList'
 
 export type AgentDetailProps = { workforce: Workforce; layout: OfficeLayout; agent: Agent; onBack(): void; onEdit(): void; onRemove(): void; onFocusDesk(): void }
@@ -50,6 +50,7 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
   const desk = deskStatus(layout, agent)
   const groups = deskOptions(layout, state, agent.id)
   const task = state.tasks.find((t) => t.id === agent.currentTaskId)
+  const usageText = formatUsage(task?.usage ?? null)
   const active = task && isActiveTask(task)
   const timeline = agentTimeline(state, agent.id)
   const [deskError, setDeskError] = useState<string | null>(null)
@@ -119,6 +120,7 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
       <small>{task.startedAt ? `Started ${formatTime(task.startedAt)}` : `Queued ${formatTime(task.createdAt)}`}{task.completedAt && ` · Ended ${formatTime(task.completedAt)}`} · {TASK_RUNTIME_LABEL[task.runtime]}{task.workspaceId && ` · Workspace ${task.workspaceId}`}</small>
       {task.resultSummary && <p className="task-result">{task.resultSummary}</p>}
       {task.errorMessage && <p className="task-error">{task.errorMessage}</p>}
+      {usageText && <small className="task-usage">{usageText}</small>}
     </div> : <p className="panel-hint">No task yet.</p>}
     {task?.status === 'waiting_for_approval' && task.pendingApproval && <div className="approval-card" role="status">
       <div className="task-card-head"><strong>Approval needed</strong><span className="agent-chip">{task.pendingApproval.tool}</span></div>

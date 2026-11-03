@@ -5,7 +5,7 @@ import type { OfficeLayout } from '../layout/types'
 import { createDemoWorkforce } from './demo'
 import type { PermissionRuleView } from './api'
 import { addActivity, assignTask, cancelTask } from './operations'
-import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskClickTarget, deskMarkers, shortDigest, environmentBadge, environmentNote, connectionLabel, agentStatusText, workforceNotice, TASK_RUNTIME_LABEL, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, allowedScopes, permissionStateText, rulesForTab, scopeSentence, choiceFor, agentPermissionChip, revokePrompt, revokeAgentPrompt, waitingApprovals, removalPrompt, TASK_STATUS_LABEL } from './view'
+import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskClickTarget, deskMarkers, shortDigest, environmentBadge, environmentNote, connectionLabel, agentStatusText, workforceNotice, TASK_RUNTIME_LABEL, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, allowedScopes, permissionStateText, rulesForTab, scopeSentence, choiceFor, agentPermissionChip, revokePrompt, revokeAgentPrompt, waitingApprovals, removalPrompt, TASK_STATUS_LABEL, formatUsage } from './view'
 
 const NOW = '2026-10-30T09:00:00.000Z'
 const layout = createDefaultLayout()
@@ -323,4 +323,24 @@ describe('agentPermissionChip', () => {
     expect(agentPermissionChip(perms([]), waitingState(one.id), two.id)).toBe('No permission rules')
   })
   it('says nothing before the first load', () => expect(agentPermissionChip({ active: [], history: [], loaded: false, error: null }, demo, 'a')).toBeNull())
+})
+
+describe('formatUsage', () => {
+  it('is null without usage', () => {
+    expect(formatUsage(null)).toBeNull()
+  })
+
+  it.each([
+    [{ turns: 3, costUsd: 0.0123 }, 'About $0.0123 (estimate) · 3 steps'],
+    [{ turns: 1, costUsd: 0.5 }, 'About $0.50 (estimate) · 1 step'],
+    [{ turns: 0, costUsd: 0 }, 'About $0.00 (estimate) · 0 steps'],
+    [{ turns: 2, costUsd: 0.00004 }, 'Less than $0.0001 (estimate) · 2 steps'],
+    [{ turns: 2, costUsd: 0.0001 }, 'About $0.0001 (estimate) · 2 steps'],
+    [{ turns: 2, costUsd: 0.12345 }, 'About $0.1235 (estimate) · 2 steps'],
+    [{ turns: 2, costUsd: 0.1 }, 'About $0.10 (estimate) · 2 steps'],
+    [{ turns: 2, costUsd: 12 }, 'About $12.00 (estimate) · 2 steps'],
+    [{ turns: 2, costUsd: 0.125 }, 'About $0.125 (estimate) · 2 steps'],
+  ])('formats %j', (usage, text) => {
+    expect(formatUsage(usage)).toBe(text)
+  })
 })

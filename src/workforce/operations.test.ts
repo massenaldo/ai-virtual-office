@@ -14,7 +14,7 @@ function withAgent(input: AgentInput = NOVA, s: WorkforceState = emptyWorkforce(
 }
 
 function task(agentId: string, patch: Partial<AgentTask> = {}): AgentTask {
-  return { id: 'task-1', agentId, title: 'Draft sprint plan', description: '', status: 'running', createdAt: NOW, startedAt: NOW, completedAt: null, resultSummary: null, errorMessage: null, executionId: 'exec-1', timeoutMs: null, runtime: 'mock', workspaceId: null, sessionId: null, endedReason: null, pendingApproval: null, ...patch }
+  return { id: 'task-1', agentId, title: 'Draft sprint plan', description: '', status: 'running', createdAt: NOW, startedAt: NOW, completedAt: null, resultSummary: null, errorMessage: null, executionId: 'exec-1', timeoutMs: null, runtime: 'mock', workspaceId: null, sessionId: null, endedReason: null, usage: null, pendingApproval: null, ...patch }
 }
 
 describe('createAgent', () => {
@@ -147,7 +147,7 @@ const approval = (taskId: string, approvalId = 'approval-1') => ({ type: 'approv
 describe('assignTask', () => {
   it('creates a queued v2 task and points the agent at it', () => {
     const { state, agentId, taskId } = withTask()
-    expect(state.tasks[0]).toMatchObject({ id: taskId, agentId, status: 'queued', title: 'Draft sprint plan', description: 'Two-week plan', createdAt: NOW, startedAt: null, completedAt: null, executionId: null, timeoutMs: null, runtime: 'mock', workspaceId: null, sessionId: null, endedReason: null, pendingApproval: null })
+    expect(state.tasks[0]).toMatchObject({ id: taskId, agentId, status: 'queued', title: 'Draft sprint plan', description: 'Two-week plan', createdAt: NOW, startedAt: null, completedAt: null, executionId: null, timeoutMs: null, runtime: 'mock', workspaceId: null, sessionId: null, endedReason: null, usage: null, pendingApproval: null })
     expect(state.agents[0]).toMatchObject({ currentTaskId: taskId, status: 'idle' })
     expect(state.activities.at(-1)).toMatchObject({ type: 'task-assigned', agentId, taskId })
     expect(activeTaskFor(state, agentId)?.id).toBe(taskId)
@@ -257,6 +257,49 @@ describe('applyRuntimeEvent', () => {
     const s = applyRuntimeEvent(state, { type: 'failed', taskId, error: 'Simulated error' }, LATER, 'mock')
     expect(s.tasks[0]).toMatchObject({ status: 'failed', completedAt: LATER, errorMessage: 'Simulated error', endedReason: 'failed' })
     expect(s.agents[0].status).toBe('error')
+  })
+
+  describe('usage', () => {
+    const usage = { turns: 3, costUsd: 0.0123 }
+    it('is stored when a task completes or fails with it', () => {
+      const { state, taskId } = running()
+      expect(applyRuntimeEvent(state, { type: 'completed', taskId, summary: 'x', usage }, LATER, 'mock').tasks[0].usage).toEqual(usage)
+      expect(applyRuntimeEvent(state, { type: 'failed', taskId, error: 'x', usage }, LATER, 'mock').tasks[0].usage).toEqual(usage)
+    })
+
+    it('stays null without it, and for a mock task', () => {
+      const { state, taskId } = running()
+      expect(state.tasks[0].usage).toBeNull()
+      expect(applyRuntimeEvent(state, { type: 'completed', taskId, summary: 'x' }, LATER, 'mock').tasks[0].usage).toBeNull()
+    })
+
+    it.each([
+      ['negative cost', { turns: 1, costUsd: -1 }],
+      ['negative turns', { turns: -1, costUsd: 0 }],
+      ['fractional turns', { turns: 1.5, costUsd: 0 }],
+      ['NaN cost', { turns: 1, costUsd: NaN }],
+      ['infinite cost', { turns: 1, costUsd: Infinity }],
+      ['absurd cost', { turns: 1, costUsd: 1001 }],
+      ['absurd turns', { turns: 1001, costUsd: 0 }],
+      ['a string', { turns: '1', costUsd: '0.1' }],
+      ['missing cost', { turns: 1 }],
+    ])('ignores an invalid value (%s)', (_n, bad) => {
+      const { state, taskId } = running()
+      const done = applyRuntimeEvent(state, { type: 'completed', taskId, summary: 'x', usage: bad as never }, LATER, 'mock')
+      expect(done.tasks[0]).toMatchObject({ status: 'completed', usage: null })
+    })
+
+    it('keeps only the two numbers', () => {
+      const { state, taskId } = running()
+      const done = applyRuntimeEvent(state, { type: 'completed', taskId, summary: 'x', usage: { ...usage, note: 'secret' } as never }, LATER, 'mock')
+      expect(done.tasks[0].usage).toEqual(usage)
+    })
+
+    it('is not overwritten by a second event on a finished task', () => {
+      const { state, taskId } = running()
+      const done = applyRuntimeEvent(state, { type: 'completed', taskId, summary: 'x', usage }, LATER, 'mock')
+      expect(applyRuntimeEvent(done, { type: 'failed', taskId, error: 'late', usage: { turns: 9, costUsd: 9 } }, LATER, 'mock')).toBe(done)
+    })
   })
 
   it('ignores events for unknown, finished or removed tasks', () => {

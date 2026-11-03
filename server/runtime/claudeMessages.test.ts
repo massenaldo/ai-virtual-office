@@ -1,33 +1,43 @@
 import { describe, expect, it } from 'vitest'
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
-import { createMessageMapper, EXPECTED_INIT, initProblem } from './claudeMessages'
+import { createMessageMapper, EXPECTED_MODE, initProblem } from './claudeMessages'
 
 // Messages shaped like the ones a real 0.3.317 session sent in a recorded run (init, an authentication failure, the result), plus the
 // documented shapes for the rest. Only the fields the mapper reads are filled in.
 const msg = (m: Record<string, unknown>) => m as unknown as SDKMessage
-const init = (over: Record<string, unknown> = {}) => msg({ type: 'system', subtype: 'init', session_id: 'sess-1', tools: [], mcp_servers: [], permissionMode: 'dontAsk', ...over })
+const TOOLS = { 'mcp__vo__vo_read': 'Reading a file', 'mcp__vo__vo_grep': 'Searching files' }
+const EXPECT = { tools: ['mcp__vo__vo_read', 'mcp__vo__vo_grep'], mcpServers: ['vo'] }
+const init = (over: Record<string, unknown> = {}) => msg({ type: 'system', subtype: 'init', session_id: 'sess-1', tools: ['mcp__vo__vo_grep', 'mcp__vo__vo_read'], mcp_servers: [{ name: 'vo', status: 'connected', source: 'sdk' }], permissionMode: 'dontAsk', ...over })
 const assistant = (content: unknown[], over: Record<string, unknown> = {}) => msg({ type: 'assistant', session_id: 'sess-1', message: { role: 'assistant', content }, ...over })
 const result = (over: Record<string, unknown> = {}) => msg({ type: 'result', subtype: 'success', is_error: false, session_id: 'sess-1', result: 'All done.', total_cost_usd: 0.0123, num_turns: 1, ...over })
 
 describe('initProblem', () => {
-  it('accepts exactly the expected session', () => {
-    expect(initProblem(init())).toBeNull()
+  it('accepts exactly the expected session, whatever the order of the tools', () => {
+    expect(initProblem(init(), EXPECT)).toBeNull()
   })
   it.each([
-    ['a tool is visible', { tools: ['Bash'] }, 'tools'],
-    ['an MCP server is attached', { mcp_servers: [{ name: 'x', status: 'connected' }] }, 'mcp'],
-    ['the permission mode is not dontAsk', { permissionMode: 'default' }, 'mode'],
-    ['there is no session id', { session_id: '' }, 'session'],
-  ])('refuses when %s', (_name, over, word) => {
-    expect(initProblem(init(over))).toContain(word)
+    ['a built-in tool is visible', { tools: ['mcp__vo__vo_grep', 'mcp__vo__vo_read', 'Bash'] }, 'unexpected tools are visible: Bash'],
+    ['another of our tools is visible', { tools: ['mcp__vo__vo_grep', 'mcp__vo__vo_read', 'mcp__vo__vo_write'] }, 'unexpected tools are visible: mcp__vo__vo_write'],
+    ['a tool is missing', { tools: ['mcp__vo__vo_read'] }, 'tools are missing: mcp__vo__vo_grep'],
+    ['the tool list is missing', { tools: undefined }, 'the tool list is missing'],
+    ['a second MCP server is attached', { mcp_servers: [{ name: 'vo', status: 'connected' }, { name: 'evil', status: 'connected' }] }, 'unexpected mcp servers: vo,evil'],
+    ['the MCP server has another name', { mcp_servers: [{ name: 'other', status: 'connected' }] }, 'unexpected mcp servers: other'],
+    ['the MCP server is not connected', { mcp_servers: [{ name: 'vo', status: 'failed' }] }, 'an mcp server is not connected'],
+    ['the permission mode is not dontAsk', { permissionMode: 'default' }, 'permission mode is default, not dontAsk'],
+    ['there is no session id', { session_id: '' }, 'the session has no id'],
+  ])('refuses when %s', (_name, over, expected) => {
+    expect(initProblem(init(over), EXPECT)).toBe(expected)
   })
-  it('states what it expects', () => {
-    expect(EXPECTED_INIT).toEqual({ permissionMode: 'dontAsk', tools: [], mcpServers: [] })
+  it('expects the dontAsk mode', () => {
+    expect(EXPECTED_MODE).toBe('dontAsk')
+  })
+  it('with nothing expected, refuses any tool', () => {
+    expect(initProblem(init(), { tools: [], mcpServers: [] })).toContain('unexpected tools')
   })
 })
 
 describe('createMessageMapper', () => {
-  const map = (m: SDKMessage) => createMessageMapper('t1').map(m)
+  const map = (m: SDKMessage) => createMessageMapper('t1', TOOLS).map(m)
 
   it('maps init to started carrying the session id', () => {
     expect(map(init())).toMatchObject({ init: { sessionId: 'sess-1' }, events: [] })
@@ -48,10 +58,29 @@ describe('createMessageMapper', () => {
     expect(map(assistant([{ type: 'text', text: 'Invalid API key · Fix external API key' }], { error: 'authentication_failed', api_error_status: 401 })).events).toEqual([])
   })
 
-  it('treats a tool call as a violation, because no tool exists in this session', () => {
-    const r = map(assistant([{ type: 'tool_use', id: 'u1', name: 'Bash', input: { command: 'ls' } }]))
-    expect(r.violation).toBe('The Claude runtime asked for a tool, and no tool is available.')
+  it('shows a call to one of our tools as its fixed label only, never the input', () => {
+    const r = map(assistant([{ type: 'text', text: 'Let me look.' }, { type: 'tool_use', id: 'u1', name: 'mcp__vo__vo_read', input: { file_path: 'secret/plan.md' } }]))
+    expect(r.events).toEqual([{ type: 'message', taskId: 't1', text: 'Let me look.' }, { type: 'progress', taskId: 't1', step: 'working', message: 'Reading a file' }])
+    expect(JSON.stringify(r)).not.toContain('secret/plan.md')
+    expect(r.violation).toBeUndefined()
+  })
+
+  it.each(['Bash', 'Write', 'mcp__vo__vo_write', 'mcp__other__vo_read', 'toString', '__proto__', ''])('treats a call to %j as a violation', (name) => {
+    const r = map(assistant([{ type: 'tool_use', id: 'u1', name, input: { command: 'ls' } }]))
+    expect(r.violation).toBe('The Claude runtime asked for a tool that is not available.')
     expect(r.events).toEqual([])
+  })
+
+  it('treats a nameless tool call as a violation', () => {
+    expect(map(assistant([{ type: 'tool_use', id: 'u1' }])).violation).toBeDefined()
+  })
+
+  it('shows a tool result as the agent thinking, with fixed text', () => {
+    expect(map(msg({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'u1', content: 'file text with a secret' }] } })).events).toEqual([{ type: 'progress', taskId: 't1', step: 'thinking', message: 'Reading the result' }])
+  })
+
+  it('ignores a user message that is not a tool result', () => {
+    expect(map(msg({ type: 'user', message: { content: 'hello' } }))).toEqual({ events: [] })
   })
 
   it('maps a success result to completed with the final text, and reports usage as numbers only', () => {
@@ -86,7 +115,7 @@ describe('createMessageMapper', () => {
   })
 
   it('ignores every message type it does not know', () => {
-    for (const type of ['stream_event', 'user', 'tool_progress', 'something_new']) expect(map(msg({ type }))).toEqual({ events: [] })
+    for (const type of ['stream_event', 'tool_progress', 'something_new']) expect(map(msg({ type }))).toEqual({ events: [] })
   })
 
   it('notes a permission denial for the audit log, since none should happen', () => {

@@ -116,7 +116,7 @@ export type EnvironmentBadge = { label: string; title: string; tone: 'browser' |
 export function environmentBadge(env: RuntimeEnvironment): EnvironmentBadge {
   if (env.kind === 'browser') return { label: 'Mock · browser', title: 'Tasks are simulated in the browser. No AI is run.', tone: 'browser' }
   if (env.runtime === 'claude') {
-    if (env.available === true) return { label: 'Local backend · Claude', title: 'Tasks run on the Claude Agent SDK. In this version the agent has no tools: it can only answer in text.', tone: 'backend' }
+    if (env.available === true) return { label: 'Local backend · Claude', title: 'Tasks run on the Claude Agent SDK. In this version the agent can read files in the workspace you pick and answer in text; it cannot write or run anything.', tone: 'backend' }
     return { label: 'Local backend · Claude (not available)', title: `${env.reason ?? 'Claude Agent SDK not installed'}. Tasks are refused.`, tone: 'unavailable' }
   }
   if (env.runtime === 'mock') return { label: 'Local backend · mock runtime', title: "Tasks run on the local backend's mock runtime. No AI is run.", tone: env.available === false ? 'unavailable' : 'backend' }

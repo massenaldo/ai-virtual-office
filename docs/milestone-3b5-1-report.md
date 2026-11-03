@@ -17,7 +17,7 @@ Date: 2026-11-03. Branch `feat/3b5-1-sdk-foundation`, based on `main` at `d7c94c
 | `npm run check:secrets` | no secrets found (12 files) |
 | `npm audit` | 0 vulnerabilities (95 packages added) |
 | Built server, `RUNTIME=claude` | no key: `available: false, reason: credentials not configured`; with a key: `available: true`; the key is in no log line |
-| Real SDK through our provider, dummy key | session started, init assertion passed, a real 401 became `The Claude runtime could not sign in. Check the API key.`, no process left behind |
+| Real SDK through our provider, dummy key | session started, init assertion passed, a real 401 became `The Claude runtime could not sign in. Check the API key.` (the "no process left behind" part of this check was not valid, see the correction under question 3) |
 
 `server/fileOps.test.ts` "stops the traversal at the entry cap" failed once in a full parallel run (6.4 s) and passed alone and in the later full runs; it is a timing-sensitive test that exists on `main` and was not changed.
 
@@ -44,7 +44,7 @@ The provider never starts a process: the SDK does. `server/noProcessExecution.te
 | # | Question | Answer from this stage |
 |---|---|---|
 | 1 | Does `tools: []` remove every built-in in 0.3.317? | **For our option set, yes**: a real session reported `tools: []` and `mcp_servers: []` in `init`, including with the deny callback and hook set. The init assertion stays so a future version cannot change this silently |
-| 3 | Does abort end the child, and does it exit when our process dies? | Abort at init: the child was gone within 3 s, and the SDK threw `Operation aborted`. After a normal end: 0 children. Killing the parent with SIGKILL left no child, **but that run was ended by the 401 within about 0.7 s, so this is not conclusive**; a long real run must repeat it |
+| 3 | Does abort end the child, and does it exit when our process dies? | **Corrected in 3B.5.2:** the process checks made here used a name pattern that never matched the child (the binary renames itself to plain `claude`), so the counts reported in this stage were not valid evidence. They were redone in 3B.5.2 with the right check: the child is visible while a tool call runs, exits after abort, and exits within 4 s after the parent is killed with SIGKILL mid-call (see `docs/milestone-3b5-2-report.md`). What this stage did show is that abort at init makes the SDK throw `Operation aborted` |
 | 6 | Does `dontAsk` with no `allowedTools` work? | Accepted by the binary; `init.permissionMode` was `dontAsk` |
 | 2, 4, 5, 7 | MCP tool timeout, memory per child, result subtypes, `permissionPrompts` | Not needed without tools / not measured. 2 and 4 belong to 3B.5.2 |
 

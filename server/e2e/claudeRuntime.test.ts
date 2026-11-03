@@ -26,7 +26,7 @@ async function boot(env: Record<string, string> = {}) {
   const dir = tempDataDir()
   const query = fakeQuery()
   const log = recordingLogger()
-  const provider = new ClaudeAgentRuntimeProvider({ apiKey: new Secret(KEY), dataDir: dir, query, log })
+  const provider = new ClaudeAgentRuntimeProvider({ apiKey: new Secret(KEY), dataDir: dir, query, log, protectedRoots: [dir] })
   s = await startTestServer({ ...ws.env, DATA_DIR: dir, RUNTIME: 'claude', ANTHROPIC_API_KEY: KEY, ...env }, { provider, log })
   const stream = await openEventStream(s.url, { token: s.app.apiToken.value })
   streams.push(stream)

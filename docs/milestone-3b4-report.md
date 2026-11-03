@@ -27,7 +27,8 @@ Final verification: 90 files, 1529 tests pass; `tsc -b`, build, secrets check an
 | B3 token and data folder readable by same-user processes | Mitigated (denylist, 0600, no Bash); residual same-user risk stays, see `native-host-execution.md` |
 | B4 browser session | Closed for backend and browser by stage D; the dev proxy limitation stays documented |
 | B5 permissions UI | Closed by stage F |
-| B6, B7 TOCTOU, abort of in-flight calls | Addressed in stage E by descriptor-based operations that check the signal; not tested against a real SDK abort |
+| B6 TOCTOU | Narrowed by stage E, not eliminated (no `openat`) |
+| B7 abort of in-flight calls | Closed as "refused before start"; a call already running is not interrupted; not tested against a real SDK abort |
 | B8 end-to-end with SSE | Closed by stage G |
 | B9 stale task rules after a restart | **Open** (inert, may show stale entries) |
 | B10 redact timing flake, no coverage tool, 1.3 MB chunk | **Open** |

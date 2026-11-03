@@ -22,7 +22,7 @@ export function foldName(s: string): string {
 
 function sensitiveSegment(segment: string): boolean {
   const s = foldName(segment)
-  return SENSITIVE_NAMES.has(s) || SENSITIVE_PREFIXES.some((p) => s.startsWith(p)) || SENSITIVE_EXTENSIONS.some((e) => s.endsWith(e)) || s.includes('.tfstate.')
+  return SENSITIVE_NAMES.has(s) || SENSITIVE_PREFIXES.some((p) => s.startsWith(p)) || SENSITIVE_EXTENSIONS.some((e) => s.endsWith(e)) || s.includes('.tfstate.') || s.includes('.tfvars.')
 }
 
 function sensitiveSegments(segments: readonly string[]): boolean {

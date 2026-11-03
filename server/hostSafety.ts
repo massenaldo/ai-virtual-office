@@ -3,6 +3,9 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { ServerConfig } from './config'
 import type { Logger } from './log'
+import { ruleState } from './permissions/engine'
+import type { PermissionRule } from './permissions/types'
+import { foldName } from './sensitivePaths'
 import { resolveWorkspace, isInside } from './workspaces'
 
 // What the Claude runtime cannot check for itself: who the server runs as and what else that user can reach. The agent's tools
@@ -39,20 +42,22 @@ export function checkHost(f: HostFacts): HostCheck {
   const refuse: string[] = []
   const warn: string[] = []
   if (f.runtime !== 'claude') return { refuse, warn }
+  // A case-insensitive file system treats /Users/Me and /users/me as one folder, so every comparison is on folded names.
+  const inside = (parent: string, child: string): boolean => isInside(foldName(parent), foldName(child))
 
   if (f.uid === 0 && !f.allowRoot) {
     refuse.push('Refusing to run RUNTIME=claude as root. Run the server as a dedicated unprivileged user (see docs/os-user-hardening.md), or set VO_ALLOW_ROOT=yes if you accept that the agent then runs with root\'s privileges.')
   }
   for (const w of f.workspaces) {
-    if (isInside(w.path, f.projectDir)) {
+    if (inside(w.path, f.projectDir)) {
       refuse.push(`Workspace "${w.id}" contains the application's own folder, so the agent could change the server's code and settings. Point the workspace at a folder that does not contain this project.`)
     }
   }
   for (const w of f.workspaces) {
-    if (isInside(w.path, f.home)) {
+    if (inside(w.path, f.home)) {
       refuse.push(`Workspace "${w.id}" contains the server user's home folder, which holds personal files and credentials. Use a folder made for the agent.`)
     }
-    if (f.workspaceRoot !== null && w.path === f.workspaceRoot) {
+    if (f.workspaceRoot !== null && foldName(w.path) === foldName(f.workspaceRoot)) {
       refuse.push(`Workspace "${w.id}" is the whole workspace root. Give each workspace its own folder under WORKSPACE_ROOT.`)
     }
   }
@@ -60,7 +65,7 @@ export function checkHost(f: HostFacts): HostCheck {
     for (let j = i + 1; j < f.workspaces.length; j++) {
       const a = f.workspaces[i]!
       const b = f.workspaces[j]!
-      if (isInside(a.path, b.path) || isInside(b.path, a.path)) {
+      if (inside(a.path, b.path) || inside(b.path, a.path)) {
         refuse.push(`Workspaces "${a.id}" and "${b.id}" overlap, so a grant or a change in one reaches the other. Give each its own folder.`)
       }
     }
@@ -79,7 +84,7 @@ export function readHostFacts(config: ServerConfig, env: Record<string, string |
   let dataDirMode: number | null = null
   try { dataDirMode = statSync(config.dataDir).mode & 0o777 } catch { dataDirMode = null }
   let projectDir = cwd
-  try { projectDir = realpathSync(cwd) } catch { /* keep the given path */ }
+  try { projectDir = realpathSync.native(cwd) } catch { /* keep the given path */ }
   const workspaces: HostFacts['workspaces'] = []
   for (const entry of config.workspaces) {
     const resolved = resolveWorkspace(config, entry.id)
@@ -87,7 +92,7 @@ export function readHostFacts(config: ServerConfig, env: Record<string, string |
   }
   const homeRaw = env.HOME ?? homedir()
   let home = homeRaw
-  try { home = realpathSync(homeRaw) } catch { /* keep the given path */ }
+  try { home = realpathSync.native(homeRaw) } catch { /* keep the given path */ }
   const homeCredentials = HOME_CREDENTIALS.filter((name) => existsSync(join(home, name)))
   return { runtime: config.runtime, uid: typeof process.getuid === 'function' ? process.getuid() : null, allowRoot: env.VO_ALLOW_ROOT === 'yes', dataDir: config.dataDir, dataDirMode, projectDir, home, workspaceRoot: config.workspaceRoot, workspaces, homeCredentials: [...homeCredentials] }
 }
@@ -99,3 +104,12 @@ export function enforceHostSafety(config: ServerConfig, log: Logger, env: Record
   for (const message of refuse) log.error(message)
   return refuse.length === 0
 }
+
+
+/** Agent and task rules that allow Write or Edit in every workspace: made before rules were bound to a workspace. */
+export function countUnboundWriteRules(rules: readonly PermissionRule[], at: string): number {
+  return rules.filter((r) => (r.scope === 'agent' || r.scope === 'task') && r.effect === 'allow' && (r.tool === 'Write' || r.tool === 'Edit') && r.workspaceId === null && ruleState(r, at) === 'active').length
+}
+
+export const UNBOUND_WRITE_RULES_WARNING = (count: number): string =>
+  `${count} active agent or task permission ${count === 1 ? 'rule allows' : 'rules allow'} file writes in every workspace (they were made before workspace binding). Review and revoke them in the permissions panel.`

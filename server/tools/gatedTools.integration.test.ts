@@ -313,3 +313,46 @@ describe('vo_run runs nothing', () => {
     expect(existsSync(join(process.cwd(), 'pwned'))).toBe(false)
   })
 })
+
+describe('private key blocks are hidden from read and search, whatever the file looks like', () => {
+  const BODY = 'MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7BODYMARKER'
+  const put = (name: string, text: string) => writeFileSync(join(wsPath(), 'dir', name), text)
+  const rel = (name: string) => `dir/${name}`
+  const cases: Array<[string, () => string]> = [
+    ['a block with no END line', () => `head\n-----BEGIN RSA PRIVATE KEY-----\n${BODY}\n${BODY}\n`],
+    ['CRLF line endings', () => `head\r\n-----BEGIN RSA PRIVATE KEY-----\r\n${BODY}\r\n-----END RSA PRIVATE KEY-----\r\ntail\r\n`],
+    ['two blocks in one file', () => `-----BEGIN RSA PRIVATE KEY-----\n${BODY}\n-----END RSA PRIVATE KEY-----\nmiddle\n-----BEGIN EC PRIVATE KEY-----\n${BODY}\n-----END EC PRIVATE KEY-----\n`],
+    ['a block that straddles the read cap', () => `${'x'.repeat(65536 - 100)}\n-----BEGIN RSA PRIVATE KEY-----\n${BODY}\n${BODY}\n${BODY}\n${BODY}\n-----END RSA PRIVATE KEY-----\n`],
+    ['a PGP private key block', () => `head\n-----BEGIN PGP PRIVATE KEY BLOCK-----\n\n${BODY}\n-----END PGP PRIVATE KEY BLOCK-----\n`],
+    ['a PuTTY key file', () => `PuTTY-User-Key-File-3: ssh-ed25519\nPublic-Lines: 1\nAAAAC3\nPrivate-Lines: 1\n${BODY}\nPrivate-MAC: 00ff\ntail\n`],
+  ]
+
+  it.each(cases)('vo_read does not show the key body: %s', async (_name, make) => {
+    put('deploy_ident', make())
+    const { tools } = await start()
+    const r = await tools.vo_read({ file_path: rel('deploy_ident') })
+    expect(r.ok).toBe(true)
+    expect(JSON.stringify(r)).not.toContain('BODYMARKER')
+    expect(JSON.stringify(r)).toContain('[REDACTED]')
+  })
+
+  it.each(cases)('vo_read with offset and limit does not show the key body: %s', async (_name, make) => {
+    put('deploy_ident', make())
+    const { tools } = await start()
+    for (const window of [{ offset: 2, limit: 3 }, { offset: 3 }, { limit: 2 }]) {
+      const r = await tools.vo_read({ file_path: rel('deploy_ident'), ...window })
+      expect(JSON.stringify(r)).not.toContain('BODYMARKER')
+    }
+  })
+
+  it.each(cases)('vo_grep finds nothing inside the key, in both modes: %s', async (_name, make) => {
+    put('deploy_ident', make())
+    const { tools } = await start()
+    for (const output_mode of ['content', 'files_with_matches']) {
+      for (const pattern of ['BODYMARKER', 'MIIEvQIBADAN']) {
+        const r = await tools.vo_grep({ pattern, path: 'dir', output_mode })
+        expect(r).toMatchObject({ ok: true, text: 'No matches found.' })
+      }
+    }
+  })
+})

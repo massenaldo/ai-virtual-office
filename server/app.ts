@@ -20,6 +20,7 @@ import type { ServerRuntimeProvider } from './runtime/types'
 import { openWorkforceStore, type WorkforceStore } from './store'
 import { toRuleView } from './permissions/view'
 import { openPermissionStore, type PermissionChange, type PermissionStore } from './permissions/store'
+import { countUnboundWriteRules, UNBOUND_WRITE_RULES_WARNING } from './hostSafety'
 import { TaskManager, type LifecycleEvent } from './taskManager'
 import { toolPolicyFrom } from './toolPolicy'
 
@@ -93,6 +94,10 @@ export function createApp(config: ServerConfig, deps: AppDeps = {}): App {
     // Rules of agents that no longer exist go too. Agent and global rules of existing agents are kept, as documented.
     for (const rule of permissions.reconcile({ liveTaskIds: new Set(), agentIds: new Set(store.state.agents.map((a) => a.id)) })) {
       if (rule.endedAt !== null && rule.revokedAt === null) audit.write({ action: 'permission.ended', actor: 'system', ruleId: rule.id, tool: rule.tool, reason: 'restart', detail: rule.scope, ...(rule.agentId !== null ? { agentId: rule.agentId } : {}), ...(rule.taskId !== null ? { taskId: rule.taskId } : {}) })
+    }
+    if (config.runtime === 'claude') {
+      const unbound = countUnboundWriteRules(permissions.rules, now())
+      if (unbound > 0) log.warn(UNBOUND_WRITE_RULES_WARNING(unbound))
     }
     const manager = new TaskManager({ store, provider, permissions, config, policy: toolPolicyFrom(config), now, log, onLifecycle: (e) => audit.write(toAuditInput(e)) })
     const streams = new Set<ServerResponse>()

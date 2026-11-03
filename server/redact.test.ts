@@ -196,6 +196,34 @@ describe('redactSecrets: JWT, Slack, Google, PEM, -p and URL passwords', () => {
   })
 })
 
+describe('PGP and PuTTY private keys', () => {
+  const B = 'lQdGBF8bodybodybodybodybodybodybody1234567890abcdef'
+  const pgp = (end = true) => `-----BEGIN PGP PRIVATE KEY BLOCK-----\n\n${B}\n${B}\n${end ? '-----END PGP PRIVATE KEY BLOCK-----' : ''}`
+  const ppk = (mac = true) => `PuTTY-User-Key-File-3: ssh-ed25519\nEncryption: none\nComment: deploy\nPublic-Lines: 2\nAAAApublicpart\nPrivate-Lines: 1\nAAAAprivatepart${mac ? '\nPrivate-MAC: 0123abcd' : ''}`
+  it('redacts a PGP private key block and keeps the text around it', () => {
+    expect(redactSecrets(`before\n${pgp()}\nafter`)).toBe('before\n[REDACTED]\nafter')
+    expect(redactSecrets(`a ${pgp(false)}`)).toBe('a [REDACTED]')
+  })
+  it('keeps a PGP public key block', () => {
+    const pub = `-----BEGIN PGP PUBLIC KEY BLOCK-----\n\n${B}\n-----END PGP PUBLIC KEY BLOCK-----`
+    expect(redactSecrets(pub)).toBe(pub)
+  })
+  it('redacts a PuTTY key file from its header through the Private-MAC line', () => {
+    const out = redactSecrets(`top\n${ppk()}\nbottom`)
+    expect(out).toBe('top\n[REDACTED]\nbottom')
+    expect(out).not.toContain('privatepart')
+  })
+  it('redacts a PuTTY key file with no MAC line to the end, and with CRLF', () => {
+    expect(redactSecrets(`x ${ppk(false)}`)).toBe('x [REDACTED]')
+    expect(redactSecrets(ppk().replace(/\n/g, '\r\n') + '\r\nafter')).toBe('[REDACTED]\nafter'.replace('\n', '\r\n'))
+  })
+  it('costs about linear time on repeated starts', () => {
+    expectLinear('pgp starts', (n) => '-----BEGIN PGP PRIVATE KEY BLOCK-----\n'.repeat(n), 800)
+    expectLinear('putty starts', (n) => 'PuTTY-User-Key-File-3: x\n'.repeat(n), 800)
+    expectLinear('pgp near misses', (n) => '-----BEGIN PGP PUBLIC KEY BLOCK-----\n'.repeat(n), 800)
+  })
+})
+
 describe('scrub', () => {
   it('truncates after redacting', () => {
     const long = scrub('a'.repeat(600))

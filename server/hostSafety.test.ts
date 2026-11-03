@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { parseConfig } from './config'
-import { checkHost, enforceHostSafety, readHostFacts, type HostFacts } from './hostSafety'
+import { checkHost, countUnboundWriteRules, enforceHostSafety, readHostFacts, UNBOUND_WRITE_RULES_WARNING, type HostFacts } from './hostSafety'
+import type { PermissionRule } from './permissions/types'
 import { recordingLogger } from './log'
 
 const base: HostFacts = { runtime: 'claude', uid: 1000, allowRoot: false, dataDir: '/srv/vo/data', dataDirMode: 0o700, projectDir: '/srv/vo/app', home: '/home/vo', workspaceRoot: '/srv/vo/workspaces', workspaces: [{ id: 'sandbox', path: '/srv/vo/workspaces/sandbox' }], homeCredentials: [] }
@@ -128,5 +129,42 @@ describe('reading the facts and enforcing them', () => {
     const log = recordingLogger()
     expect(enforceHostSafety(s.config, log, { HOME: s.home }, s.root)).toBe(true)
     expect(log.lines).toEqual([])
+  })
+})
+
+
+describe('checkHost compares folded names', () => {
+  it('refuses a workspace that contains the project folder under a different spelling', () => {
+    expect(checkHost({ ...base, workspaces: [{ id: 'big', path: '/SRV/Vo' }] }).refuse[0]).toContain('contains the application')
+  })
+  it('refuses a workspace that equals the home folder under a different case or Unicode fold', () => {
+    expect(checkHost({ ...base, workspaces: [{ id: 'h', path: '/HOME/VO' }] }).refuse[0]).toContain('home folder')
+    expect(checkHost({ ...base, home: '/home/ſo', workspaces: [{ id: 'h', path: '/home/SO' }] }).refuse[0]).toContain('home folder')
+  })
+  it('refuses overlapping workspaces and the workspace root whatever the case', () => {
+    const r = checkHost({ ...base, workspaces: [{ id: 'a', path: '/srv/vo/workspaces/Team' }, { id: 'b', path: '/srv/vo/workspaces/team/x' }] })
+    expect(r.refuse).toEqual([expect.stringContaining('overlap')])
+    expect(checkHost({ ...base, workspaces: [{ id: 'dot', path: '/SRV/VO/WORKSPACES' }] }).refuse).toEqual([expect.stringContaining('whole workspace root')])
+  })
+  it('still accepts siblings that differ only by a longer name', () => {
+    expect(checkHost({ ...base, workspaces: [{ id: 'a', path: '/SRV/vo/workspaces/a' }, { id: 'b', path: '/srv/vo/workspaces/AB' }] })).toEqual({ refuse: [], warn: [] })
+  })
+})
+
+describe('countUnboundWriteRules', () => {
+  const at = '2026-01-01T00:00:00.000Z'
+  const rule = (o: Partial<PermissionRule>): PermissionRule => ({ id: 'r', scope: 'agent', effect: 'allow', tool: 'Write', agentId: 'a', taskId: null, pathPattern: null, workspaceId: null, digest: null, createdAt: at, createdBy: 'user', expiresAt: null, revokedAt: null, usedAt: null, endedAt: null, reason: null, ...o })
+  it('counts active agent and task allow rules for Write or Edit that have no workspace', () => {
+    expect(countUnboundWriteRules([rule({}), rule({ tool: 'Edit' }), rule({ scope: 'task', taskId: 't' })], at)).toBe(3)
+  })
+  it('ignores bound, revoked, expired, used, ended, ask, deny, read and global rules', () => {
+    expect(countUnboundWriteRules([
+      rule({ workspaceId: 'sandbox' }), rule({ revokedAt: at }), rule({ expiresAt: '2025-01-01T00:00:00.000Z' }), rule({ endedAt: at }),
+      rule({ effect: 'ask' }), rule({ effect: 'deny' }), rule({ tool: 'Read' }), rule({ scope: 'global', agentId: null }), rule({ scope: 'once', digest: 'a'.repeat(64), taskId: 't' }),
+    ], at)).toBe(0)
+  })
+  it('the warning names the count and carries no path', () => {
+    expect(UNBOUND_WRITE_RULES_WARNING(2)).toBe('2 active agent or task permission rules allow file writes in every workspace (they were made before workspace binding). Review and revoke them in the permissions panel.')
+    expect(UNBOUND_WRITE_RULES_WARNING(1)).toContain('1 active agent or task permission rule allows')
   })
 })

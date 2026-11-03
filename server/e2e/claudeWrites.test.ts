@@ -507,6 +507,13 @@ describe('permissions made from an approval belong to one workspace', () => {
     expect((await api('GET', '/api/permissions')).body.rules.some((r: { workspaceId?: string }) => r.workspaceId === 'ghost')).toBe(false)
   })
 
+  it.each(['../x', 'A', 'x'.repeat(40), '', 'sand box', '/etc'])('refuses a malformed workspace id %j with the same fixed sentence', async (workspaceId) => {
+    h = await start({ ALLOW_BROAD_WRITE_SCOPES: 'yes' }, undefined, ['docs'])
+    const bad = await api('POST', '/api/permissions', { scope: 'agent', effect: 'allow', tool: 'Write', agentId: 'agent-demo-backend', workspaceId })
+    expect(bad.status).toBe(422)
+    expect(bad.body).toEqual({ error: 'Unknown workspace.' })
+  })
+
   it('accepts a rule for a registered workspace, shows it, and applies it there only', async () => {
     h = await start({ ALLOW_BROAD_WRITE_SCOPES: 'yes' }, undefined, ['docs'])
     const ok = await api('POST', '/api/permissions', { scope: 'agent', effect: 'allow', tool: 'Write', agentId: 'agent-demo-backend', workspaceId: 'sandbox' })

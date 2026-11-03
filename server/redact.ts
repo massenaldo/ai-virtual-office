@@ -86,7 +86,7 @@ function redactPrivateKeys(text: string): string {
   while (from !== -1) {
     const labelEnd = text.indexOf('-----', from + BEGIN.length)
     const label = labelEnd === -1 ? '' : text.slice(from + BEGIN.length, labelEnd)
-    if (labelEnd === -1 || !/PRIVATE KEY$/.test(label) || label.length > 40) {
+    if (labelEnd === -1 || !/PRIVATE KEY( BLOCK)?$/.test(label) || label.length > 40) {
       from = text.indexOf(BEGIN, from + BEGIN.length)
       continue
     }
@@ -94,6 +94,29 @@ function redactPrivateKeys(text: string): string {
     out += text.slice(cursor, from) + REDACTED
     cursor = end === -1 ? text.length : end + `-----END ${label}-----`.length
     from = end === -1 ? -1 : text.indexOf(BEGIN, cursor)
+  }
+  return out + text.slice(cursor)
+}
+
+/**
+ * PuTTY key files have no PEM frame: they start with `PuTTY-User-Key-File-N:` and end with the `Private-MAC:` line. The whole
+ * file from the header through that line is redacted; with no MAC line (a cut-short copy) it is redacted to the end.
+ */
+function redactPuttyKeys(text: string): string {
+  const HEADER = 'PuTTY-User-Key-File-'
+  let from = text.indexOf(HEADER)
+  if (from === -1) return text
+  let out = ''
+  let cursor = 0
+  while (from !== -1) {
+    const mac = text.indexOf('Private-MAC:', from)
+    out += text.slice(cursor, from) + REDACTED
+    if (mac === -1) return out
+    let lineEnd = text.indexOf('\n', mac)
+    if (lineEnd === -1) return out
+    if (text[lineEnd - 1] === '\r') lineEnd--
+    cursor = lineEnd
+    from = text.indexOf(HEADER, cursor)
   }
   return out + text.slice(cursor)
 }
@@ -128,7 +151,7 @@ function redactJwts(text: string): string {
 }
 
 export function redactSecrets(text: string): string {
-  return PATTERNS.reduce((t, [re, to]) => t.replace(re, to as string), redactJwts(redactPrivateKeys(text)))
+  return PATTERNS.reduce((t, [re, to]) => t.replace(re, to as string), redactJwts(redactPuttyKeys(redactPrivateKeys(text))))
 }
 
 /** Redacts, then cuts to maxChars (the last character becomes an ellipsis). */

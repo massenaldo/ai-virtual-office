@@ -16,6 +16,7 @@ import type { ServerRuntimeProvider } from '../runtime/types'
 import type { WorkforceStore } from '../store'
 import type { ManagerError, TaskManager } from '../taskManager'
 import { parseApproval, parseCreateAgent, parseCreatePermission, parseCreateTask, parseDesk, parsePatchAgent } from './inputs'
+import { WORKSPACE_ID_RE } from '../workspaces'
 import { HttpError, type Reply, type Route } from './router'
 import { createSessionRoutes } from './sessionRoutes'
 import type { SessionStore } from '../session'
@@ -186,7 +187,8 @@ export function createRoutes(deps: RouteDeps): Route[] {
       handler: ({ body }) => {
         const input = parseCreatePermission(body as Record<string, unknown>)
         if (input.scope === 'agent' && input.agentId !== null && !agent(input.agentId)) throw new HttpError(404, 'Agent not found.')
-        if (input.workspaceId !== null && !config.workspaces.some((w) => w.id === input.workspaceId)) throw new HttpError(422, 'Unknown workspace.')
+        // The shape is checked before the lookup, so a malformed id never reaches the list of configured ones.
+        if (input.workspaceId !== null && (!WORKSPACE_ID_RE.test(input.workspaceId) || !config.workspaces.some((w) => w.id === input.workspaceId))) throw new HttpError(422, 'Unknown workspace.')
         const r = permissions.grant({ ...input, createdBy: 'user' })
         if (!r.ok) throw r.error === 'limit' ? new HttpError(409, 'Too many active permissions.') : new HttpError(422, GRANT_COPY[r.error])
         const reply: PermissionResponse = { rule: view(r.rule) }

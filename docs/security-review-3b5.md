@@ -124,3 +124,24 @@ Counts: Critical 0, High 1, Medium 3, Low 4, Info 6.
 Used with "allow once" only, a careful approver, and a workspace that is a plain project folder (not $HOME, not the server repo), the remaining risk is acceptable. A model can only cause what a person read in full, and the main residual is a person approving a malicious config change such as an npm script or a hook without noticing. With "allow task" or "allow agent", the risk is high: it is effectively "the model may plant code that you will run later", across workspaces (H1). Secrets in the workspace should be treated as readable by the model (M1, L1), so they also go to Anthropic's API and may reach task output.
 
 **Would a dedicated unprivileged OS user change the outcome materially?** Only partly, and only if the whole server runs as that user. The file operations run in the server process (in-process MCP), not in the Claude child, so giving only the child its own user changes nothing. Running the server as a user that can reach only `WORKSPACE_ROOT` and its own `DATA_DIR` would turn M2, M3 and any future path-check bug from a home or credential disclosure into a workspace-only issue, and would protect `~/.claude`, the SSH keys and the server source. It does **not** reduce H1: the planted files are run later by the human (npm, git hooks, Claude Code, CI) under the human's own account or CI secrets. H1 needs the scope and path changes above, not process isolation.
+
+---
+
+## Status after the fixes
+
+Fixed:
+- **H1.** Workspace binding, a once-only class of files that tools run on their own (hidden names, `node_modules`, lock files, CI and container files and more), and the queue re-ask: `fix(server): changes to files that tools run are approved once; queued requests are asked again`, `fix(server): task and agent permissions from an approval belong to their workspace`. A final review found the class can never be complete, so a server default was added: for the Claude runtime a Write or Edit is approved one at a time unless the owner sets `ALLOW_BROAD_WRITE_SCOPES=yes`: `fix(server): hidden and tool-run files are once-only; broad write approvals are off unless ALLOW_BROAD_WRITE_SCOPES=yes`.
+- **M1.** Whole-file redaction before slicing and searching, grep matches redacted text, PGP and PuTTY key blocks: `fix(server): redact whole files before slicing or searching, and more secret formats`, plus the follow-up that adds PGP, PuTTY and the pinning tests.
+- **M2.** One Unicode fold (`foldName`) for the denylist, deny rules, protected roots and the once-only class: `fix(server): fold Unicode names, widen the denylist and check the workspace layout`.
+- **M3.** Host checks (home, project, overlap, workspace root) on real paths, compared folded, and a wider denylist (now also `*.tfvars.json` and `*.auto.tfvars*`): the same commit and the follow-up.
+- **L1.** New secret formats, anchored patterns, and grep matching redacted text only, so the content oracle is gone for every redacted format: `fix(server): redact whole files before slicing or searching, and more secret formats`.
+
+Recorded and not fixed:
+- **L2** (event loop blocked by parallel searches): needs worker threads or async file access, which the project rules forbid for now; the per-call caps bound the stall.
+- **L3** (review does not show an overwrite): a display gap, not a bypass; the person sees the whole new content.
+- **L4** (audit rotation can flush history): needs a retention design; the size is configurable.
+- **I1 to I6:** informational; each is described above and none opens a path to a secret or an unreviewed write.
+
+Notes for the owner:
+- A permission rule binds a workspace id, not a folder. Revoke a workspace's rules before reusing its id for another folder.
+- Agent rules granted before the upgrade stay unbound, so they apply in every workspace. The server logs a warning at each start with the count; review and revoke them in the permissions panel. With broad write scopes off (the default) they cannot allow a write without a fresh approval.

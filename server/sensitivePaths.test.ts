@@ -42,13 +42,13 @@ describe('Unicode folding', () => {
 describe('wider denylist', () => {
   it.each([
     '.credentials.json', '.claude/.credentials.json', '.vault-token', '.s3cfg', '.boto', 'kubeconfig', 'a/Kubeconfig',
-    '.config/gh', '.config/gh/hosts.yml', 'home/.config/gcloud/creds.db', '.azure/x', 'terraform.tfstate', 'x.tfstate.backup', 'prod.tfvars',
+    '.config/gh', '.config/gh/hosts.yml', 'home/.config/gcloud/creds.db', '.azure/x', 'terraform.tfstate', 'x.tfstate.backup', 'prod.tfvars', 'prod.tfvars.json', 'x.auto.tfvars', 'x.auto.tfvars.json', 'Prod.TFVARS.JSON', 'a/x.auto.tfvars.bak',
     '.bash_history', '.zsh_history', '.python_history', '.node_repl_history', '.psql_history', '.mysql_history', 'fish_history', 'secrets.yml', 'secrets.yaml', 'secrets.json',
   ])('refuses %s', (p) => {
     expect(isSensitiveRelative(p)).toBe(true)
     expect(globReachesSensitive(p)).toBe(true)
   })
-  it.each(['.config', '.config/other/hosts.yml', 'config/gh/x', 'hosts.yml', 'gh/hosts.yml', 'history.md', 'secrets.md', 'my.tfstates', 'tfvars.md', 'kubeconfig.md', '.credentials.json.md'])('allows %s', (p) => {
+  it.each(['.config', '.config/other/hosts.yml', 'config/gh/x', 'hosts.yml', 'gh/hosts.yml', 'history.md', 'secrets.md', 'my.tfstates', 'tfvars.md', 'tfvars.jsonx.md', 'auto.tfvarsx', 'kubeconfig.md', '.credentials.json.md'])('allows %s', (p) => {
     expect(isSensitiveRelative(p)).toBe(false)
   })
 })

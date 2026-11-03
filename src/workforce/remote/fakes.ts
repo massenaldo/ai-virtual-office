@@ -48,6 +48,7 @@ export function createFakeBackend(opts: { baseUrl: string; state: StateResponse;
       if (scripted) return reply(scripted.status, scripted.body)
       if (method === 'GET' && path === '/api/state') return reply(200, state)
       if (method === 'GET' && path === '/api/health') return reply(200, opts.health ?? DEFAULT_HEALTH)
+      if (method === 'GET' && (path === '/api/permissions' || path === '/api/permissions/history')) return reply(200, { rules: [] })
       return reply(200, {})
     }) as typeof fetch,
   }

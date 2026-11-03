@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ChangeEvent, StateResponse } from '../api'
+import type { ChangeEvent, PermissionChangedEvent, PermissionRuleView, StateResponse } from '../api'
 import { createDemoWorkforce } from '../demo'
 import type { Agent, AgentTask } from '../types'
 import { createApiClient, NOT_AUTHORIZED } from './client'
@@ -324,5 +324,100 @@ describe('createRemoteSync: offline, restart and cleanup', () => {
     sync.dispose()
     await vi.advanceTimersByTimeAsync(60000)
     expect(backend.calls.length).toBe(count)
+  })
+})
+
+const prule = (id: string, over: Partial<PermissionRuleView> = {}): PermissionRuleView => ({ id, scope: 'global', effect: 'allow', tool: 'Read', agentId: null, taskId: null, pathPattern: null, createdAt: NOW, createdBy: 'user', expiresAt: null, revokedAt: null, usedAt: null, endedAt: null, reason: null, state: 'active', ...over })
+const pevent = (id: string, kind: PermissionChangedEvent['kind'], rule: PermissionRuleView): PermissionChangedEvent => ({ id, type: 'permission.changed', at: NOW, kind, rule })
+
+describe('createRemoteSync: permissions', () => {
+  it('loads the active rules and the history after the snapshot', async () => {
+    start({ before: (b) => { b.respond('GET', '/api/permissions', 200, { rules: [prule('p1')] }); b.respond('GET', '/api/permissions/history', 200, { rules: [prule('p0', { state: 'revoked' })] }) } })
+    expect(sync.getSnapshot().permissions).toEqual({ active: [], history: [], loaded: false, error: null })
+    await flush()
+    const p = sync.getSnapshot().permissions
+    expect(p.loaded).toBe(true)
+    expect(p.active.map((r) => r.id)).toEqual(['p1'])
+    expect(p.history.map((r) => r.id)).toEqual(['p0'])
+  })
+
+  it('applies permission.changed from the stream without touching the workforce state', async () => {
+    start()
+    await flush()
+    const before = sync.getSnapshot().state
+    es(0).emit(pevent('b1:6', 'granted', prule('p9')))
+    expect(sync.getSnapshot().permissions.active.map((r) => r.id)).toEqual(['p9'])
+    expect(sync.getSnapshot().state).toBe(before)
+    es(0).emit(pevent('b1:7', 'revoked', prule('p9', { state: 'revoked', revokedAt: NOW })))
+    expect(sync.getSnapshot().permissions.active).toEqual([])
+    expect(sync.getSnapshot().permissions.history.map((r) => r.id)).toEqual(['p9'])
+  })
+
+  it('an event that arrives while the lists load is not lost to an older list', async () => {
+    start()
+    const release = backend.hold('/api/permissions')
+    await flush()
+    es(0).emit(pevent('b1:6', 'granted', prule('p-new')))
+    release()
+    await flush()
+    expect(sync.getSnapshot().permissions.active.map((r) => r.id)).toEqual(['p-new'])
+    expect(sync.getSnapshot().permissions.loaded).toBe(true)
+  })
+
+  it('a replayed or older permission event is ignored like any other', async () => {
+    start()
+    await flush()
+    es(0).emit(pevent('b1:6', 'granted', prule('p1')))
+    es(0).emit(pevent('b1:6', 'revoked', prule('p1', { state: 'revoked' })))
+    es(0).emit(pevent('b1:4', 'revoked', prule('p1', { state: 'revoked' })))
+    expect(sync.getSnapshot().permissions.active.map((r) => r.id)).toEqual(['p1'])
+  })
+
+  it('a malformed event starts over from the snapshot', async () => {
+    start()
+    await flush()
+    es(0).emitRaw('permission.changed', '{nope')
+    await flush()
+    expect(calls(backend, '/api/state')).toBe(2)
+  })
+
+  it('reloads both lists after a state.reset and after a reconnect', async () => {
+    start()
+    await flush()
+    expect(calls(backend, '/api/permissions')).toBe(1)
+    es(0).emit(reset('b1:6'))
+    await flush()
+    expect(calls(backend, '/api/permissions')).toBe(2)
+    expect(calls(backend, '/api/permissions/history')).toBe(2)
+    es(1).fail()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(calls(backend, '/api/permissions')).toBe(3)
+  })
+
+  it('a failed list load keeps the old lists and says why once', async () => {
+    start({ before: (b) => b.respond('GET', '/api/permissions', 200, { rules: [prule('p1')] }) })
+    await flush()
+    backend.respond('GET', '/api/permissions', 500, { error: 'No permissions today.' })
+    es(0).emit(reset('b1:6'))
+    await flush()
+    const p = sync.getSnapshot().permissions
+    expect(p.active.map((r) => r.id)).toEqual(['p1'])
+    expect(p.error).toBe('No permissions today.')
+  })
+
+  it('a malformed list body is a failed load, not an empty list', async () => {
+    start({ before: (b) => b.respond('GET', '/api/permissions', 200, { rules: [{ id: 1 }] }) })
+    await flush()
+    expect(sync.getSnapshot().permissions).toMatchObject({ loaded: false, active: [], error: 'The backend sent an invalid permission list.' })
+  })
+
+  it('a load that finishes after dispose or a newer connect changes nothing', async () => {
+    start()
+    const release = backend.hold('/api/permissions')
+    await flush()
+    sync.dispose()
+    release()
+    await flush()
+    expect(sync.getSnapshot().permissions.loaded).toBe(false)
   })
 })

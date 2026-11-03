@@ -25,6 +25,29 @@ function make(state = stateAt('b1:5'), before?: (b: ReturnType<typeof createFake
 beforeEach(() => { vi.useFakeTimers(); FakeEventSource.reset() })
 afterEach(() => { c?.dispose(); vi.useRealTimers() })
 
+describe('createRemoteWorkforceController: permissions', () => {
+  it('exposes the live permission lists next to the workforce state', async () => {
+    make(stateAt('b1:5'), (b) => b.respond('GET', '/api/permissions', 200, { rules: [{ id: 'p1', scope: 'global', effect: 'deny', tool: 'Bash', agentId: null, taskId: null, pathPattern: null, createdAt: NOW, createdBy: 'default', expiresAt: null, revokedAt: null, usedAt: null, endedAt: null, reason: null, state: 'active' }] }))
+    expect(c.getSnapshot().permissions).toMatchObject({ loaded: false, active: [] })
+    await flush()
+    expect(c.getSnapshot().permissions?.active.map((r) => r.id)).toEqual(['p1'])
+  })
+
+  it('offers the permission commands in backend mode', async () => {
+    make()
+    await flush()
+    expect(await c.revokePermission!('p1')).toEqual({ ok: true })
+    expect(backend.calls.at(-1)).toMatchObject({ method: 'DELETE', url: `${BASE}/api/permissions/p1` })
+  })
+
+  it('a misconfigured backend address has no permissions and makes no request', () => {
+    backend = createFakeBackend({ baseUrl: BASE, state: stateAt('b1:5') })
+    c = createRemoteWorkforceController({ baseUrl: BASE, configError: 'Bad address.', fetch: backend.fetch })
+    expect(c.getSnapshot().permissions).toBeNull()
+    expect(backend.calls).toEqual([])
+  })
+})
+
 describe('createRemoteWorkforceController', () => {
   it('createAgent shows the agent before its event arrives', async () => {
     make()

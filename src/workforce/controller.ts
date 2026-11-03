@@ -4,6 +4,8 @@ import type { AgentInput, TaskInput } from './operations'
 import { MockRuntimeProvider } from './runtime/mockRuntime'
 import type { MockDemoControls, RuntimeProvider } from './runtime/types'
 import { loadWorkforce, saveWorkforce, type Preserved } from './storage'
+import type { CreatePermissionBody } from './api'
+import type { PermissionsState } from './permissions'
 import type { ApprovalChoice, WorkforceState } from './types'
 
 type KV = Pick<Storage, 'getItem' | 'setItem'>
@@ -28,6 +30,8 @@ export type WorkforceSnapshot = {
   needsPairing: boolean
   /** Shown above the pairing form when the page and backend host names differ (the cookie would not be kept); otherwise null. Never contains a token. */
   pairingNote: string | null
+  /** The backend's permission rules, kept live; null in browser mode (the local mock has no permission engine) and when the backend address is misconfigured. */
+  permissions: PermissionsState | null
 }
 export type ActionResult = { ok: true } | { ok: false; error: string }
 
@@ -49,6 +53,10 @@ export type WorkforceController = {
   dismissCommandError(): void
   /** Backend mode only: trade the API token for a session cookie. The token is never kept. */
   pair?(token: string): Promise<ActionResult>
+  /** Backend mode only; a refusal comes back as the server's own text. Changes arrive as permission.changed events. */
+  createPermission?(body: CreatePermissionBody): Promise<ActionResult>
+  revokePermission?(permissionId: string): Promise<ActionResult>
+  revokeAgentPermissions?(agentId: string): Promise<ActionResult>
   dispose(): void
 }
 
@@ -63,7 +71,7 @@ export function createWorkforceController(opts: { storage: KV | null; now?: () =
   const loaded = loadWorkforce(opts.storage, now())
   const listeners = new Set<() => void>()
   let current = loaded.state
-  let snapshot: WorkforceSnapshot = { state: current, loadProblem: loaded.problem, preserved: loaded.preserved, saveError: null, environment: { kind: 'browser' }, connection: 'local', lastSyncedAt: null, commandError: null, connectionError: null, needsPairing: false, pairingNote: null }
+  let snapshot: WorkforceSnapshot = { state: current, loadProblem: loaded.problem, preserved: loaded.preserved, saveError: null, environment: { kind: 'browser' }, connection: 'local', lastSyncedAt: null, commandError: null, connectionError: null, needsPairing: false, pairingNote: null, permissions: null }
   let disposed = false
 
   const publish = (patch: Partial<WorkforceSnapshot>) => {

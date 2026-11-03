@@ -1,6 +1,7 @@
-import { applyWorkforceEvent, parseEventId, WORKFORCE_EVENT_TYPES, type HealthResponse, type StateResponse, type WorkforceEvent } from '../api'
+import { applyWorkforceEvent, parseEventId, WORKFORCE_EVENT_TYPES, type HealthResponse, type PermissionChangedEvent, type PermissionsResponse, type StateResponse, type WorkforceEvent } from '../api'
 import type { WorkforceSnapshot } from '../controller'
 import { emptyWorkforce } from '../operations'
+import { applyPermissionEvent, emptyPermissions, parsePermissionLists, withLists, type PermissionsState } from '../permissions'
 import type { Agent } from '../types'
 import type { ApiClient } from './client'
 
@@ -8,7 +9,7 @@ export type EventSourceLike = {
   addEventListener(type: string, listener: (event: { data?: string }) => void): void
   close(): void
 }
-export type SyncSnapshot = Pick<WorkforceSnapshot, 'state' | 'loadProblem' | 'preserved' | 'saveError' | 'environment' | 'connection' | 'lastSyncedAt' | 'connectionError' | 'needsPairing' | 'pairingNote'>
+export type SyncSnapshot = Pick<WorkforceSnapshot, 'state' | 'loadProblem' | 'preserved' | 'saveError' | 'environment' | 'connection' | 'lastSyncedAt' | 'connectionError' | 'needsPairing' | 'pairingNote'> & { permissions: PermissionsState }
 /** How the snapshot answered a (re)connect: ok (or superseded), 401, or any other failure. */
 export type ReconnectOutcome = 'ok' | 'unauthorized' | 'failed'
 export type RemoteSync = {
@@ -34,7 +35,7 @@ export function createRemoteSync(opts: { client: ApiClient; createEventSource: (
   const { client } = opts
   const now = opts.now ?? (() => new Date().toISOString())
   const listeners = new Set<() => void>()
-  let snap: SyncSnapshot = { state: emptyWorkforce(), loadProblem: null, preserved: null, saveError: null, environment: { kind: 'backend', runtime: null, available: null, reason: null }, connection: 'connecting', lastSyncedAt: null, connectionError: null, needsPairing: false, pairingNote: null }
+  let snap: SyncSnapshot = { state: emptyWorkforce(), loadProblem: null, preserved: null, saveError: null, environment: { kind: 'backend', runtime: null, available: null, reason: null }, connection: 'connecting', lastSyncedAt: null, connectionError: null, needsPairing: false, pairingNote: null, permissions: emptyPermissions() }
   let generation = 0
   let cursor: { boot: string; seq: number } | null = null
   let stream: EventSourceLike | null = null
@@ -43,6 +44,8 @@ export function createRemoteSync(opts: { client: ApiClient; createEventSource: (
   let attempt = 0
   let resetStreak = 0
   let disposed = false
+  /** Permission events that arrived while the lists were loading: the lists may be older than they are, so they are applied again on top. */
+  let buffered: PermissionChangedEvent[] | null = null
 
   const publish = (patch: Partial<SyncSnapshot>) => {
     snap = { ...snap, ...patch }
@@ -94,7 +97,29 @@ export function createRemoteSync(opts: { client: ApiClient; createEventSource: (
     if (cursor && id.seq <= cursor.seq) return
     cursor = id
     resetStreak = 0
+    if (event.type === 'permission.changed') {
+      buffered?.push(event)
+      publish({ permissions: applyPermissionEvent(snap.permissions, event), lastSyncedAt: now() })
+      return
+    }
     publish({ state: applyWorkforceEvent(snap.state, event), lastSyncedAt: now() })
+  }
+
+  /** Both lists, loaded together: a failure or a malformed body keeps the lists as they were and records why. */
+  async function loadPermissions(g: number, signal: AbortSignal): Promise<void> {
+    const events: PermissionChangedEvent[] = []
+    buffered = events
+    const [active, history] = await Promise.all([client.get<PermissionsResponse>('/api/permissions', signal), client.get<PermissionsResponse>('/api/permissions/history', signal)])
+    if (g !== generation) return
+    buffered = null
+    const failed = !active.ok ? active.error : !history.ok ? history.error : null
+    const lists = active.ok && history.ok ? parsePermissionLists(active.body, history.body) : null
+    if (!lists) {
+      const error = failed ?? 'The backend sent an invalid permission list.'
+      if (snap.permissions.error !== error) publish({ permissions: { ...snap.permissions, error } })
+      return
+    }
+    publish({ permissions: events.reduce(applyPermissionEvent, withLists(snap.permissions, lists.active, lists.history)) })
   }
 
   async function connect(): Promise<ReconnectOutcome> {
@@ -123,7 +148,8 @@ export function createRemoteSync(opts: { client: ApiClient; createEventSource: (
 
     const source = opts.createEventSource(`${client.baseUrl}/api/events?lastEventId=${encodeURIComponent(r.body.lastEventId)}`, { withCredentials: true })
     stream = source
-    for (const name of WORKFORCE_EVENT_TYPES) source.addEventListener(name, (e) => onFrame(g, name, e.data))
+    for (const name of [...WORKFORCE_EVENT_TYPES, 'permission.changed']) source.addEventListener(name, (e) => onFrame(g, name, e.data))
+    void loadPermissions(g, controller.signal)
     source.addEventListener('open', () => {
       if (g !== generation) return
       attempt = 0

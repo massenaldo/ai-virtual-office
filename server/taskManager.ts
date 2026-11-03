@@ -50,7 +50,7 @@ export type TaskManagerOptions = {
   policy: ToolPolicy
   /** The permission rules: they decide, together with the policy, what each tool request gets. */
   permissions: PermissionStore
-  config: Pick<ServerConfig, 'taskTimeoutMs' | 'cancelGraceMs' | 'approvalTimeoutMs' | 'maxMessageBytes' | 'maxTaskOutputBytes' | 'workspaceRoot' | 'workspaces'> & { dataDir?: string; /** Claude runtime only: how many tasks may run at once. Absent means no limit. */ maxConcurrentTasks?: number }
+  config: Pick<ServerConfig, 'taskTimeoutMs' | 'cancelGraceMs' | 'approvalTimeoutMs' | 'maxMessageBytes' | 'maxTaskOutputBytes' | 'workspaceRoot' | 'workspaces'> & { dataDir?: string; /** Claude runtime: true only when the owner set ALLOW_BROAD_WRITE_SCOPES=yes. Absent means off. */ allowBroadWriteScopes?: boolean; /** Claude runtime only: how many tasks may run at once. Absent means no limit. */ maxConcurrentTasks?: number }
   now: () => string
   log: Logger
   /** Audit seam: called for each lifecycle step the manager takes. */
@@ -68,7 +68,7 @@ type Timer = ReturnType<typeof setTimeout>
 /** Everything the manager holds for one task while it is active; deleted when the task ends. */
 type Run = { abort: AbortController; taskTimer: Timer | null; approvalTimer: Timer | null; approvalId: string | null; graceTimer: Timer | null; outputBytes: number; outputClosed: boolean; launched: boolean; workspace: ResolvedWorkspace | null; toolWaiter: { approvalId: string; tool: string; digest: string; actionHash: string; onceOnly: boolean; resolve: (r: ToolGateResult) => void } | null; toolQueue: Array<{ request: ToolRequest; digest: string; /** Rules granted while this request waited: they do not answer it, a person does. */ skipRules: ReadonlySet<string>; resolve: (r: ToolGateResult) => void }> }
 
-const ONCE_ONLY_SENTENCE = 'Changes to files that tools run on their own can only be allowed once.'
+const ONCE_ONLY_SENTENCE = 'This change can only be allowed once.'
 const CANCELLED: ToolGateResult = { behavior: 'deny', outcome: 'cancelled', message: 'The task is no longer running.' }
 
 const isDemo = (p: ServerRuntimeProvider): p is DemoProvider => 'requestApproval' in p && 'forceError' in p
@@ -445,9 +445,11 @@ export class TaskManager {
     return promise
   }
 
-  /** Write and Edit of a file that tools run on their own. Fail closed: no checked path, or any error, counts as sensitive. */
+  /** Write and Edit that may only be approved once: any write unless broad scopes are on, else a file that tools run on their own. Fail closed: no checked path, or any error, counts as sensitive. */
   private isOnceOnly(tool: string, paths: ReadonlyArray<{ readonly relative: string }> | undefined, workspace: ResolvedWorkspace | null): boolean {
     if (tool !== 'Write' && tool !== 'Edit') return false
+    // A list of files that tools run can never be complete, so by default the Claude runtime never takes a broad write approval.
+    if (this.provider.kind === 'claude' && this.config.allowBroadWriteScopes !== true) return true
     try {
       return !workspace || !paths || paths.length === 0 || paths.some((x) => isExecSensitive(x.relative, workspace.path))
     } catch {

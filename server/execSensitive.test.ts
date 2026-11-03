@@ -58,3 +58,16 @@ describe('isExecSensitive', () => {
     expect(isExecSensitive('x.txt', 'a\0b')).toBe(true)
   })
 })
+
+describe('isExecSensitive: hidden names and the wider class', () => {
+  const HIDDEN = ['.eslintrc.cjs', '.cargo/config.toml', '.cursor/mcp.json', '.gemini/settings.json', '.yarn/releases/yarn-4.cjs', '.venv/lib/x.py', '.config/x', '.pre-commit-config.yaml', '.husky/pre-commit', '.anything', 'sub/.hidden/deep.txt', '.prettierrc.js', '.travis.yml', '.buildkite/pipeline.yml']
+  it.each(HIDDEN)('%s is sensitive (hidden segment)', (p) => expect(isExecSensitive(p, ws)).toBe(true))
+  const MORE = [
+    'node_modules/lodash/index.js', 'vendor/x/a.rb', 'venv/bin/a', 'lib/site-packages/a.py', 'lefthook.yml', 'lefthook.yaml', 'Jenkinsfile', 'Gemfile', 'Gemfile.lock', 'Rakefile',
+    'bunfig.toml', 'compose.yml', 'compose.yaml', 'Containerfile', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lockb', 'sitecustomize.py', 'usercustomize.py', 'Dockerfile.prod', 'Containerfile.dev',
+    'a.pth', 'my.code-workspace', 'CLAUDE.local.md', 'eslintrc.cjs', 'babelrc.js', 'mocharc.yml', 'lintstagedrc', 'sub/prettierrc.json', 'x/jestrc.toml', 'a/b/NODE_MODULES/x.txt',
+  ]
+  it.each(MORE)('%s is sensitive', (p) => expect(isExecSensitive(p, ws)).toBe(true))
+  it.each(['notes.txt', 'src/a.ts', 'README.md', 'docs/guide.md', '.gitignore', '.editorconfig', 'sub/.gitignore', 'config.js', 'tarc.txt', 'src/rc.txt', 'lockfile.txt', 'vendors.md'])('%s stays allowed', (p) => expect(isExecSensitive(p, ws)).toBe(false))
+})
+

@@ -15,10 +15,12 @@ let outside: string
 let h: Harness
 afterEach(async () => { await stop(); if (outside) rmSync(outside, { recursive: true, force: true }) })
 
+// Broad write approvals are off by default; most tests here are about what they do, so they start with the flag on.
+// Pass ALLOW_BROAD_WRITE_SCOPES: '' to run with the default.
 async function setup(env: Record<string, string> = {}) {
   outside = mkdtempSync(join(tmpdir(), 'vo-outside-'))
   writeFileSync(join(outside, 'victim.txt'), 'OUTSIDE ORIGINAL\n')
-  h = await start(env, (root) => {
+  h = await start({ ALLOW_BROAD_WRITE_SCOPES: 'yes', ...env }, (root) => {
     writeFileSync(join(root, 'notes.txt'), 'hello world\nsecond line\nhello again\n')
     mkdirSync(join(root, 'docs'))
     writeFileSync(join(root, 'docs', 'plan.md'), '# plan\n')
@@ -315,6 +317,7 @@ describe('a wider approval, and taking it back', () => {
     const first = a.call('vo_write', { file_path: 'one.txt', content: '1\n' })
     await decide(a.id, await pendingApproval(a.id), 'allow_task')
     await first
+    // A second agent is needed: an agent has one task at a time, and the leak check must come from another agent's task.
     const b = await session(h, 'agent-demo-pm', 1)
     const second = b.call('vo_write', { file_path: 'other.txt', content: '2\n' })
     const p = await pendingApproval(b.id)
@@ -345,7 +348,7 @@ describe('what is recorded, and what is not', () => {
 })
 
 describe('files that tools run on their own are approved once, and the queue is asked again', () => {
-  const SENTENCE = 'Changes to files that tools run on their own can only be allowed once.'
+  const SENTENCE = 'This change can only be allowed once.'
   const PATHS = ['package.json', '.husky/pre-commit', '.claude/settings.json', 'scripts/build.sh', 'bin/existing']
 
   async function setupExec() {
@@ -475,7 +478,7 @@ describe('permissions made from an approval belong to one workspace', () => {
   const cancel = async (id: string) => { expect((await api('POST', `/api/tasks/${id}/cancel`)).status).toBe(202); await until(async () => (await status(id)) === 'cancelled') }
 
   it('after "allow for this agent" in sandbox, a write in docs asks, and a write in sandbox still runs freely', async () => {
-    h = await start({}, undefined, ['docs'])
+    h = await start({ ALLOW_BROAD_WRITE_SCOPES: 'yes' }, undefined, ['docs'])
     const a = await session(h, 'agent-demo-backend', 0, 'sandbox')
     const first = a.call('vo_write', { file_path: 'one.txt', content: '1\n' })
     await decide(a.id, await pendingApproval(a.id), 'allow_agent')
@@ -496,7 +499,7 @@ describe('permissions made from an approval belong to one workspace', () => {
   })
 
   it('refuses a rule created through the API for an unknown workspace, with a fixed sentence', async () => {
-    h = await start({}, undefined, ['docs'])
+    h = await start({ ALLOW_BROAD_WRITE_SCOPES: 'yes' }, undefined, ['docs'])
     const bad = await api('POST', '/api/permissions', { scope: 'agent', effect: 'allow', tool: 'Write', agentId: 'agent-demo-backend', workspaceId: 'ghost' })
     expect(bad.status).toBe(422)
     expect(bad.body.error).toBe('Unknown workspace.')
@@ -505,7 +508,7 @@ describe('permissions made from an approval belong to one workspace', () => {
   })
 
   it('accepts a rule for a registered workspace, shows it, and applies it there only', async () => {
-    h = await start({}, undefined, ['docs'])
+    h = await start({ ALLOW_BROAD_WRITE_SCOPES: 'yes' }, undefined, ['docs'])
     const ok = await api('POST', '/api/permissions', { scope: 'agent', effect: 'allow', tool: 'Write', agentId: 'agent-demo-backend', workspaceId: 'sandbox' })
     expect(ok.status).toBe(201)
     expect(ok.body.rule).toMatchObject({ workspaceId: 'sandbox', scope: 'agent' })
@@ -526,5 +529,80 @@ describe('permissions made from an approval belong to one workspace', () => {
     expect(existsSync(inDocs('d.txt'))).toBe(false)
     await decide(c.id, p, 'reject')
     await docs
+  })
+})
+
+
+describe('writes are approved one at a time unless the owner turns broad scopes on', () => {
+  const OFF = { ALLOW_BROAD_WRITE_SCOPES: '' }
+  const SENTENCE = 'This change can only be allowed once.'
+
+  it.each([['allow_task'], ['allow_agent']])('with the default, %s for an ordinary file is refused with 422 and allow_once writes it', async (choice) => {
+    await setup(OFF)
+    const { id, call } = await session(h)
+    const pending = call('vo_write', { file_path: 'notes2.txt', content: 'x\n' })
+    const p = await pendingApproval(id)
+    expect(p.onceOnly).toBe(true)
+    const r = await decide(id, p, choice)
+    expect(r.status).toBe(422)
+    expect(r.body.error).toBe(SENTENCE)
+    expect(existsSync(file('notes2.txt'))).toBe(false)
+    expect((await decide(id, p)).status).toBe(200)
+    expect((await pending).isError).toBeUndefined()
+    expect(read('notes2.txt')).toBe('x\n')
+    expect((await api('GET', '/api/permissions')).body.rules.some((r2: { scope: string }) => r2.scope === 'task' || r2.scope === 'agent')).toBe(false)
+  })
+
+  it('with the default, an Edit is once-only too, and a second write asks again', async () => {
+    await setup(OFF)
+    const { id, call } = await session(h)
+    const e = call('vo_edit', { file_path: 'notes.txt', old_string: 'hello world', new_string: 'hi' })
+    const p = await pendingApproval(id)
+    expect(p.onceOnly).toBe(true)
+    expect((await decide(id, p, 'allow_task')).status).toBe(422)
+    expect((await decide(id, p)).status).toBe(200)
+    await e
+    const next = call('vo_write', { file_path: 'again.txt', content: 'y' })
+    const p2 = await pendingApproval(id)
+    expect(existsSync(file('again.txt'))).toBe(false)
+    await decide(id, p2, 'reject')
+    await next
+  })
+
+  it('with the default, a global allow rule for Write still asks', async () => {
+    await setup(OFF)
+    expect((await api('POST', '/api/permissions', { scope: 'global', effect: 'allow', tool: 'Write' })).status).toBe(201)
+    const { id, call } = await session(h)
+    const pending = call('vo_write', { file_path: 'g.txt', content: 'g' })
+    const p = await pendingApproval(id)
+    expect(p.onceOnly).toBe(true)
+    expect(existsSync(file('g.txt'))).toBe(false)
+    await decide(id, p, 'reject')
+    expect((await pending).isError).toBe(true)
+  })
+
+  it('reads are not affected by the default', async () => {
+    await setup(OFF)
+    const { call } = await session(h)
+    const r = await call('vo_read', { file_path: 'notes.txt' })
+    expect(r.isError).toBeUndefined()
+    expect(r.content[0].text).toContain('hello world')
+  })
+
+  it('with ALLOW_BROAD_WRITE_SCOPES=yes, an ordinary file can be allowed for the task, and package.json still cannot', async () => {
+    await setup({ ALLOW_BROAD_WRITE_SCOPES: 'yes' })
+    const { id, call } = await session(h)
+    const first = call('vo_write', { file_path: 'one.txt', content: '1\n' })
+    const p = await pendingApproval(id)
+    expect(p.onceOnly).toBe(false)
+    expect((await decide(id, p, 'allow_task')).status).toBe(200)
+    await first
+    expect((await call('vo_write', { file_path: 'two.txt', content: '2\n' })).isError).toBeUndefined()
+    const pkg = call('vo_write', { file_path: 'package.json', content: '{}' })
+    const q = await pendingApproval(id)
+    expect(q.onceOnly).toBe(true)
+    expect((await decide(id, q, 'allow_agent')).status).toBe(422)
+    await decide(id, q, 'reject')
+    await pkg
   })
 })

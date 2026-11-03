@@ -31,7 +31,7 @@ export function serializeWorkforce(s: WorkforceState): string {
   return JSON.stringify({
     schemaVersion: s.schemaVersion,
     agents: s.agents.map((a) => ({ id: a.id, name: a.name, role: a.role, department: a.department, deskId: a.deskId, status: a.status, currentTaskId: a.currentTaskId, runtimeMode: a.runtimeMode, demo: a.demo, createdAt: a.createdAt, lastActivityAt: a.lastActivityAt })),
-    tasks: s.tasks.map((t) => ({ id: t.id, agentId: t.agentId, title: t.title, description: t.description, status: t.status, createdAt: t.createdAt, startedAt: t.startedAt, completedAt: t.completedAt, resultSummary: t.resultSummary, errorMessage: t.errorMessage, executionId: t.executionId, timeoutMs: t.timeoutMs, runtime: t.runtime, workspaceId: t.workspaceId, sessionId: t.sessionId, endedReason: t.endedReason, pendingApproval: t.pendingApproval && { id: t.pendingApproval.id, tool: t.pendingApproval.tool, summary: t.pendingApproval.summary, requestedAt: t.pendingApproval.requestedAt, digest: t.pendingApproval.digest, review: t.pendingApproval.review } })),
+    tasks: s.tasks.map((t) => ({ id: t.id, agentId: t.agentId, title: t.title, description: t.description, status: t.status, createdAt: t.createdAt, startedAt: t.startedAt, completedAt: t.completedAt, resultSummary: t.resultSummary, errorMessage: t.errorMessage, executionId: t.executionId, timeoutMs: t.timeoutMs, runtime: t.runtime, workspaceId: t.workspaceId, sessionId: t.sessionId, endedReason: t.endedReason, pendingApproval: t.pendingApproval && { id: t.pendingApproval.id, tool: t.pendingApproval.tool, summary: t.pendingApproval.summary, requestedAt: t.pendingApproval.requestedAt, digest: t.pendingApproval.digest, review: t.pendingApproval.review, onceOnly: t.pendingApproval.onceOnly } })),
     activities: s.activities.slice(-ACTIVITY_LIMIT).map((a) => ({
       id: a.id, agentId: a.agentId, taskId: a.taskId, type: a.type, message: a.message, timestamp: a.timestamp, source: a.source,
       ...(a.type === 'desk-assigned' ? { deskId: a.deskId } : {}),
@@ -73,7 +73,7 @@ function parseApproval(v: unknown): PendingApproval | null {
   if (digest !== null && !(typeof digest === 'string' && /^[0-9a-f]{64}$/.test(digest))) return null
   const review = v.review === undefined || v.review === null ? null : parseReview(v.review, digest)
   if (v.review !== undefined && v.review !== null && review === null) return null
-  return { id: v.id, tool: v.tool, summary: v.summary, requestedAt: v.requestedAt, digest, review }
+  return { id: v.id, tool: v.tool, summary: v.summary, requestedAt: v.requestedAt, digest, review, onceOnly: v.onceOnly === true }
 }
 
 function parseTask(v: unknown): AgentTask | null {
@@ -147,7 +147,7 @@ export function migrateWorkforceV1(raw: unknown): unknown {
       status: waiting ? 'waiting_for_approval' : t.status,
       timeoutMs: null, runtime: 'mock', sessionId: null,
       endedReason: typeof t.status === 'string' ? V1_END[t.status] ?? null : null,
-      pendingApproval: waiting ? { id: `legacy-${t.id}`, tool: 'unknown', summary: 'Waiting for input (from an earlier version)', requestedAt: t.startedAt ?? t.createdAt, digest: null, review: null } : null,
+      pendingApproval: waiting ? { id: `legacy-${t.id}`, tool: 'unknown', summary: 'Waiting for input (from an earlier version)', requestedAt: t.startedAt ?? t.createdAt, digest: null, review: null, onceOnly: false } : null,
     }
   })
   const activities = raw.activities.map((a) => (isObject(a) && a.type === 'task-waiting' ? { ...a, type: 'task-approval-requested', approvalId: `legacy-${a.taskId}` } : a))

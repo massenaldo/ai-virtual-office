@@ -13,6 +13,8 @@ export type PermissionRule = {
   taskId: string | null
   /** Workspace-relative glob that narrows the rule; never widens it. */
   pathPattern: string | null
+  /** The workspace the rule belongs to; null applies in every workspace. A bound rule never applies to a query with no workspace. */
+  workspaceId: string | null
   /** Once rules only: the exact action digest the grant is bound to. */
   digest: string | null
   createdAt: string
@@ -32,6 +34,7 @@ export type GrantInput = {
   agentId?: string | null
   taskId?: string | null
   pathPattern?: string | null
+  workspaceId?: string | null
   digest?: string | null
   expiresAt?: string | null
   reason?: string | null
@@ -39,7 +42,7 @@ export type GrantInput = {
 }
 
 /** `paths` are workspace-relative, as `CheckedPath.relative`. */
-export type PermissionQuery = { agentId: string; taskId: string; tool: string; digest: string; paths: readonly string[] }
+export type PermissionQuery = { agentId: string; taskId: string; tool: string; digest: string; workspaceId: string | null; paths: readonly string[] }
 
 export type PermissionDecision = {
   effect: PermissionEffect

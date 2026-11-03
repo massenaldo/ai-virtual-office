@@ -16,7 +16,7 @@ const now = () => new Date(clock).toISOString()
 const file = () => join(dir, PERMISSIONS_FILE)
 const open = (extra: Partial<PermissionStoreOptions> = {}) => openPermissionStore({ dataDir: dir, now, log: silentLogger, ...extra })
 const D = (c: string) => c.repeat(64)
-const q = (o: Partial<PermissionQuery> = {}): PermissionQuery => ({ agentId: 'a1', taskId: 't1', tool: 'Write', digest: D('a'), paths: ['src/x.ts'], ...o })
+const q = (o: Partial<PermissionQuery> = {}): PermissionQuery => ({ agentId: 'a1', taskId: 't1', tool: 'Write', digest: D('a'), workspaceId: 'w1', paths: ['src/x.ts'], ...o })
 const agentWrite: GrantInput = { scope: 'agent', effect: 'allow', tool: 'Write', agentId: 'a1' }
 const once = (c: string): GrantInput => ({ scope: 'once', effect: 'allow', tool: 'Write', agentId: 'a1', taskId: 't1', digest: D(c) })
 const granted = (s: ReturnType<typeof open>, i: GrantInput) => { const r = s.grant(i); if (!r.ok) throw new Error(r.error); return r.rule }
@@ -217,5 +217,26 @@ describe('reconcile after a restart', () => {
     const s = open()
     expect(s.reconcile({ liveTaskIds: new Set(), agentIds: new Set() })).toEqual([])
     expect(s.rules.filter((r) => r.createdBy === 'default' && r.revokedAt === null)).toHaveLength(8)
+  })
+})
+
+describe('workspace on grants', () => {
+  it('keeps the workspace a grant names, and null otherwise', () => {
+    const s = open()
+    expect(granted(s, { ...agentWrite, workspaceId: 'w1' }).workspaceId).toBe('w1')
+    expect(granted(s, agentWrite).workspaceId).toBeNull()
+  })
+  it('survives a restart, and the rule answers only its workspace', () => {
+    granted(open(), { ...agentWrite, workspaceId: 'w1' })
+    const again = open()
+    expect(again.evaluate(q())).toMatchObject({ effect: 'allow', source: 'agent' })
+    expect(again.evaluate(q({ workspaceId: 'w2' })).effect).toBe('ask')
+    expect(again.evaluate(q({ workspaceId: null })).effect).toBe('ask')
+  })
+  it('reconcile keeps a workspace-bound agent rule of an existing agent, like any agent rule', () => {
+    const s = open()
+    const r = granted(s, { ...agentWrite, workspaceId: 'w1' })
+    expect(s.reconcile({ liveTaskIds: new Set(), agentIds: new Set(['a1']) })).toEqual([])
+    expect(s.rules.find((x) => x.id === r.id)!.revokedAt).toBeNull()
   })
 })

@@ -152,12 +152,75 @@ describe('redactSecrets: JWT, Slack, Google, PEM, -p and URL passwords', () => {
     expect(redactSecrets(input)).toBe(input)
   })
 
+  it.each([
+    ['sk_live_' + 'a1B2c3D4e5F6g7H8i9', '[REDACTED]'],
+    ['pay rk_test_' + 'a1B2c3D4e5F6g7H8 done', 'pay [REDACTED] done'],
+    ['sk_test_' + 'A'.repeat(24), '[REDACTED]'],
+    ['rk_live_' + 'z9'.repeat(10), '[REDACTED]'],
+    ['token glpat-' + 'abcdEFGH_1234-ijklMNOP', 'token [REDACTED]'],
+    ['x npm_' + 'aB3'.repeat(12) + ' y', 'x [REDACTED] y'],
+    ['xoxe-1-' + 'abcdefghij1234567890', '[REDACTED]'],
+    ['xoxe.xoxp-1-' + 'abcdefghij1234567890', '[REDACTED]'],
+    ['AWS_SECRET_ACCESS_KEY=' + 'wJalrXUtnFEMI/K7MDENG/bPxRfiCY', 'AWS_SECRET_ACCESS_KEY=[REDACTED]'],
+    ['aws_secret_access_key = ' + 'wJalrXUtnFEMI/K7MDENG/bPxRfiCY', 'aws_secret_access_key = [REDACTED]'],
+    ['aws_secret_access_key: "' + 'wJalrXUtnFEMI/K7MDENG"', 'aws_secret_access_key: [REDACTED]'],
+  ])('redacts more secret formats: %s', (input, expected) => {
+    expect(redactSecrets(input)).toBe(expected)
+  })
+
+  it.each([
+    'sk_live_stream', 'sk_test_ok', 'rk_live_short1234567', 'npm_config', 'npm_' + 'a'.repeat(20), 'glpat-short', 'xoxe is a word', 'use the sk_live_ prefix',
+  ])('leaves alone: %s', (input) => {
+    expect(redactSecrets(input)).toBe(input)
+  })
+
   it('costs about linear time on hostile input', () => {
     expectLinear('unterminated key lines', (n) => '-----BEGIN RSA PRIVATE KEY-----\n'.repeat(n), 800)
     expectLinear('url start without @', (n) => `https://a:${'x'.repeat(n)}`, 200000)
     expectLinear('jwt-like repeats', (n) => 'eyJ.'.repeat(n), 6000)
     expectLinear('xox repeats', (n) => 'xox-'.repeat(n), 6000)
     expectLinear('many urls', (n) => 'https://a:b '.repeat(n), 2000)
+  })
+
+  it('costs about linear time on the token formats', () => {
+    expectLinear('stripe run', (n) => `sk_live_${'a'.repeat(n)}`, 200000)
+    expectLinear('stripe prefixes', (n) => 'sk_live_a'.repeat(n), 20000)
+    expectLinear('glpat run', (n) => `glpat-${'a'.repeat(n)}`, 200000)
+    expectLinear('glpat prefixes', (n) => 'glpat-a'.repeat(n), 20000)
+    expectLinear('npm run', (n) => `npm_${'a'.repeat(n)}`, 200000)
+    expectLinear('npm prefixes', (n) => 'npm_aaaa'.repeat(n), 20000)
+    expectLinear('xoxe run', (n) => `xoxe.xoxp-${'a-'.repeat(n)}`, 100000)
+    expectLinear('xoxe prefixes', (n) => 'xoxe.xoxp-'.repeat(n), 10000)
+    expectLinear('aws assignments', (n) => 'aws_secret_access_key = '.repeat(n), 5000)
+    expectLinear('aws long space', (n) => `aws_secret_access_key${' '.repeat(n)}`, 100000)
+  })
+})
+
+describe('PGP and PuTTY private keys', () => {
+  const B = 'lQdGBF8bodybodybodybodybodybodybody1234567890abcdef'
+  const pgp = (end = true) => `-----BEGIN PGP PRIVATE KEY BLOCK-----\n\n${B}\n${B}\n${end ? '-----END PGP PRIVATE KEY BLOCK-----' : ''}`
+  const ppk = (mac = true) => `PuTTY-User-Key-File-3: ssh-ed25519\nEncryption: none\nComment: deploy\nPublic-Lines: 2\nAAAApublicpart\nPrivate-Lines: 1\nAAAAprivatepart${mac ? '\nPrivate-MAC: 0123abcd' : ''}`
+  it('redacts a PGP private key block and keeps the text around it', () => {
+    expect(redactSecrets(`before\n${pgp()}\nafter`)).toBe('before\n[REDACTED]\nafter')
+    expect(redactSecrets(`a ${pgp(false)}`)).toBe('a [REDACTED]')
+  })
+  it('keeps a PGP public key block', () => {
+    const pub = `-----BEGIN PGP PUBLIC KEY BLOCK-----\n\n${B}\n-----END PGP PUBLIC KEY BLOCK-----`
+    expect(redactSecrets(pub)).toBe(pub)
+  })
+  it('redacts a PuTTY key file from its header through the Private-MAC line', () => {
+    const out = redactSecrets(`top\n${ppk()}\nbottom`)
+    expect(out).toBe('top\n[REDACTED]\nbottom')
+    expect(out).not.toContain('privatepart')
+  })
+  it('redacts a PuTTY key file with no MAC line to the end, and with CRLF', () => {
+    expect(redactSecrets(`x ${ppk(false)}`)).toBe('x [REDACTED]')
+    expect(redactSecrets(ppk().replace(/\n/g, '\r\n') + '\r\nafter')).toBe('[REDACTED]\nafter'.replace('\n', '\r\n'))
+  })
+  it('costs about linear time on repeated starts', () => {
+    expectLinear('pgp starts', (n) => '-----BEGIN PGP PRIVATE KEY BLOCK-----\n'.repeat(n), 800)
+    expectLinear('putty starts', (n) => 'PuTTY-User-Key-File-3: x\n'.repeat(n), 800)
+    expectLinear('pgp near misses', (n) => '-----BEGIN PGP PUBLIC KEY BLOCK-----\n'.repeat(n), 800)
   })
 })
 

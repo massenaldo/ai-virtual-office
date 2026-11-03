@@ -33,7 +33,7 @@ function build(allowed: readonly string[] = DEFAULT_ALLOWED_TOOLS, limits?: { ma
   permissions = openPermissionStore({ dataDir: dir, now, log: silentLogger, writeFile: () => {}, limits })
   manager = new TaskManager({
     store, provider: fake, permissions, policy: { allowedTools: new Set(allowed), protectedRoots: [] },
-    config: { ...CONFIG, workspaceRoot: ws.root, workspaces: [{ id: 'sandbox', relativePath: 'sandbox' }] },
+    config: { ...CONFIG, workspaceRoot: ws.root, workspaces: [{ id: 'sandbox', relativePath: 'sandbox' }, { id: 'docs', relativePath: 'docs' }] },
     now, log: silentLogger, onLifecycle: (e) => events.push(e),
   })
 }
@@ -42,7 +42,7 @@ beforeEach(() => {
   vi.useFakeTimers()
   clock = Date.parse(NOW)
   dir = mkdtempSync(join(tmpdir(), 'vo-perm-gate-'))
-  ws = makeWorkspaceRoot(['sandbox'])
+  ws = makeWorkspaceRoot(['sandbox', 'docs'])
   mkdirSync(join(ws.path('sandbox'), 'sub'))
   mkdirSync(join(ws.path('sandbox'), 'secrets'))
   writeFileSync(join(ws.path('sandbox'), 'sub', 'notes.md'), 'hi')
@@ -251,6 +251,28 @@ describe('scoped approval decisions', () => {
     expect(task(next.id).status).toBe('running')
   })
 
+  it('allow_agent is bound to the workspace it was made in: another workspace asks, the same one does not', async () => {
+    fake.confirmCancel = true
+    const { id, ctx } = await run()
+    const p1 = ctx.tools.use(write(), vi.fn())
+    expect(decide(id, 'allow_agent').ok).toBe(true)
+    await p1
+    expect(userRules().map((r) => [r.scope, r.workspaceId])).toEqual([['agent', 'sandbox']])
+    manager.cancelTask(id)
+    const other = manager.startTask(FORGE, { title: 'T', description: '' }, { workspaceId: 'docs' })
+    if (!other.ok) throw new Error(other.error)
+    await tick()
+    fake.emit({ type: 'started', taskId: other.task.id, executionId: 'e1' })
+    const perform = vi.fn(() => 'no')
+    void fake.starts[1].ctx.tools.use(write(), perform)
+    expect(task(other.task.id).status).toBe('waiting_for_approval')
+    expect(perform).not.toHaveBeenCalled()
+    manager.cancelTask(other.task.id)
+    const again = await run(FORGE, 2)
+    await expect(again.ctx.tools.use(write(), vi.fn(() => 'ok'))).resolves.toMatchObject({ behavior: 'allow', value: 'ok' })
+    expect(task(again.id).status).toBe('running')
+  })
+
   it('reject denies, creates no rule and records a deny', async () => {
     const { id, ctx } = await run()
     const perform = vi.fn()
@@ -354,15 +376,32 @@ describe('concurrent requests in one task', () => {
     await expect(p2).resolves.toMatchObject({ behavior: 'allow', value: 'b' })
   })
 
-  it('allow for this task also answers a queued write to another file, with no second prompt', async () => {
+  it('allow for this task does not answer a write that was already waiting: a person is asked again', async () => {
     const { id, ctx } = await run()
     const perform1 = vi.fn(() => 'a')
     const perform2 = vi.fn(() => 'b')
     const p1 = ctx.tools.use(write('sub/a.txt'), perform1)
     const p2 = ctx.tools.use(write('sub/b.txt'), perform2)
     decide(id, 'allow_task')
-    await expect(Promise.all([p1, p2])).resolves.toMatchObject([{ behavior: 'allow', value: 'a' }, { behavior: 'allow', value: 'b' }])
+    await expect(p1).resolves.toMatchObject({ behavior: 'allow', value: 'a' })
+    await vi.waitFor(() => expect(task(id).status).toBe('waiting_for_approval'))
+    expect(perform2).not.toHaveBeenCalled()
+    decide(id, 'allow_once')
+    await expect(p2).resolves.toMatchObject({ behavior: 'allow', value: 'b' })
     expect(task(id).status).toBe('running')
+  })
+
+  it('refuses a change to a file that tools run when a standing rule replaces the once grant before use, and does not write', async () => {
+    const { id, ctx } = await run()
+    const perform = vi.fn(() => 'x')
+    const p = ctx.tools.use(write('package.json'), perform)
+    expect(task(id).pendingApproval).toMatchObject({ onceOnly: true })
+    decide(id, 'allow_once')
+    for (const rule of permissions.rules.filter((r) => r.scope === 'once')) permissions.revoke(rule.id)
+    agentAllow()
+    await expect(p).resolves.toMatchObject({ behavior: 'deny' })
+    expect(perform).not.toHaveBeenCalled()
+    expect(events.find((e) => e.action === 'permission.denied')).toMatchObject({ reason: 'exec_sensitive' })
   })
 
   it('a queued identical request cannot reuse a one-time permission, and perform runs once for the pair', async () => {

@@ -71,3 +71,15 @@ describe('parsePermissionLists', () => {
     expect(parsePermissionLists({ rules: [] }, body)).toBeNull()
   })
 })
+
+describe('workspaceId in a rule view', () => {
+  const lists = (r: unknown) => parsePermissionLists({ rules: [r] }, { rules: [] })
+  it('accepts a workspace id, null, and a missing field (an older server)', () => {
+    expect(lists(rule('a', { workspaceId: 'sandbox' }))).not.toBeNull()
+    expect(lists(rule('a', { workspaceId: null }))).not.toBeNull()
+    expect(lists(rule('a'))).not.toBeNull()
+  })
+  it.each([[5], [{}], [['x']], [false]])('rejects %j', (bad) => {
+    expect(lists({ ...rule('a'), workspaceId: bad })).toBeNull()
+  })
+})

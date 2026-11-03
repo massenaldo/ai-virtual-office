@@ -87,7 +87,8 @@ export function createGatedTools(ctx: Pick<StartContext, 'tools'>, opts: { prote
         const t = target(action, true)
         // Read a little past the cap so a secret that straddles it is redacted whole, then cut after redacting.
         const read = readTextFile(t.workspacePath, t.relative!, t.signal, undefined, { maxBytes: FILE_READ_MAX_BYTES + READ_REDACTION_LOOKAHEAD })
-        let text = read.text
+        // Redact everything that was read before slicing: a key block is found by its first line, so a slice must not decide what is hidden.
+        let text = redactSecrets(read.text)
         let sliced = false
         const offset = posInt(i.offset)
         const limit = posInt(i.limit)
@@ -98,7 +99,7 @@ export function createGatedTools(ctx: Pick<StartContext, 'tools'>, opts: { prote
           sliced = end < lines.length
           text = lines.slice(start, end).join('\n')
         }
-        const cut = truncateUtf8(redactSecrets(text), FILE_READ_MAX_BYTES)
+        const cut = truncateUtf8(text, FILE_READ_MAX_BYTES)
         return cut.truncated || (read.truncated && !sliced) ? cut.text + READ_MARKER : cut.text
       }),
 

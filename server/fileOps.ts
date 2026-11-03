@@ -283,8 +283,6 @@ export const TRAVERSAL_MAX_ENTRIES = 10000
 /** Wall-clock budget for one Glob or Grep call. File operations are synchronous, so this is the only bound besides the caps. */
 export const SEARCH_MAX_MS = 2000
 const GREP_LINE_MAX_CHARS = 200
-/** Characters past the cut that are redacted with it, so a secret straddling the cut is still matched whole. */
-const GREP_REDACTION_LOOKAHEAD = 4096
 const LINE_CHECK_INTERVAL = 256
 /** Names that could forge extra output lines: C0 controls, DEL, LS and PS. */
 const UNSAFE_NAME = /[\u0000-\u001f\u007f\u2028\u2029]/
@@ -391,11 +389,6 @@ function cutLine(line: string): string {
   return line.slice(0, end)
 }
 
-/** The first GREP_LINE_MAX_CHARS characters plus a lookahead: redacting this instead of a whole line bounds the cost, and a secret straddling the cut is still matched. */
-function window(line: string): string {
-  return line.length > GREP_LINE_MAX_CHARS + GREP_REDACTION_LOOKAHEAD ? line.slice(0, GREP_LINE_MAX_CHARS + GREP_REDACTION_LOOKAHEAD) : line
-}
-
 /** Reads a file for grep through the safe open; null when it is unsafe, too large, binary or not UTF-8 (skipped, not an error). */
 function readForGrep(workspacePath: string, relative: string, signal: AbortSignal, budget: { left: number; exhausted: boolean }): string | null {
   let fd: number
@@ -453,9 +446,11 @@ export function grepFiles(
   const expired = startDeadline(extra?.limits?.maxMs)
   const cut = walkFiles(workspacePath, baseRelative, signal, protectedRoots, (relative) => {
     if (opts.glob !== undefined && !matchesPathPattern(opts.glob, relative, true)) return true
-    const text = readForGrep(workspacePath, relative, signal, budget)
+    const raw = readForGrep(workspacePath, relative, signal, budget)
     if (budget.exhausted) { truncated = true; return false }
-    if (text === null) return true
+    if (raw === null) return true
+    // Redact the whole file first: a key block is found by its BEGIN line, so what is matched and what is returned must be the same redacted text.
+    const text = redactSecrets(raw)
     const lines = text.split(/\r?\n/)
     for (let i = 0; i < lines.length; i++) {
       if (i % LINE_CHECK_INTERVAL === 0 && expired()) { truncated = true; return false }
@@ -463,7 +458,7 @@ export function grepFiles(
       if (!hay.includes(needle)) continue
       if (matches.length >= GREP_MAX_MATCHES) { truncated = true; return false }
       if (opts.mode === 'files_with_matches') { matches.push({ path: relative, line: 0, text: '' }); break }
-      matches.push({ path: relative, line: i + 1, text: cutLine(redactSecrets(window(lines[i]!))) })
+      matches.push({ path: relative, line: i + 1, text: cutLine(lines[i]!) })
     }
     return true
   }, extra, expired)

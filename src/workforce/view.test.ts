@@ -232,6 +232,8 @@ describe('allowedScopes', () => {
   })
   it('offers Once only when the approval has no digest (a simulated request)', () => {
     expect(allowedScopes('Write', null)).toEqual(['once'])
+    expect(allowedScopes('Write', DIGEST, true)).toEqual(['once'])
+    expect(allowedScopes('Edit', DIGEST, false)).toEqual(['once', 'task', 'agent'])
   })
 })
 
@@ -283,7 +285,7 @@ describe('waitingApprovals', () => {
     const s = structuredClone(demo)
     const t = { ...s.tasks[0] ?? ({} as never) }
     const agent = s.agents[0]
-    const waiting = { ...t, id: 'tk-w', agentId: agent.id, status: 'waiting_for_approval' as const, pendingApproval: { id: 'ap', tool: 'Write', summary: 'Write src/a.ts', requestedAt: NOW, digest: null, review: null } }
+    const waiting = { ...t, id: 'tk-w', agentId: agent.id, status: 'waiting_for_approval' as const, pendingApproval: { id: 'ap', tool: 'Write', summary: 'Write src/a.ts', requestedAt: NOW, digest: null, review: null, onceOnly: false } }
     expect(waitingApprovals({ ...s, tasks: [waiting] })).toEqual([{ agentId: agent.id, agentName: agent.name, taskId: 'tk-w', tool: 'Write', summary: 'Write src/a.ts' }])
     expect(waitingApprovals({ ...s, tasks: [{ ...waiting, status: 'running', pendingApproval: null }] })).toEqual([])
   })
@@ -292,8 +294,8 @@ describe('waitingApprovals', () => {
 describe('scopeSentence', () => {
   it('says exactly what each scope grants', () => {
     expect(scopeSentence('once', 'Write', 'Nova')).toBe('Allow Write once, for exactly this action.')
-    expect(scopeSentence('task', 'Write', 'Nova')).toBe('Allow Write for the rest of this task. Each call is still checked and recorded.')
-    expect(scopeSentence('agent', 'Write', 'Nova')).toBe('Allow Write for Nova on every task until you revoke it. Each call is still checked and recorded.')
+    expect(scopeSentence('task', 'Write', 'Nova')).toBe('Allow Write for the rest of this task. Later changes under it are not shown to you again.')
+    expect(scopeSentence('agent', 'Write', 'Nova')).toBe('Allow Write for Nova on every task until you revoke it. Later changes under it are not shown to you again.')
   })
 })
 
@@ -307,7 +309,7 @@ describe('choiceFor', () => {
 
 describe('agentPermissionChip', () => {
   const perms = (rules: PermissionRuleView[]) => ({ active: rules, history: [], loaded: true, error: null })
-  const waitingState = (agentId: string) => ({ ...demo, tasks: [{ ...demo.tasks[0], id: 'tk', agentId, status: 'waiting_for_approval' as const, pendingApproval: { id: 'ap', tool: 'Write', summary: 's', requestedAt: NOW, digest: null, review: null } }] })
+  const waitingState = (agentId: string) => ({ ...demo, tasks: [{ ...demo.tasks[0], id: 'tk', agentId, status: 'waiting_for_approval' as const, pendingApproval: { id: 'ap', tool: 'Write', summary: 's', requestedAt: NOW, digest: null, review: null, onceOnly: false } }] })
   it('is absent without a backend', () => expect(agentPermissionChip(null, demo, 'a')).toBeNull())
   it('counts the active rules that name the agent', () => {
     const rules = [prule({ id: '1', scope: 'agent', agentId: 'a' }), prule({ id: '2', scope: 'task', agentId: 'a', taskId: 't' }), prule({ id: '3', scope: 'agent', agentId: 'b' }), prule({ id: '4' })]

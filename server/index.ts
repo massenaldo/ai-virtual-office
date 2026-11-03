@@ -1,5 +1,6 @@
 import { startServer } from './app'
 import { formatConfigErrors, loadConfig } from './config'
+import { enforceHostSafety } from './hostSafety'
 import { consoleLogger } from './log'
 import { redactingLogger } from './redact'
 
@@ -10,6 +11,8 @@ if (!parsed.ok) {
   log.error(formatConfigErrors(parsed.errors))
   process.exit(1)
 }
+// The claude runtime shares one operating-system user with the server: refuse the worst setups, warn about the rest.
+if (!enforceHostSafety(parsed.config, log)) process.exit(1)
 
 let running
 try {

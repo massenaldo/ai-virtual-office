@@ -17,7 +17,7 @@ const review: ToolReview = { kind: 'write', path: 'src/a.ts', bytes: 3, lines: 1
 
 const waiting = (tool: string, withReview: ToolReview | null): typeof demo => ({
   ...demo,
-  tasks: [{ ...(demo.tasks[0] ?? ({} as never)), id: 'tk', agentId: agent.id, title: 'T', description: '', status: 'waiting_for_approval' as const, pendingApproval: { id: 'ap1', tool, summary: `${tool} src/a.ts`, requestedAt: NOW, digest: withReview?.digest ?? null, review: withReview } }],
+  tasks: [{ ...(demo.tasks[0] ?? ({} as never)), id: 'tk', agentId: agent.id, title: 'T', description: '', status: 'waiting_for_approval' as const, pendingApproval: { id: 'ap1', tool, summary: `${tool} src/a.ts`, requestedAt: NOW, digest: withReview?.digest ?? null, review: withReview, onceOnly: false } }],
   agents: demo.agents.map((a) => (a.id === agent.id ? { ...a, currentTaskId: 'tk', status: 'waiting' as const } : a)),
 })
 

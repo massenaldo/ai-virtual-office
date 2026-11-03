@@ -25,6 +25,7 @@ function appliesTo(rule: PermissionRule, q: PermissionQuery): boolean {
   if (rule.tool !== q.tool) return false
   if (rule.agentId !== null && rule.agentId !== q.agentId) return false
   if (rule.taskId !== null && rule.taskId !== q.taskId) return false
+  if (rule.workspaceId !== null && rule.workspaceId !== q.workspaceId) return false
   if (rule.scope === 'once' && rule.digest !== q.digest) return false
   return true
 }
@@ -87,5 +88,5 @@ export function validateGrant(input: GrantInput, now: string): { ok: true; field
   }
   const reason = input.reason ?? null
   if (reason !== null && reason.length > REASON_MAX_CHARS) return fail('invalid_reason')
-  return { ok: true, fields: { scope, effect, tool: input.tool, agentId, taskId, pathPattern, digest, createdBy: input.createdBy ?? 'user', expiresAt, reason } }
+  return { ok: true, fields: { scope, effect, tool: input.tool, agentId, taskId, pathPattern, workspaceId: input.workspaceId ?? null, digest, createdBy: input.createdBy ?? 'user', expiresAt, reason } }
 }

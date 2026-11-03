@@ -6,10 +6,10 @@ const NOW = '2026-11-01T10:00:00.000Z'
 const DIGEST = 'a'.repeat(64)
 let n = 0
 const rule = (o: Partial<PermissionRule> = {}): PermissionRule => ({
-  id: `r${++n}`, scope: 'global', effect: 'allow', tool: 'Write', agentId: null, taskId: null, pathPattern: null, digest: null,
+  id: `r${++n}`, scope: 'global', effect: 'allow', tool: 'Write', agentId: null, taskId: null, pathPattern: null, workspaceId: null, digest: null,
   createdAt: NOW, createdBy: 'user', expiresAt: null, revokedAt: null, usedAt: null, endedAt: null, reason: null, ...o,
 })
-const q = (o: Partial<PermissionQuery> = {}): PermissionQuery => ({ agentId: 'a1', taskId: 't1', tool: 'Write', digest: DIGEST, paths: ['src/x.ts'], ...o })
+const q = (o: Partial<PermissionQuery> = {}): PermissionQuery => ({ agentId: 'a1', taskId: 't1', tool: 'Write', digest: DIGEST, workspaceId: 'w1', paths: ['src/x.ts'], ...o })
 
 describe('ruleState', () => {
   it('orders revoked, used, ended, expired, active', () => {
@@ -145,5 +145,35 @@ describe('validateGrant', () => {
   })
   it('still lets a deny on an execute tool be global', () => {
     expect(ok({ scope: 'global', effect: 'deny', tool: 'Bash' }).ok).toBe(true)
+  })
+})
+
+describe('evaluate: workspace', () => {
+  it('applies a workspace-bound agent rule in its workspace only', () => {
+    const r = rule({ scope: 'agent', agentId: 'a1', workspaceId: 'w1' })
+    expect(evaluate([r], q(), NOW)).toEqual({ effect: 'allow', source: 'agent', ruleId: r.id })
+    expect(evaluate([r], q({ workspaceId: 'w2' }), NOW)).toMatchObject({ effect: 'deny', source: 'default' })
+  })
+  it('never applies a workspace-bound rule to a query with no workspace', () => {
+    const r = rule({ scope: 'agent', agentId: 'a1', workspaceId: 'w1' })
+    expect(evaluate([r], q({ workspaceId: null }), NOW)).toMatchObject({ effect: 'deny', source: 'default' })
+  })
+  it('applies a rule without a workspace everywhere, with or without one', () => {
+    const r = rule({ scope: 'agent', agentId: 'a1' })
+    for (const workspaceId of ['w1', 'w2', null]) expect(evaluate([r], q({ workspaceId }), NOW)).toMatchObject({ effect: 'allow', source: 'agent' })
+  })
+  it('keeps a workspace-bound deny to its workspace', () => {
+    const d = rule({ effect: 'deny', workspaceId: 'w1' })
+    expect(evaluate([d], q(), NOW)).toMatchObject({ effect: 'deny', source: 'deny_rule' })
+    expect(evaluate([d, rule()], q({ workspaceId: 'w2' }), NOW)).toMatchObject({ effect: 'allow', source: 'global' })
+  })
+})
+
+describe('validateGrant: workspace', () => {
+  it('carries the workspace id, defaulting to null', () => {
+    const ok = validateGrant({ scope: 'agent', effect: 'allow', tool: 'Write', agentId: 'a1', workspaceId: 'w1' }, NOW)
+    expect(ok.ok && ok.fields.workspaceId).toBe('w1')
+    const none = validateGrant({ scope: 'agent', effect: 'allow', tool: 'Write', agentId: 'a1' }, NOW)
+    expect(none.ok && none.fields.workspaceId).toBe(null)
   })
 })

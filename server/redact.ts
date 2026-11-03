@@ -49,6 +49,7 @@ const mysqlPassword = (_match: string, head: string, _value: string): string => 
 
 const PATTERNS: Array<[RegExp, string | ((...groups: string[]) => string)]> = [
   [URL_PATTERN, urlCredential],
+  [/\bxoxe(?:\.xox[abposr])?-[A-Za-z0-9-]{10,200}/g, REDACTED],
   [/\bxox[abposr]-[A-Za-z0-9-]{10,200}/g, REDACTED],
   [/\bxapp-\d-[A-Za-z0-9-]{10,200}/g, REDACTED],
   [/\bAIza[A-Za-z0-9_-]{35}(?![A-Za-z0-9_-])/g, REDACTED],
@@ -57,6 +58,10 @@ const PATTERNS: Array<[RegExp, string | ((...groups: string[]) => string)]> = [
   [/\bgh[pousr]_[A-Za-z0-9]{36,255}/g, REDACTED],
   [/\bgithub_pat_[A-Za-z0-9_]{22,255}/g, REDACTED],
   [/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, REDACTED],
+  [/\b[sr]k_(?:live|test)_[A-Za-z0-9]{16,255}/g, REDACTED],
+  [/\bglpat-[A-Za-z0-9_-]{20,255}/g, REDACTED],
+  [/\bnpm_[A-Za-z0-9]{36}(?![A-Za-z0-9])/g, REDACTED],
+  [/(\baws_secret_access_key\b"?\s{0,16}[=:]\s{0,16})("[^"]{0,256}"|'[^']{0,256}'|[^\s"',;&]{1,256})/gi, `$1${REDACTED}`],
   // curl -u user:password and --user user:password
   [/(\s(?:-u|--user)\s+)[^\s:]{1,128}:[^\s]{1,256}/g, `$1${REDACTED}`],
   [/\b(Basic)\s+([A-Za-z0-9+/]{8,512}={0,2})/gi, basicCredential],
@@ -81,7 +86,7 @@ function redactPrivateKeys(text: string): string {
   while (from !== -1) {
     const labelEnd = text.indexOf('-----', from + BEGIN.length)
     const label = labelEnd === -1 ? '' : text.slice(from + BEGIN.length, labelEnd)
-    if (labelEnd === -1 || !/PRIVATE KEY$/.test(label) || label.length > 40) {
+    if (labelEnd === -1 || !/PRIVATE KEY( BLOCK)?$/.test(label) || label.length > 40) {
       from = text.indexOf(BEGIN, from + BEGIN.length)
       continue
     }
@@ -89,6 +94,29 @@ function redactPrivateKeys(text: string): string {
     out += text.slice(cursor, from) + REDACTED
     cursor = end === -1 ? text.length : end + `-----END ${label}-----`.length
     from = end === -1 ? -1 : text.indexOf(BEGIN, cursor)
+  }
+  return out + text.slice(cursor)
+}
+
+/**
+ * PuTTY key files have no PEM frame: they start with `PuTTY-User-Key-File-N:` and end with the `Private-MAC:` line. The whole
+ * file from the header through that line is redacted; with no MAC line (a cut-short copy) it is redacted to the end.
+ */
+function redactPuttyKeys(text: string): string {
+  const HEADER = 'PuTTY-User-Key-File-'
+  let from = text.indexOf(HEADER)
+  if (from === -1) return text
+  let out = ''
+  let cursor = 0
+  while (from !== -1) {
+    const mac = text.indexOf('Private-MAC:', from)
+    out += text.slice(cursor, from) + REDACTED
+    if (mac === -1) return out
+    let lineEnd = text.indexOf('\n', mac)
+    if (lineEnd === -1) return out
+    if (text[lineEnd - 1] === '\r') lineEnd--
+    cursor = lineEnd
+    from = text.indexOf(HEADER, cursor)
   }
   return out + text.slice(cursor)
 }
@@ -123,7 +151,7 @@ function redactJwts(text: string): string {
 }
 
 export function redactSecrets(text: string): string {
-  return PATTERNS.reduce((t, [re, to]) => t.replace(re, to as string), redactJwts(redactPrivateKeys(text)))
+  return PATTERNS.reduce((t, [re, to]) => t.replace(re, to as string), redactJwts(redactPuttyKeys(redactPrivateKeys(text))))
 }
 
 /** Redacts, then cuts to maxChars (the last character becomes an ellipsis). */

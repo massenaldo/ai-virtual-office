@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isValidPathPattern, matchesPathPattern } from './pathPattern'
+import { isValidPathPattern, matchesPathPattern, patternReachableFrom } from './pathPattern'
 
 describe('isValidPathPattern', () => {
   it.each(['src/**', '*.md', 'docs/*/index.md', 'a?c.txt', '**/*.ts'])('accepts %s', (p) => {
@@ -8,6 +8,20 @@ describe('isValidPathPattern', () => {
 
   it.each(['', '/etc/**', '~/x', '../x', 'a/../b', 'a\\b', 'a//b', 'a/', '{a,b}', '[ab]', '(x)', 'a\u0000b', 'x'.repeat(201)])('rejects %j', (p) => {
     expect(isValidPathPattern(p)).toBe(false)
+  })
+})
+
+describe('matchesPathPattern with Unicode folding', () => {
+  it('folds long s, the Kelvin sign and sharp s when case-insensitive only', () => {
+    expect(matchesPathPattern('secrets/**', '\u017Fecrets/a', false)).toBe(true)
+    expect(matchesPathPattern('secrets/**', '\u017Fecrets/a', true)).toBe(false)
+    expect(matchesPathPattern('k/*', '\u212A/a', false)).toBe(true)
+    expect(matchesPathPattern('strasse/*', 'Stra\u00DFe/a', false)).toBe(true)
+    expect(matchesPathPattern('secrets/**', '\u017Fit/a', false)).toBe(false)
+  })
+  it('folds in patternReachableFrom', () => {
+    expect(patternReachableFrom('secrets/**', '\u017Fecrets')).toBe(true)
+    expect(patternReachableFrom('secrets/**', '\u017Fit')).toBe(false)
   })
 })
 

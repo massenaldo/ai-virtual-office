@@ -244,4 +244,29 @@ describe('gated tools', () => {
     const r = await make(approvingGate(pathOf)).vo_read({ file_path: 's.txt', limit: 2 })
     expect(r.text).toBe('one\ntwo')
   })
+  describe('private key blocks in a file that is not on the denylist', () => {
+    const body = ['MIIEowIBAAKCAQEAbodyone', 'QqzXbodytwo0000', 'ZZyybodythree99']
+    const pem = ['-----BEGIN RSA PRIVATE KEY-----', ...body, '-----END RSA PRIVATE KEY-----'].join('\n')
+    const leaks = (text: string) => [...body, 'END RSA', 'zzzzmarker'].filter((l) => text.includes(l))
+    beforeEach(() => writeFileSync(join(dir, 'deploy_ident'), `head\n${pem}\ntail\n`))
+
+    it.each([
+      [{ offset: 2 }], [{ limit: 2 }], [{ offset: 3, limit: 1 }], [{ offset: 4 }], [{ offset: 5, limit: 1 }],
+    ])('does not return key lines when read with %j', async (range) => {
+      const r = await make(approvingGate(pathOf)).vo_read({ file_path: 'deploy_ident', ...range })
+      expect(r.ok).toBe(true)
+      expect(leaks(r.text)).toEqual([])
+    })
+
+    it('does not return a key body line from grep content', async () => {
+      const r = await make(approvingGate(pathOf)).vo_grep({ pattern: 'MII', output_mode: 'content' })
+      expect(leaks(r.text)).toEqual([])
+      expect(r.text).toBe('No matches found.')
+    })
+
+    it('does not reveal the file through files_with_matches on a body-only string', async () => {
+      const r = await make(approvingGate(pathOf)).vo_grep({ pattern: 'bodytwo', output_mode: 'files_with_matches' })
+      expect(r.text).toBe('No matches found.')
+    })
+  })
 })

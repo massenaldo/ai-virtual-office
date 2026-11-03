@@ -4,7 +4,7 @@ import { createDefaultLayout } from '../layout/defaultLayout'
 import type { OfficeLayout } from '../layout/types'
 import { createDemoWorkforce } from './demo'
 import { addActivity, assignTask, cancelTask } from './operations'
-import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskClickTarget, deskMarkers, shortDigest, environmentBadge, environmentNote, connectionLabel, agentStatusText, workforceNotice, TASK_RUNTIME_LABEL, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, removalPrompt, TASK_STATUS_LABEL } from './view'
+import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskClickTarget, deskMarkers, shortDigest, environmentBadge, environmentNote, connectionLabel, agentStatusText, workforceNotice, TASK_RUNTIME_LABEL, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, allowedScopes, removalPrompt, TASK_STATUS_LABEL } from './view'
 
 const NOW = '2026-10-30T09:00:00.000Z'
 const layout = createDefaultLayout()
@@ -219,3 +219,12 @@ describe('shortDigest', () => {
   })
 })
 
+
+describe('allowedScopes', () => {
+  it('offers every scope for file tools', () => {
+    for (const tool of ['Read', 'Write', 'Edit', 'Glob', 'Grep']) expect(allowedScopes(tool)).toEqual(['once', 'task', 'agent'])
+  })
+  it('offers Once only for execute and network tools', () => {
+    for (const tool of ['Bash', 'WebFetch', 'WebSearch']) expect(allowedScopes(tool)).toEqual(['once'])
+  })
+})

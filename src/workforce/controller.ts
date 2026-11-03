@@ -4,7 +4,7 @@ import type { AgentInput, TaskInput } from './operations'
 import { MockRuntimeProvider } from './runtime/mockRuntime'
 import type { MockDemoControls, RuntimeProvider } from './runtime/types'
 import { loadWorkforce, saveWorkforce, type Preserved } from './storage'
-import type { ApprovalDecision, WorkforceState } from './types'
+import type { ApprovalChoice, WorkforceState } from './types'
 
 type KV = Pick<Storage, 'getItem' | 'setItem'>
 type Runtime = RuntimeProvider & Partial<MockDemoControls>
@@ -41,7 +41,7 @@ export type WorkforceController = {
   startTask(agentId: string, input: TaskInput): Awaitable<ActionResult>
   cancelTask(taskId: string): Awaitable<ActionResult>
   /** digest: the pending approval's action digest, sent back so the server can check it is the same action. */
-  decideApproval(taskId: string, approvalId: string, decision: ApprovalDecision, digest?: string | null): Awaitable<ActionResult>
+  decideApproval(taskId: string, approvalId: string, decision: ApprovalChoice, digest?: string | null): Awaitable<ActionResult>
   requestApproval(taskId: string): void
   forceError(taskId: string): void
   restoreDemoAgents(): void
@@ -129,7 +129,9 @@ export function createWorkforceController(opts: { storage: KV | null; now?: () =
       commit(ops.cancelTask(current, taskId, now()))
       return { ok: true }
     },
-    decideApproval(taskId, approvalId, decision) {
+    decideApproval(taskId, approvalId, choice) {
+      // The local mock has no permission engine: any allow is an approval, a rejection is a denial.
+      const decision = choice === 'approve' || choice === 'deny' ? choice : choice === 'reject' ? 'deny' : 'approve'
       const before = current
       commit(ops.decideApproval(current, taskId, approvalId, decision, now(), runtime.mode))
       if (current !== before) runtime.respondToApproval(taskId, approvalId, decision)

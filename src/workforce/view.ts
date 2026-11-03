@@ -173,3 +173,6 @@ export function formatReviewLines(text: string): ReviewLine[] {
 
 /** Approve is available only after the full change has been opened; with no review (a simulated approval, Bash) it always is. */
 export const approveEnabled = (review: unknown, opened: boolean): boolean => review === null || opened
+
+/** The scopes a person may give an allow for a tool. Execute and network tools are Once only; the server refuses anything broader. */
+export const allowedScopes = (tool: string): Array<'once' | 'task' | 'agent'> => ['Bash', 'WebFetch', 'WebSearch'].includes(tool) ? ['once'] : ['once', 'task', 'agent']

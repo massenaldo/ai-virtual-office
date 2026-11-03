@@ -145,3 +145,4 @@ Recorded and not fixed:
 Notes for the owner:
 - A permission rule binds a workspace id, not a folder. Revoke a workspace's rules before reusing its id for another folder.
 - Agent rules granted before the upgrade stay unbound, so they apply in every workspace. The server logs a warning at each start with the count; review and revoke them in the permissions panel. With broad write scopes off (the default) they cannot allow a write without a fresh approval.
+- **Project folder from the working directory** (final review L-3): the host checks take the application's own folder from `process.cwd()`, not from the package root, so a server started from another directory would not see that a workspace contains the project. Run the server from the project folder, as the scripts do.

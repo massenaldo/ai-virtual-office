@@ -98,11 +98,11 @@ describe('the session it asks for', () => {
     expect(String(o.systemPrompt)).not.toContain('sandbox-secret-path')
     expect(session.prompt).toBe('Summarise')
   })
-  it('pre-approves exactly three read tools, none of which can write or run anything', async () => {
+  it('pre-approves exactly our five tools, none of which can run a command or reach the internet', async () => {
     const s = setup()
     const { session } = await started(s)
-    expect(session.options.allowedTools).toEqual(['mcp__vo__vo_read', 'mcp__vo__vo_glob', 'mcp__vo__vo_grep'])
-    expect(session.options.allowedTools!.join(' ')).not.toMatch(/write|edit|run|bash|web/i)
+    expect(session.options.allowedTools).toEqual(['mcp__vo__vo_read', 'mcp__vo__vo_glob', 'mcp__vo__vo_grep', 'mcp__vo__vo_write', 'mcp__vo__vo_edit'])
+    expect(session.options.allowedTools!.join(' ')).not.toMatch(/run|bash|web|fetch|search_web/i)
   })
   it('gives the SDK a tool-call timeout longer than the approval wait', async () => {
     const s = setup({ toolTimeoutMs: 123456 })
@@ -124,7 +124,7 @@ describe('the session it asks for', () => {
     await expect(session.options.canUseTool!('Bash', {}, {} as never)).resolves.toMatchObject({ behavior: 'deny' })
     const hook = session.options.hooks!.PreToolUse![0].hooks[0]
     const call = (input: unknown) => hook(input as never, undefined, { signal: new AbortController().signal })
-    for (const bad of ['Bash', 'Write', 'mcp__vo__vo_write', 'mcp__other__vo_read']) await expect(call({ tool_name: bad })).resolves.toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
+    for (const bad of ['Bash', 'Write', 'Edit', 'mcp__vo__vo_run', 'mcp__vo__vo_delete', 'mcp__other__vo_write']) await expect(call({ tool_name: bad })).resolves.toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
     await expect(call({})).resolves.toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
     await expect(call(null)).resolves.toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
     for (const good of OUR_TOOLS) await expect(call({ tool_name: good })).resolves.toEqual({})

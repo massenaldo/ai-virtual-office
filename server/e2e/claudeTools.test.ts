@@ -1,75 +1,13 @@
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { AUDIT_FILE, type AuditRecord } from '../audit'
-import { recordingLogger } from '../log'
-import { ClaudeAgentRuntimeProvider } from '../runtime/claudeAgent'
-import { Secret } from '../secret'
-import { fakeQuery, initMessage } from '../test/fakeClaudeSession'
-import { startTestServer, tempDataDir, type TestServer } from '../test/helpers'
-import { makeWorkspaceRoot } from '../test/workspaces'
-import { toolPolicyFrom } from '../toolPolicy'
+import { AUDIT_FILE } from '../audit'
+import { api, audit, FILE_SECRET, KEY, session, srv, start, stop, tasks, until, workspaceRoot } from '../test/claudeHarness'
 
 // The read tools of the claude runtime inside the whole server: a real MCP client calls the same tool server the SDK would, the
 // calls go through the real gate, permission rules, approval flow and file operations, and a real workspace is read.
 
-const KEY = 'sk-ant-api03-canary-0123456789abcdef'
-const FILE_SECRET = 'sk-ant-api03-in-a-file-0123456789abcdef'
-const FORGE = 'agent-demo-backend'
-let s: TestServer | null = null
-let ws: ReturnType<typeof makeWorkspaceRoot> | null = null
-const clients: Client[] = []
-afterEach(async () => { await Promise.all(clients.splice(0).map((c) => c.close())); await s?.close(); s = null; ws?.cleanup(); ws = null })
-
-// startTestServer takes the provider in its deps; the provider needs the server's config, so it is built from the same values.
-async function start(env: Record<string, string> = {}) {
-  ws = makeWorkspaceRoot(['sandbox'])
-  const root = ws.path('sandbox')
-  writeFileSync(join(root, 'notes.txt'), `line one\nline two\ntoken: ${FILE_SECRET}\n`)
-  mkdirSync(join(root, 'src'))
-  writeFileSync(join(root, 'src', 'a.ts'), 'export const needle = 1\n')
-  writeFileSync(join(root, '.env'), 'API_TOKEN=should-never-be-read\n')
-  mkdirSync(join(root, '.git'))
-  writeFileSync(join(root, '.git', 'config'), 'needle in git\n')
-  symlinkSync('/etc/hostname', join(root, 'link.txt'))
-  const dir = tempDataDir()
-  const query = fakeQuery()
-  const log = recordingLogger()
-  const full = { ...ws.env, DATA_DIR: dir, RUNTIME: 'claude', ANTHROPIC_API_KEY: KEY, ...env }
-  const probe = await import('../config').then((m) => m.parseConfig({ ...full, PORT: '0' }))
-  if (!probe.ok) throw new Error(probe.errors.join('; '))
-  const provider = new ClaudeAgentRuntimeProvider({ apiKey: new Secret(KEY), dataDir: dir, query, log, protectedRoots: toolPolicyFrom(probe.config).protectedRoots, toolTimeoutMs: probe.config.approvalTimeoutMs + 60000 })
-  s = await startTestServer(full, { provider, log })
-  return { query, log, dir, root }
-}
-
-const api = (method: string, path: string, body?: unknown) => s!.api(method, path, body)
-const tasks = async () => (await api('GET', '/api/state')).body.state.tasks as Array<{ id: string; status: string; pendingApproval: { id: string; tool: string; digest: string | null; review: unknown } | null }>
-async function until(fn: () => Promise<boolean>, ms = 3000) {
-  const end = Date.now() + ms
-  while (!(await fn())) { if (Date.now() > end) throw new Error('condition not met in time'); await new Promise((r) => setTimeout(r, 10)) }
-}
-/** Starts a task, answers the session's init, and returns an MCP client on the session's own tool server. */
-async function session(ctx: Awaited<ReturnType<typeof start>>, agent = FORGE, index = 0) {
-  const r = await api('POST', `/api/agents/${agent}/tasks`, { title: 'Read the notes', workspaceId: 'sandbox' })
-  expect(r.status).toBe(202)
-  await until(async () => ctx.query.sessions.length > index)
-  const fake = ctx.query.sessions[index]
-  fake.send(initMessage())
-  const id = r.body.task.id as string
-  await until(async () => (await tasks()).find((t) => t.id === id)?.status === 'running')
-  const server = fake.options.mcpServers!.vo as unknown as { instance: { connect(t: unknown): Promise<void> } }
-  const [a, b] = InMemoryTransport.createLinkedPair()
-  await server.instance.connect(b)
-  const client = new Client({ name: 'test', version: '1' })
-  await client.connect(a)
-  clients.push(client)
-  const call = async (name: string, args: Record<string, unknown>) => (await client.callTool({ name, arguments: args })) as { isError?: boolean; content: Array<{ text: string }> }
-  return { id, fake, call, text: async (name: string, args: Record<string, unknown>) => (await call(name, args)).content[0].text }
-}
-const audit = (): AuditRecord[] => readFileSync(join(s!.dataDir, AUDIT_FILE), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+afterEach(stop)
 
 describe('the read tools in the whole server', () => {
   it('reads a file in the workspace without asking, masks a secret in it, and audits the call', async () => {
@@ -97,7 +35,7 @@ describe('the read tools in the whole server', () => {
     const grep = await text('vo_grep', { pattern: 'needle', output_mode: 'content' })
     expect(grep).toContain('src/a.ts:1:')
     expect(grep).not.toContain('git')
-    for (const t of [glob, grep]) expect(t).not.toContain(ws!.root)
+    for (const t of [glob, grep]) expect(t).not.toContain(workspaceRoot())
   })
 
   it.each([
@@ -115,7 +53,7 @@ describe('the read tools in the whole server', () => {
     expect(r.isError).toBe(true)
     expect(r.content[0].text).toMatch(/^(The action is not allowed by policy\.|That path is not allowed\.)$/)
     expect(JSON.stringify(r)).not.toContain('should-never-be-read')
-    expect(JSON.stringify(r)).not.toContain(ws!.root)
+    expect(JSON.stringify(r)).not.toContain(workspaceRoot())
   })
 
   it('hands the model a refusal it can read and the task goes on running', async () => {
@@ -201,8 +139,8 @@ describe('the read tools in the whole server', () => {
     const ctx = await start()
     const { id, call } = await session(ctx)
     const results = [await call('vo_read', { file_path: 'notes.txt' }), await call('vo_glob', { pattern: '*' }), await call('vo_read', { file_path: '/etc/passwd' })]
-    const everything = [JSON.stringify(results), JSON.stringify((await api('GET', '/api/state')).body), readFileSync(join(s!.dataDir, AUDIT_FILE), 'utf8'), ctx.log.lines.join('\n')].join('\n')
-    for (const secret of [KEY, FILE_SECRET, ws!.root, s!.dataDir]) expect(everything).not.toContain(secret)
+    const everything = [JSON.stringify(results), JSON.stringify((await api('GET', '/api/state')).body), readFileSync(join(srv().dataDir, AUDIT_FILE), 'utf8'), ctx.log.lines.join('\n')].join('\n')
+    for (const secret of [KEY, FILE_SECRET, workspaceRoot(), srv().dataDir]) expect(everything).not.toContain(secret)
     expect(id).toBeTruthy()
   })
 })

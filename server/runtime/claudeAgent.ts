@@ -17,14 +17,15 @@ import type { ExecutionResult, ExecutionStatus, ServerRuntimeProvider, StartCont
 /**
  * The provider for the Claude Agent SDK. One `query()` and one SDK session per task.
  *
- * What the model can do (3B.5.2): answer in text and use three read-only tools, `vo_read`, `vo_glob` and `vo_grep`, served by
- * an in-process MCP server over the gated tool handlers (claudeTools.ts). It cannot write or run anything.
+ * What the model can do (3B.5.3): answer in text and use five tools served by an in-process MCP server over the gated tool
+ * handlers (claudeTools.ts): `vo_read`, `vo_glob` and `vo_grep` (read), and `vo_write` and `vo_edit` (change a file, each only
+ * after a person approves exactly that change, unless a rule says otherwise). It cannot run anything.
  *
  * The server's permission engine is authoritative, not the SDK's. Every tool handler calls `ctx.tools.use`, so the policy,
  * the permission rules, the approval and the use-time re-check all happen in our process, right before the file operation. The
  * SDK is configured so it has nothing of its own to decide, and anything unexpected stops the task (fail closed):
  *  1. `tools: []` removes every built-in tool; `mcpServers` holds only our server and `strictMcpConfig` ignores every other source.
- *  2. `allowedTools` pre-approves exactly our three tools (the gate decides inside them); `dontAsk` denies everything else.
+ *  2. `allowedTools` pre-approves exactly our five tools (the gate decides inside them); `dontAsk` denies everything else.
  *  3. The session's own `init` message must list exactly those tools, exactly our server, and the `dontAsk` mode, or the task
  *     fails before it starts.
  *  4. A `PreToolUse` hook and `canUseTool` deny any tool that is not ours; an assistant message that calls one ends the task.

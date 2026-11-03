@@ -31,17 +31,24 @@ describe('the tool server', () => {
     expect(server).toMatchObject({ type: 'sdk', name: VO_SERVER_NAME, timeout: 4321 })
   })
 
-  it('offers exactly the three read tools, as read-only, with plain descriptions', async () => {
+  it('offers exactly five tools: three marked read-only and two marked as changing files, with plain descriptions', async () => {
     const { client } = await connect()
     const { tools } = await client.listTools()
     expect(tools.map((t) => `mcp__${VO_SERVER_NAME}__${t.name}`).sort()).toEqual([...MODEL_TOOL_NAMES].sort())
     expect(Object.keys(TOOL_LABELS).sort()).toEqual([...MODEL_TOOL_NAMES].sort())
     for (const t of tools) {
-      expect(t.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false })
+      const writes = t.name === 'vo_write' || t.name === 'vo_edit'
+      expect(t.annotations).toMatchObject(writes ? { readOnlyHint: false, destructiveHint: true } : { readOnlyHint: true, destructiveHint: false })
       expect(t.description).toMatch(/workspace/)
       expect(t.description).not.toMatch(/\/(home|data|srv|tmp|Users)\b/)
     }
-    expect(tools.map((t) => t.name).join(' ')).not.toMatch(/write|edit|run|bash/)
+    expect(tools.map((t) => t.name).join(' ')).not.toMatch(/run|bash|fetch|web/)
+  })
+
+  it('tells the model that a person approves every change', async () => {
+    const { client } = await connect()
+    const { tools } = await client.listTools()
+    for (const name of ['vo_write', 'vo_edit']) expect(tools.find((t) => t.name === name)!.description).toMatch(/must approve/)
   })
 
   it('describes the arguments of each tool', async () => {
@@ -51,6 +58,8 @@ describe('the tool server', () => {
     expect(props('vo_read')).toEqual(['file_path', 'limit', 'offset'])
     expect(props('vo_glob')).toEqual(['path', 'pattern'])
     expect(props('vo_grep')).toEqual(['-i', 'glob', 'output_mode', 'path', 'pattern'])
+    expect(props('vo_write')).toEqual(['content', 'file_path'])
+    expect(props('vo_edit')).toEqual(['file_path', 'new_string', 'old_string', 'replace_all'])
   })
 
   it('sends each call through the gate under the policy name of the tool, and returns what the handler produced', async () => {
@@ -62,7 +71,11 @@ describe('the tool server', () => {
     expect(r).toMatchObject({ content: [{ type: 'text', text: 'handled Read' }] })
     await client.callTool({ name: 'vo_glob', arguments: { pattern: '*.ts' } })
     await client.callTool({ name: 'vo_grep', arguments: { pattern: 'x' } })
-    expect(calls.map((c) => c.tool)).toEqual(['Read', 'Glob', 'Grep'])
+    await client.callTool({ name: 'vo_write', arguments: { file_path: 'a.txt', content: 'c' } })
+    await client.callTool({ name: 'vo_edit', arguments: { file_path: 'a.txt', old_string: 'a', new_string: 'b', replace_all: true } })
+    expect(calls.map((c) => c.tool)).toEqual(['Read', 'Glob', 'Grep', 'Write', 'Edit'])
+    expect(calls[3]).toEqual({ tool: 'Write', input: { file_path: 'a.txt', content: 'c' } })
+    expect(calls[4]).toEqual({ tool: 'Edit', input: { file_path: 'a.txt', old_string: 'a', new_string: 'b', replace_all: true } })
   })
 
   it('turns a refusal by the gate into an error result with a fixed sentence the model can read', async () => {
@@ -87,16 +100,16 @@ describe('the tool server', () => {
 
   it('refuses the wrong shape of arguments before the gate is asked', async () => {
     const { client } = await connect()
-    for (const [name, args] of [['vo_read', { file_path: 3 }], ['vo_read', {}], ['vo_read', { file_path: 'a', offset: 0 }], ['vo_glob', { pattern: ['x'] }], ['vo_grep', { pattern: 'x', output_mode: 'regex' }]] as const) {
+    for (const [name, args] of [['vo_read', { file_path: 3 }], ['vo_read', {}], ['vo_read', { file_path: 'a', offset: 0 }], ['vo_glob', { pattern: ['x'] }], ['vo_grep', { pattern: 'x', output_mode: 'regex' }], ['vo_write', { file_path: 'a' }], ['vo_write', { file_path: 'a', content: 5 }], ['vo_edit', { file_path: 'a', old_string: 'x' }], ['vo_edit', { file_path: 'a', old_string: 'x', new_string: 'y', replace_all: 'yes' }]] as const) {
       const r = await client.callTool({ name, arguments: args as never }).catch((e: unknown) => ({ isError: true, thrown: String(e) }))
       expect(r).toMatchObject({ isError: true })
     }
     expect(calls).toEqual([])
   })
 
-  it('has no tool for writing, editing or running anything', async () => {
+  it('has no tool for running a command, deleting or moving a file, or any built-in tool', async () => {
     const { client } = await connect()
-    for (const name of ['vo_write', 'vo_edit', 'vo_run', 'Bash', 'Write']) {
+    for (const name of ['vo_run', 'vo_delete', 'vo_move', 'vo_mkdir', 'Bash', 'Write', 'Edit']) {
       const r = await client.callTool({ name, arguments: {} }).catch((e: unknown) => ({ isError: true, thrown: String(e) }))
       expect(r).toMatchObject({ isError: true })
     }

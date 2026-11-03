@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process'
-import { existsSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { parseConfig } from '../config'
@@ -51,11 +51,11 @@ const childList = () => execSync(`ps --ppid ${process.pid} -o pid=,comm= || true
 const children = () => childList().split('\n').filter((l) => l !== '').length
 
 describe.skipIf(!process.env.VO_REAL_SDK)('the real SDK with a scripted API', () => {
-  it('sends the model our three tools and no built-in tool', async () => {
+  it('sends the model our five tools and no built-in tool', async () => {
     const { id } = await run([[{ text: 'Nothing to do.' }]])
     await until(async () => (await task(id)).status === 'completed')
     const names = api!.requests[0].tools
-    expect(names.filter((n) => n.startsWith('mcp__'))).toEqual(['mcp__vo__vo_read', 'mcp__vo__vo_glob', 'mcp__vo__vo_grep'].sort((a, b) => names.indexOf(a) - names.indexOf(b)))
+    expect(names.filter((n) => n.startsWith('mcp__')).sort()).toEqual(['mcp__vo__vo_edit', 'mcp__vo__vo_glob', 'mcp__vo__vo_grep', 'mcp__vo__vo_read', 'mcp__vo__vo_write'])
     for (const builtin of ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Task', 'TodoWrite']) expect(names).not.toContain(builtin)
     expect((await task(id)).sessionId).toMatch(/^[0-9a-f-]{36}$/)
   })
@@ -110,10 +110,41 @@ describe.skipIf(!process.env.VO_REAL_SDK)('the real SDK with a scripted API', ()
     await until(async () => children() === 0, 8000)
   })
 
+  it('writes a file only after a person approves exactly that content, through the real SDK', async () => {
+    const content = 'Written by the agent.\n'
+    const { id, root } = await run([[{ tool: 'mcp__vo__vo_write', input: { file_path: 'out.txt', content } }], [{ text: 'Wrote it.' }]])
+    await until(async () => (await task(id)).status === 'waiting_for_approval')
+    expect(existsSync(join(root, 'out.txt'))).toBe(false)
+    await new Promise((r) => setTimeout(r, 2500))
+    expect(existsSync(join(root, 'out.txt'))).toBe(false)
+    const approval = (await task(id)).pendingApproval!
+    expect((await s!.api('POST', `/api/tasks/${id}/approval`, { approvalId: approval.id, decision: 'allow_once', digest: approval.digest })).status).toBe(200)
+    await until(async () => (await task(id)).status === 'completed')
+    expect(readFileSync(join(root, 'out.txt'), 'utf8')).toBe(content)
+    expect(toolResults(api!.requests)).toContain('Wrote 22 bytes to out.txt.')
+  })
+
+  it('writes nothing when the person rejects, and the model carries on', async () => {
+    const { id, root } = await run([[{ tool: 'mcp__vo__vo_write', input: { file_path: 'out.txt', content: 'no\n' } }], [{ text: 'It was refused.' }]])
+    await until(async () => (await task(id)).status === 'waiting_for_approval')
+    const approval = (await task(id)).pendingApproval!
+    await s!.api('POST', `/api/tasks/${id}/approval`, { approvalId: approval.id, decision: 'reject', digest: approval.digest })
+    await until(async () => (await task(id)).status === 'completed')
+    expect(existsSync(join(root, 'out.txt'))).toBe(false)
+    expect(toolResults(api!.requests)).toContain('The action was not approved.')
+  })
+
+  it('refuses a write to a sensitive file with no approval asked', async () => {
+    const { id, root } = await run([[{ tool: 'mcp__vo__vo_write', input: { file_path: '.env', content: 'API_TOKEN=stolen\n' } }], [{ text: 'Refused.' }]])
+    await until(async () => (await task(id)).status === 'completed')
+    expect(readFileSync(join(root, '.env'), 'utf8')).toBe('API_TOKEN=should-never-be-read\n')
+    expect(toolResults(api!.requests)).toContain('The action is not allowed by policy.')
+  })
+
   it('leaves no scratch folder behind', async () => {
     const { id } = await run([[{ text: 'Done.' }]])
     await until(async () => (await task(id)).status === 'completed')
-    await new Promise((r) => setTimeout(r, 300))
-    expect(existsSync(join(s!.dataDir, 'claude-scratch', id))).toBe(false)
+    // The folder goes when the SDK's output ends, which is a moment after the result; wait for it rather than guess.
+    await until(async () => !existsSync(join(s!.dataDir, 'claude-scratch', id)), 8000)
   })
 })

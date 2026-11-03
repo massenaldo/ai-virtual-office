@@ -3,9 +3,10 @@ import type { AddressInfo } from 'node:net'
 import { classifyPath } from '../../scripts/apiProxy'
 import { consoleLogger, type Logger } from '../log'
 import { createPasswordCheck } from './auth'
+import { createApiProxy } from './proxy'
 import { createStaticHandler } from './static'
 
-// The public front door: password first for every request, then the built app, then (Task 2) the API proxy.
+// The public front door: password first for every request, then the built app, then the API proxy.
 
 export type GatewayOptions = {
   password: string
@@ -29,6 +30,7 @@ export function createGateway(opts: GatewayOptions): { handler(req: IncomingMess
   const log = opts.log ?? consoleLogger
   const passwords = createPasswordCheck({ password: opts.password, now: opts.now })
   const serveStatic = createStaticHandler({ root: opts.staticDir })
+  const proxy = createApiProxy({ backend: opts.backend, readToken: opts.readToken, log })
   let locked = false
 
   return {
@@ -45,7 +47,8 @@ export function createGateway(opts: GatewayOptions): { handler(req: IncomingMess
       }
       locked = false
       const url = req.url ?? '/'
-      if (classifyPath(url) !== 'other') return sendJson(res, 502, 'The API is not connected.')
+      // Anything that reads as the API, plain or not, goes to the proxy, which refuses the variants itself.
+      if (classifyPath(url) !== 'other') return proxy(req, res)
       if (serveStatic(req, res)) return
       sendJson(res, 405, 'Method not allowed.', { allow: 'GET, HEAD' })
     },

@@ -58,16 +58,16 @@ describe('gateway', () => {
     expect((await get('/', auth(), 'POST')).status).toBe(405)
   })
 
-  it('answers any /api path 502 until the proxy is connected, including variants', async () => {
-    for (const path of ['/api/health', '/api/anything?x=1']) {
-      const res = await get(path, auth())
-      expect(res.status, path).toBe(502)
-      expect(await res.json()).toEqual({ error: 'The API is not connected.' })
-      expect(res.headers.get('cache-control')).toBe('no-store')
-    }
+  it('hands /api paths to the proxy after the password check, including variants', async () => {
+    // Port 1 has no backend: a plain API path with the right header reaches the proxy and finds it unreachable.
+    const plain = await get('/api/health', { ...auth(), 'sec-fetch-site': 'same-origin' })
+    expect(plain.status).toBe(502)
+    expect(await plain.json()).toEqual({ error: 'The backend is not reachable.' })
+    expect((await get('/api/health', auth())).status).toBe(403)
     for (const path of ['/API/x', '/api', '/apiX', '/api%2Fx']) {
-      const res = await get(path, auth())
-      expect(res.status, path).toBe(502)
+      const res = await get(path, { ...auth(), 'sec-fetch-site': 'same-origin' })
+      expect(res.status, path).toBe(404)
+      expect(res.headers.get('cache-control')).toBe('no-store')
     }
   })
 

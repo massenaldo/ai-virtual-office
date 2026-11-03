@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import type { WorkforceEvent } from '../../src/workforce/api'
+import type { PermissionChangedEvent, PermissionRuleView, WorkforceEvent } from '../../src/workforce/api'
 import { startServer, type RunningServer } from '../app'
 import { AUDIT_FILE } from '../audit'
 import { TOKEN_FILE } from '../auth'
@@ -144,5 +144,109 @@ describe('the real server, end to end', () => {
     expect(first.id.split(':')[0]).toBe(before.split(':')[0])
     const stale = await open({ lastEventId: 'oldboot:5' })
     expect((await stale.next()).type).toBe('state.reset')
+  })
+})
+
+describe('permissions, end to end', () => {
+  const permEvents = (events: WorkforceEvent[]) => events.filter((e): e is PermissionChangedEvent => e.type === 'permission.changed')
+  const rules = async (path = '/api/permissions') => (await call('GET', path)).body.rules as PermissionRuleView[]
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
+  const taskOf = async (id: string) => (await state()).tasks.find((t) => t.id === id)!
+  async function untilTask(id: string, ok: (t: Awaited<ReturnType<typeof taskOf>>) => boolean) {
+    for (let i = 0; i < 100; i++) { if (ok(await taskOf(id))) return; await pause(50) }
+    throw new Error(`task ${id} never reached the expected state`)
+  }
+  async function startTask(): Promise<string> {
+    const r = await call('POST', `/api/agents/${FORGE}/tasks`, { body: { title: 'Perm', workspaceId: 'sandbox' } })
+    expect(r.status).toBe(202)
+    const id = r.body.task.id as string
+    await untilTask(id, (t) => t.status === 'running')
+    return id
+  }
+  async function askWrite(id: string) {
+    await call('POST', `/api/demo/tasks/${id}/request-approval`)
+    await untilTask(id, (t) => t.status === 'waiting_for_approval')
+    return (await taskOf(id)).pendingApproval!
+  }
+  const decide = (id: string, p: { id: string; digest: string | null }, decision: string) =>
+    call('POST', `/api/tasks/${id}/approval`, { body: { approvalId: p.id, decision, digest: p.digest } })
+  const finish = async (id: string) => { await call('POST', `/api/tasks/${id}/cancel`); await untilTask(id, (t) => t.status === 'cancelled' || t.status === 'completed') }
+  const seen: WorkforceEvent[] = []
+  let stream: SseStream
+  const drain = () => { seen.push(...stream.events.slice(seen.length)) }
+
+  it('streams a global grant and its revoke in order, and the lists agree with the events', async () => {
+    stream = await open()
+    const made = await call('POST', '/api/permissions', { body: { scope: 'global', effect: 'deny', tool: 'Grep' } })
+    expect(made.status).toBe(201)
+    const granted = (await stream.next((e) => e.type === 'permission.changed')) as PermissionChangedEvent
+    expect(granted).toMatchObject({ kind: 'granted', rule: { id: made.body.rule.id, scope: 'global', effect: 'deny', state: 'active' } })
+    expect((await rules()).find((r) => r.id === granted.rule.id)).toEqual(granted.rule)
+    expect((await call('DELETE', `/api/permissions/${granted.rule.id}`)).status).toBe(200)
+    const revoked = (await stream.next((e) => e.type === 'permission.changed')) as PermissionChangedEvent
+    expect(revoked).toMatchObject({ kind: 'revoked', rule: { id: granted.rule.id, state: 'revoked' } })
+    expect(seqOf(revoked)).toBeGreaterThan(seqOf(granted))
+    expect((await rules()).some((r) => r.id === granted.rule.id)).toBe(false)
+    expect((await rules('/api/permissions/history')).find((r) => r.id === granted.rule.id)).toEqual(revoked.rule)
+    expect((await call('DELETE', `/api/permissions/${granted.rule.id}`)).status).toBe(409)
+    drain()
+  })
+
+  it('refuses to allow Bash for everyone, and an unknown agent, creating no rule', async () => {
+    const before = await rules()
+    expect((await call('POST', '/api/permissions', { body: { scope: 'global', effect: 'allow', tool: 'Bash' } })).status).toBeGreaterThanOrEqual(400)
+    expect((await call('POST', '/api/permissions', { body: { scope: 'agent', agentId: FORGE, effect: 'allow', tool: 'Bash' } })).status).toBeGreaterThanOrEqual(400)
+    expect((await call('POST', '/api/permissions', { body: { scope: 'agent', agentId: 'nobody', effect: 'deny', tool: 'Grep' } })).status).toBe(404)
+    expect(await rules()).toEqual(before)
+  })
+
+  it('allow_task: the same task is not asked again; revoking the rule makes it ask again', async () => {
+    const id = await startTask()
+    const first = await askWrite(id)
+    expect((await decide(id, first, 'allow_task')).status).toBe(200)
+    const granted = (await stream.next((e) => e.type === 'permission.changed' && (e as PermissionChangedEvent).kind === 'granted')) as PermissionChangedEvent
+    expect(granted.rule).toMatchObject({ scope: 'task', effect: 'allow', tool: 'Write', taskId: id })
+    await untilTask(id, (t) => t.status === 'running')
+    await call('POST', `/api/demo/tasks/${id}/request-approval`)
+    await pause(150)
+    expect((await taskOf(id)).status).not.toBe('waiting_for_approval')
+    expect((await call('DELETE', `/api/permissions/${granted.rule.id}`)).status).toBe(200)
+    await stream.next((e) => e.type === 'permission.changed' && (e as PermissionChangedEvent).kind === 'revoked')
+    await askWrite(id)
+    await finish(id)
+    drain()
+  })
+
+  it('allow_once: granted, then used, then in history', async () => {
+    const id = await startTask()
+    const p = await askWrite(id)
+    expect((await decide(id, p, 'allow_once')).status).toBe(200)
+    const got = permEvents(await stream.until((e) => e.type === 'permission.changed' && (e as PermissionChangedEvent).kind === 'used'))
+      .filter((e) => e.rule.scope === 'once')
+    expect(got.map((e) => e.kind)).toEqual(['granted', 'used'])
+    expect((await rules('/api/permissions/history')).some((r) => r.id === got[0].rule.id)).toBe(true)
+    await finish(id)
+    drain()
+  })
+
+  it('never puts a digest in a permission event', () => {
+    drain()
+    const all = permEvents(seen)
+    expect(all.length).toBeGreaterThanOrEqual(6)
+    expect(JSON.stringify(all)).not.toMatch(/digest|[0-9a-f]{64}/)
+  })
+
+  it('replays the permission events a client missed, in order; an unknown boot gets state.reset', async () => {
+    const made = await call('POST', '/api/permissions', { body: { scope: 'global', effect: 'ask', tool: 'Glob' } })
+    const granted = (await stream.next((e) => e.type === 'permission.changed')) as PermissionChangedEvent
+    stream.close()
+    await call('DELETE', `/api/permissions/${made.body.rule.id}`)
+    const again = await call('POST', '/api/permissions', { body: { scope: 'global', effect: 'ask', tool: 'Glob' } })
+    expect(again.status).toBe(201)
+    const resumed = await open({ lastEventId: granted.id })
+    const got = permEvents(await resumed.until((e) => e.type === 'permission.changed' && (e as PermissionChangedEvent).kind === 'granted'))
+    expect(got.map((e) => e.kind)).toEqual(['revoked', 'granted'])
+    expect(got[0].rule.id).toBe(made.body.rule.id)
+    expect((await (await open({ lastEventId: 'oldboot:5' })).next()).type).toBe('state.reset')
   })
 })

@@ -23,10 +23,15 @@ describe('buildSystemPrompt', () => {
     expect(text).toContain('Forge')
     expect(text).toContain('API engineer')
   })
-  it('names the three read-only tools and says it cannot write, run or reach the internet', () => {
-    for (const name of ['vo_read', 'vo_glob', 'vo_grep']) expect(text).toContain(name)
-    expect(text).toMatch(/cannot write or change files, run commands or reach the internet/)
-    expect(text).not.toContain('vo_write')
+  it('names the five tools, separates reading from changing, and says it cannot run commands or reach the internet', () => {
+    for (const name of ['vo_read', 'vo_glob', 'vo_grep', 'vo_write', 'vo_edit']) expect(text).toContain(name)
+    expect(text).toMatch(/Three only read/)
+    expect(text).toMatch(/cannot run commands or reach the internet/)
+    expect(text).not.toContain('vo_run')
+  })
+  it('says a person approves every change and may refuse it, and that a change is made exactly as shown', () => {
+    expect(text).toMatch(/must approve every change/)
+    expect(text).toMatch(/exactly as shown/)
   })
   it('says paths are relative and that file text is data, not instructions', () => {
     expect(text).toMatch(/relative to the workspace root/)

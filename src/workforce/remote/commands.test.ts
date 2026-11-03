@@ -33,6 +33,10 @@ const ROUTES: Array<{ action: string; call: (c: RemoteCommands) => unknown; meth
   { action: 'cancelTask', call: (c) => c.cancelTask('t1'), method: 'POST', path: '/api/tasks/t1/cancel' },
   { action: 'decideApproval', call: (c) => c.decideApproval('t1', 'ap1', 'deny'), method: 'POST', path: '/api/tasks/t1/approval', body: '{"approvalId":"ap1","decision":"deny"}' },
   { action: 'decideApproval (with digest)', call: (c) => c.decideApproval('t1', 'ap1', 'approve', 'ef'.repeat(32)), method: 'POST', path: '/api/tasks/t1/approval', body: `{"approvalId":"ap1","decision":"approve","digest":"${'ef'.repeat(32)}"}` },
+  { action: 'decideApproval (scoped)', call: (c) => c.decideApproval('t1', 'ap1', 'allow_task', 'ef'.repeat(32)), method: 'POST', path: '/api/tasks/t1/approval', body: `{"approvalId":"ap1","decision":"allow_task","digest":"${'ef'.repeat(32)}"}` },
+  { action: 'createPermission', call: (c) => c.createPermission({ scope: 'agent', effect: 'allow', tool: 'Read', agentId: 'a1' }), method: 'POST', path: '/api/permissions', body: '{"scope":"agent","effect":"allow","tool":"Read","agentId":"a1"}' },
+  { action: 'revokePermission', call: (c) => c.revokePermission('p 1'), method: 'DELETE', path: '/api/permissions/p%201' },
+  { action: 'revokeAgentPermissions', call: (c) => c.revokeAgentPermissions('a/1'), method: 'DELETE', path: '/api/agents/a%2F1/permissions' },
   { action: 'requestApproval', call: (c) => c.requestApproval('t1'), method: 'POST', path: '/api/demo/tasks/t1/request-approval' },
   { action: 'forceError', call: (c) => c.forceError('t1'), method: 'POST', path: '/api/demo/tasks/t1/force-error' },
   { action: 'restoreDemoAgents', call: (c) => c.restoreDemoAgents(), method: 'POST', path: '/api/demo/agents/restore' },
@@ -55,6 +59,16 @@ describe('createRemoteCommands', () => {
     backend.respond('POST', '/api/agents/a1/tasks', 409, { error: 'Agent already has an active task.' })
     expect(await commands.startTask('a1', { title: 'T', description: '' })).toEqual({ ok: false, error: 'Agent already has an active task.' })
     expect(reportError).not.toHaveBeenCalledWith('Agent already has an active task.')
+  })
+
+  it.each([
+    ['createPermission', (c: RemoteCommands) => c.createPermission({ scope: 'global', effect: 'deny', tool: 'Grep' }), 'POST', '/api/permissions', 422],
+    ['revokePermission', (c: RemoteCommands) => c.revokePermission('p1'), 'DELETE', '/api/permissions/p1', 409],
+    ['revokeAgentPermissions', (c: RemoteCommands) => c.revokeAgentPermissions('a1'), 'DELETE', '/api/agents/a1/permissions', 404],
+  ] as const)('%s hands the server text of a refusal back to the caller', async (_n, call, method, path, status) => {
+    backend.respond(method, path, status, { error: 'Refused by the server.' })
+    expect(await call(commands)).toEqual({ ok: false, error: 'Refused by the server.' })
+    expect(reportError).not.toHaveBeenCalled()
   })
 
   it('a failing void command reports its error and a success clears it', async () => {

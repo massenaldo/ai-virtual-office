@@ -1,6 +1,8 @@
 import { DEPARTMENTS } from '../layout/catalog'
 import type { OfficeLayout } from '../layout/types'
 import type { DeskMarker } from '../scene/labels'
+import type { PermissionRuleView } from './api'
+import type { PermissionsState } from './permissions'
 import type { ConnectionStatus, RuntimeEnvironment, WorkforceSnapshot } from './controller'
 import { activeTaskFor, agentAtDesk } from './operations'
 import type { Preserved, WorkforceLoadProblem } from './storage'
@@ -173,3 +175,60 @@ export function formatReviewLines(text: string): ReviewLine[] {
 
 /** Approve is available only after the full change has been opened; with no review (a simulated approval, Bash) it always is. */
 export const approveEnabled = (review: unknown, opened: boolean): boolean => review === null || opened
+
+/**
+ * The scopes a person may give an allow for an approval. Execute and network tools are Once only, and so is an approval without a
+ * digest (a simulated one: there is no exact action to grant from); the server refuses anything broader in both cases.
+ */
+export const allowedScopes = (tool: string, digest: string | null): Array<'once' | 'task' | 'agent'> => digest === null || ['Bash', 'WebFetch', 'WebSearch'].includes(tool) ? ['once'] : ['once', 'task', 'agent']
+
+export type PermissionIcon = 'allowed' | 'denied' | 'ask' | 'expired' | 'revoked' | 'used' | 'ended'
+/** The word and icon shown for a rule; colour only adds to them. */
+export function permissionStateText(rule: PermissionRuleView): { label: string; icon: PermissionIcon } {
+  if (rule.state === 'active') return rule.effect === 'allow' ? { label: 'Allowed', icon: 'allowed' } : rule.effect === 'deny' ? { label: 'Denied', icon: 'denied' } : { label: 'Approval required', icon: 'ask' }
+  return { label: { expired: 'Expired', revoked: 'Revoked', used: 'Used', ended: 'Ended' }[rule.state], icon: rule.state }
+}
+
+export const PERMISSION_SCOPE_LABEL: Record<PermissionRuleView['scope'], string> = { global: 'All agents', agent: 'One agent', task: 'One task', once: 'One use' }
+
+/** The Global tab shows global rules; an agent's tab shows every rule that names that agent (agent, task and once). */
+export const rulesForTab = (rules: PermissionRuleView[], tab: string): PermissionRuleView[] => rules.filter((r) => (tab === 'global' ? r.scope === 'global' : r.agentId === tab))
+
+export function revokePrompt(rule: PermissionRuleView, agentName: string | null): { title: string; message: string } {
+  const covered = `${rule.effect === 'allow' ? 'Allow' : rule.effect === 'deny' ? 'Deny' : 'Ask'} ${rule.tool}${rule.pathPattern ? ` on ${rule.pathPattern}` : ''}`
+  const lines = [`${covered}. Calls this rule covered are decided by the remaining rules; if none matches, they are denied.`]
+  if (rule.createdBy === 'default') lines.push('This is a built-in default rule.')
+  if (rule.scope === 'task' || rule.scope === 'once') lines.push('A call this rule allowed that is still running is stopped.')
+  return { title: `Revoke ${rule.tool}${agentName ? ` for ${agentName}` : ''}?`, message: lines.join(' ') }
+}
+
+export const revokeAgentPrompt = (agentName: string, count: number): { title: string; message: string } => ({
+  title: `Revoke all permissions for ${agentName}?`,
+  message: `This revokes ${count} active ${count === 1 ? 'rule' : 'rules'} for ${agentName}, including grants for tasks that are running. Global rules stay.`,
+})
+
+/** Tasks that are waiting for a person's decision, with the agent they belong to. */
+export function waitingApprovals(s: WorkforceState): Array<{ agentId: string; agentName: string; taskId: string; tool: string; summary: string }> {
+  return s.tasks.flatMap((t) => {
+    const agent = s.agents.find((a) => a.id === t.agentId)
+    return t.status === 'waiting_for_approval' && t.pendingApproval && agent ? [{ agentId: agent.id, agentName: agent.name, taskId: t.id, tool: t.pendingApproval.tool, summary: t.pendingApproval.summary }] : []
+  })
+}
+
+const SCOPE_VALUE = { once: 'allow_once', task: 'allow_task', agent: 'allow_agent' } as const
+export const choiceFor = (scope: 'once' | 'task' | 'agent'): 'allow_once' | 'allow_task' | 'allow_agent' => SCOPE_VALUE[scope]
+
+/** What an allow of this scope grants, in the server's terms. The tool and agent come from the pending approval, never from the person's typing. */
+export function scopeSentence(scope: 'once' | 'task' | 'agent', tool: string, agentName: string): string {
+  if (scope === 'once') return `Allow ${tool} once, for exactly this action.`
+  const checked = 'Each call is still checked and recorded.'
+  return scope === 'task' ? `Allow ${tool} for the rest of this task. ${checked}` : `Allow ${tool} for ${agentName} on every task until you revoke it. ${checked}`
+}
+
+/** The chip in an agent's header: null in browser mode and before the first load, otherwise the pending state or the rule count. */
+export function agentPermissionChip(permissions: PermissionsState | null, s: WorkforceState, agentId: string): string | null {
+  if (!permissions?.loaded) return null
+  if (waitingApprovals(s).some((w) => w.agentId === agentId)) return 'Approval required'
+  const n = permissions.active.filter((r) => r.agentId === agentId).length
+  return n === 0 ? 'No permission rules' : `${n} permission ${n === 1 ? 'rule' : 'rules'}`
+}

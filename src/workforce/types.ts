@@ -15,6 +15,8 @@ export type TaskRuntime = 'mock' | 'claude'
 export type TaskEndReason = 'completed' | 'failed' | 'cancelled' | 'timeout'
 
 export type ApprovalDecision = 'approve' | 'deny'
+/** What a person may answer a backend approval with: the scope of an allow, or a rejection. The legacy approve and deny stay valid. */
+export type ApprovalChoice = ApprovalDecision | 'allow_once' | 'allow_task' | 'allow_agent' | 'reject'
 
 /** A runtime's request to use a tool that needs a human decision; set exactly while the task is waiting_for_approval. */
 /** The most a review may show: UTF-8 bytes of the path and all text fields together. Above it nothing is asked. */

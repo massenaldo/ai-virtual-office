@@ -1,9 +1,16 @@
-import type { AgentResponse, ApprovalBody, CreateAgentBody, CreateTaskBody, DeskBody, PatchAgentBody } from '../api'
+import type { AgentResponse, ApprovalBody, CreatePermissionBody, CreateAgentBody, CreateTaskBody, DeskBody, PatchAgentBody } from '../api'
 import type { ActionResult, WorkforceController } from '../controller'
 import type { Agent } from '../types'
 import type { ApiClient, ApiResult, MutationMethod } from './client'
 
-export type RemoteCommands = Pick<WorkforceController, 'createAgent' | 'updateAgent' | 'removeAgent' | 'assignDesk' | 'startTask' | 'cancelTask' | 'decideApproval' | 'requestApproval' | 'forceError' | 'restoreDemoAgents'>
+export type RemoteCommands = Pick<WorkforceController, 'createAgent' | 'updateAgent' | 'removeAgent' | 'assignDesk' | 'startTask' | 'cancelTask' | 'decideApproval' | 'requestApproval' | 'forceError' | 'restoreDemoAgents'> & PermissionCommands
+
+/** Backend only: the local mock has no permission engine. A refusal comes back to the caller as the server's own text. */
+export type PermissionCommands = {
+  createPermission(body: CreatePermissionBody): Promise<ActionResult>
+  revokePermission(permissionId: string): Promise<ActionResult>
+  revokeAgentPermissions(agentId: string): Promise<ActionResult>
+}
 
 const id = encodeURIComponent
 
@@ -38,6 +45,9 @@ export function createRemoteCommands(deps: { client: ApiClient; insertAgent(agen
     startTask: (agentId, input) => result('POST', `/api/agents/${id(agentId)}/tasks`, { title: input.title, description: input.description } satisfies CreateTaskBody),
     cancelTask: (taskId) => result('POST', `/api/tasks/${id(taskId)}/cancel`),
     decideApproval: (taskId, approvalId, decision, digest) => result('POST', `/api/tasks/${id(taskId)}/approval`, { approvalId, decision, ...(typeof digest === 'string' ? { digest } : {}) } satisfies ApprovalBody),
+    createPermission: (body) => result('POST', '/api/permissions', body satisfies CreatePermissionBody),
+    revokePermission: (permissionId) => result('DELETE', `/api/permissions/${id(permissionId)}`),
+    revokeAgentPermissions: (agentId) => result('DELETE', `/api/agents/${id(agentId)}/permissions`),
     requestApproval: (taskId) => fireAndForget('POST', `/api/demo/tasks/${id(taskId)}/request-approval`),
     forceError: (taskId) => fireAndForget('POST', `/api/demo/tasks/${id(taskId)}/force-error`),
     restoreDemoAgents: () => fireAndForget('POST', '/api/demo/agents/restore'),

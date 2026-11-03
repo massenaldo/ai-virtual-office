@@ -4,11 +4,12 @@ import { DEPARTMENTS } from '../../layout/catalog'
 import type { OfficeLayout } from '../../layout/types'
 import type { Workforce } from '../useWorkforce'
 import type { Awaitable } from '../controller'
+import ApprovalChoiceForm, { type Scope } from './ApprovalChoiceForm'
 import ApprovalReview from './ApprovalReview'
 import { useBusy } from './useBusy'
 import { DESCRIPTION_MAX, TITLE_MAX, isActiveTask, type TaskInput } from '../operations'
 import type { Agent } from '../types'
-import { TASK_RUNTIME_LABEL, TASK_STATUS_LABEL, agentStatusText, agentTimeline, approveEnabled, shortDigest, deskOptions, deskStatus, formatTime } from '../view'
+import { TASK_RUNTIME_LABEL, TASK_STATUS_LABEL, agentStatusText, agentTimeline, agentPermissionChip, approveEnabled, choiceFor, shortDigest, deskOptions, deskStatus, formatTime } from '../view'
 import { StatusDot } from './AgentList'
 
 export type AgentDetailProps = { workforce: Workforce; layout: OfficeLayout; agent: Agent; onBack(): void; onEdit(): void; onRemove(): void; onFocusDesk(): void }
@@ -50,9 +51,15 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
   // The approval whose full change has been opened: Approve stays disabled until then (Deny never is).
   const [reviewOpenFor, setReviewOpenFor] = useState<string | null>(null)
   const cancel = useBusy()
-  const decide = async (value: 'approve' | 'deny') => {
+  // With a backend the person also chooses how far an allow reaches; the browser demo keeps Approve and Deny.
+  const remote = workforce.permissions !== null
+  const chip = agentPermissionChip(workforce.permissions, state, agent.id)
+  const [scopeChoice, setScopeChoice] = useState<{ approvalId: string; scope: Scope } | null>(null)
+  const scope: Scope = scopeChoice && scopeChoice.approvalId === task?.pendingApproval?.id ? scopeChoice.scope : 'once'
+  const decide = async (value: 'approve' | 'deny' | 'allow' | 'reject') => {
     if (!task?.pendingApproval) return
-    const r = await decision.run(() => actions.decideApproval(task.id, task.pendingApproval!.id, value, task.pendingApproval!.digest))
+    const choice = value === 'allow' ? choiceFor(scope) : value
+    const r = await decision.run(() => actions.decideApproval(task.id, task.pendingApproval!.id, choice, task.pendingApproval!.digest))
     if (r !== undefined) setActionError(r.ok ? null : r.error)
   }
   const cancelTask = async () => {
@@ -71,6 +78,7 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
       <StatusDot status={agent.status}/>
       <div><strong>{agent.name}</strong><small>{agent.role} · {DEPARTMENTS[agent.department].label}</small></div>
       {agent.demo && <span className="agent-chip demo">Demo</span>}
+      {chip && <span className="agent-chip">{chip}</span>}
     </div>
     <div className="field-static"><span>Status</span><strong>{agentStatusText(state, agent)}</strong></div>
     <div className="panel-actions">
@@ -106,10 +114,12 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
       <p>{task.pendingApproval.summary}</p>
       {task.pendingApproval.review && <ApprovalReview review={task.pendingApproval.review} open={reviewOpenFor === task.pendingApproval.id} onToggle={() => setReviewOpenFor(reviewOpenFor === task.pendingApproval!.id ? null : task.pendingApproval!.id)}/>}
       {shortDigest(task.pendingApproval.digest) && <small title={task.pendingApproval.digest ?? undefined}>Action {shortDigest(task.pendingApproval.digest)}</small>}
-      <div className="panel-actions">
-        <button className="panel-button primary" disabled={decision.busy || !approveEnabled(task.pendingApproval.review, reviewOpenFor === task.pendingApproval.id)} onClick={() => decide('approve')}><Check size={13}/> Approve</button>
-        <button className="panel-button danger" disabled={decision.busy} onClick={() => decide('deny')}><X size={13}/> Deny</button>
-      </div>
+      {remote
+        ? <ApprovalChoiceForm approvalId={task.pendingApproval.id} tool={task.pendingApproval.tool} digest={task.pendingApproval.digest} agentName={agent.name} scope={scope} onScope={(s) => setScopeChoice({ approvalId: task.pendingApproval!.id, scope: s })} canAllow={approveEnabled(task.pendingApproval.review, reviewOpenFor === task.pendingApproval.id)} busy={decision.busy} onAllow={() => decide('allow')} onReject={() => decide('reject')}/>
+        : <div className="panel-actions">
+          <button className="panel-button primary" disabled={decision.busy || !approveEnabled(task.pendingApproval.review, reviewOpenFor === task.pendingApproval.id)} onClick={() => decide('approve')}><Check size={13}/> Approve</button>
+          <button className="panel-button danger" disabled={decision.busy} onClick={() => decide('deny')}><X size={13}/> Deny</button>
+        </div>}
       {actionError && <p className="form-error" role="alert">{actionError}</p>}
     </div>}
     {active ? <>

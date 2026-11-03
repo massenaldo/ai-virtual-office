@@ -100,7 +100,18 @@ describe('createWorkforceController', () => {
   })
 
   it('reports the browser environment and a local connection', () => {
-    expect(c.getSnapshot()).toMatchObject({ environment: { kind: 'browser' }, connection: 'local', lastSyncedAt: null, commandError: null, connectionError: null })
+    expect(c.getSnapshot()).toMatchObject({ permissions: null, environment: { kind: 'browser' }, connection: 'local', lastSyncedAt: null, commandError: null, connectionError: null })
+  })
+
+  it.each([['allow_agent', 'Approved'], ['reject', 'Denied']] as const)('maps the scoped choice %s to the local decision', (choice, verb) => {
+    c.startTask('agent-demo-qa', { title: 'Run tests', description: '' })
+    vi.advanceTimersByTime(500)
+    const id = task('agent-demo-qa')!.id
+    c.requestApproval(id)
+    const pending = task('agent-demo-qa')!.pendingApproval!
+    expect(c.decideApproval(id, pending.id, choice)).toEqual({ ok: true })
+    expect(task('agent-demo-qa')!.pendingApproval).toBeNull()
+    expect(c.getSnapshot().state.activities.find((a) => a.type === 'task-approval-decided')).toMatchObject({ message: expect.stringContaining(verb) })
   })
 
   it('cancelTask and decideApproval return ok', () => {
@@ -111,6 +122,10 @@ describe('createWorkforceController', () => {
     const pending = task('agent-demo-qa')!.pendingApproval!
     expect(c.decideApproval(id, pending.id, 'approve')).toEqual({ ok: true })
     expect(c.cancelTask(id)).toEqual({ ok: true })
+  })
+
+  it('has no permission commands locally', () => {
+    expect([c.createPermission, c.revokePermission, c.revokeAgentPermissions]).toEqual([undefined, undefined, undefined])
   })
 
   it('dismissCommandError is a no-op locally', () => {

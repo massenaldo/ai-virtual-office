@@ -1,4 +1,4 @@
-import { ACTIVITY_LIMIT, type Agent, type AgentActivity, type AgentStatus, type AgentTask, type ApprovalDecision, type WorkforceState } from './types'
+import { ACTIVITY_LIMIT, type Agent, type AgentActivity, type AgentStatus, type AgentTask, type ApprovalChoice, type WorkforceState } from './types'
 import type { AgentInput } from './operations'
 
 // The wire contract between the backend and the browser: pure types and one pure function, with no I/O.
@@ -62,7 +62,7 @@ export type WorkspacesResponse = { workspaces: { id: string }[] }
 
 /** Send on every POST, PUT, PATCH and DELETE, even without a body: the server refuses state changes without it (Stage C). */
 export const MUTATION_HEADERS = { 'Content-Type': 'application/json' } as const
-export type ApprovalBody = { approvalId: string; decision: ApprovalDecision; digest?: string }
+export type ApprovalBody = { approvalId: string; decision: ApprovalChoice; digest?: string }
 
 /** Event ids are '<boot>:<seq>': seq rises within one server run, and the boot part tells a client its id predates a restart. */
 export function parseEventId(id: string): { boot: string; seq: number } | null {

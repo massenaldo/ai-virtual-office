@@ -4,7 +4,9 @@ import type { AgentInput, TaskInput } from './operations'
 import { MockRuntimeProvider } from './runtime/mockRuntime'
 import type { MockDemoControls, RuntimeProvider } from './runtime/types'
 import { loadWorkforce, saveWorkforce, type Preserved } from './storage'
-import type { ApprovalDecision, WorkforceState } from './types'
+import type { CreatePermissionBody } from './api'
+import type { PermissionsState } from './permissions'
+import type { ApprovalChoice, WorkforceState } from './types'
 
 type KV = Pick<Storage, 'getItem' | 'setItem'>
 type Runtime = RuntimeProvider & Partial<MockDemoControls>
@@ -28,6 +30,8 @@ export type WorkforceSnapshot = {
   needsPairing: boolean
   /** Shown above the pairing form when the page and backend host names differ (the cookie would not be kept); otherwise null. Never contains a token. */
   pairingNote: string | null
+  /** The backend's permission rules, kept live; null in browser mode (the local mock has no permission engine) and when the backend address is misconfigured. */
+  permissions: PermissionsState | null
 }
 export type ActionResult = { ok: true } | { ok: false; error: string }
 
@@ -41,7 +45,7 @@ export type WorkforceController = {
   startTask(agentId: string, input: TaskInput): Awaitable<ActionResult>
   cancelTask(taskId: string): Awaitable<ActionResult>
   /** digest: the pending approval's action digest, sent back so the server can check it is the same action. */
-  decideApproval(taskId: string, approvalId: string, decision: ApprovalDecision, digest?: string | null): Awaitable<ActionResult>
+  decideApproval(taskId: string, approvalId: string, decision: ApprovalChoice, digest?: string | null): Awaitable<ActionResult>
   requestApproval(taskId: string): void
   forceError(taskId: string): void
   restoreDemoAgents(): void
@@ -49,6 +53,10 @@ export type WorkforceController = {
   dismissCommandError(): void
   /** Backend mode only: trade the API token for a session cookie. The token is never kept. */
   pair?(token: string): Promise<ActionResult>
+  /** Backend mode only; a refusal comes back as the server's own text. Changes arrive as permission.changed events. */
+  createPermission?(body: CreatePermissionBody): Promise<ActionResult>
+  revokePermission?(permissionId: string): Promise<ActionResult>
+  revokeAgentPermissions?(agentId: string): Promise<ActionResult>
   dispose(): void
 }
 
@@ -63,7 +71,7 @@ export function createWorkforceController(opts: { storage: KV | null; now?: () =
   const loaded = loadWorkforce(opts.storage, now())
   const listeners = new Set<() => void>()
   let current = loaded.state
-  let snapshot: WorkforceSnapshot = { state: current, loadProblem: loaded.problem, preserved: loaded.preserved, saveError: null, environment: { kind: 'browser' }, connection: 'local', lastSyncedAt: null, commandError: null, connectionError: null, needsPairing: false, pairingNote: null }
+  let snapshot: WorkforceSnapshot = { state: current, loadProblem: loaded.problem, preserved: loaded.preserved, saveError: null, environment: { kind: 'browser' }, connection: 'local', lastSyncedAt: null, commandError: null, connectionError: null, needsPairing: false, pairingNote: null, permissions: null }
   let disposed = false
 
   const publish = (patch: Partial<WorkforceSnapshot>) => {
@@ -129,7 +137,9 @@ export function createWorkforceController(opts: { storage: KV | null; now?: () =
       commit(ops.cancelTask(current, taskId, now()))
       return { ok: true }
     },
-    decideApproval(taskId, approvalId, decision) {
+    decideApproval(taskId, approvalId, choice) {
+      // The local mock has no permission engine: any allow is an approval, a rejection is a denial.
+      const decision = choice === 'approve' || choice === 'deny' ? choice : choice === 'reject' ? 'deny' : 'approve'
       const before = current
       commit(ops.decideApproval(current, taskId, approvalId, decision, now(), runtime.mode))
       if (current !== before) runtime.respondToApproval(taskId, approvalId, decision)

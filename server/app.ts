@@ -89,6 +89,11 @@ export function createApp(config: ServerConfig, deps: AppDeps = {}): App {
     const apiToken = resolveApiToken({ configured: config.apiToken?.reveal() ?? null, dataDir: config.dataDir })
     const provider = deps.provider ?? (config.runtime === 'mock' ? new ServerMockProvider({ timings: deps.mockTimings }) : new ClaudeAgentRuntimeProvider({ credentialsConfigured: config.credentialsConfigured }))
     const permissions = deps.permissions ?? openPermissionStore({ dataDir: config.dataDir, now, log, onChange: (change) => { const record = permissionAudit(change); if (record) audit.write(record); events.appendPermission(change.kind, toRuleView(change.rule, now())) } })
+    // Nothing is running yet at boot, so no task rule may survive from before: a task that was interrupted never ended its rules.
+    // Rules of agents that no longer exist go too. Agent and global rules of existing agents are kept, as documented.
+    for (const rule of permissions.reconcile({ liveTaskIds: new Set(), agentIds: new Set(store.state.agents.map((a) => a.id)) })) {
+      if (rule.endedAt !== null && rule.revokedAt === null) audit.write({ action: 'permission.ended', actor: 'system', ruleId: rule.id, tool: rule.tool, reason: 'restart', detail: rule.scope, ...(rule.agentId !== null ? { agentId: rule.agentId } : {}), ...(rule.taskId !== null ? { taskId: rule.taskId } : {}) })
+    }
     const manager = new TaskManager({ store, provider, permissions, config, policy: toolPolicyFrom(config), now, log, onLifecycle: (e) => audit.write(toAuditInput(e)) })
     const streams = new Set<ServerResponse>()
     const startedAt = now()

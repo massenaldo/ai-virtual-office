@@ -177,3 +177,45 @@ describe('failure handling', () => {
     expect(s.evaluate(q())).toEqual({ effect: 'deny', source: 'error', ruleId: null })
   })
 })
+
+describe('reconcile after a restart', () => {
+  const taskRule: GrantInput = { scope: 'task', effect: 'allow', tool: 'Write', agentId: 'a1', taskId: 't1' }
+  it('ends task and once rules whose task is not live, and keeps agent and global rules', () => {
+    const s = open()
+    const t = granted(s, taskRule)
+    const o = granted(s, once('b'))
+    const a = granted(s, agentWrite)
+    const changes: PermissionChange[] = []
+    const again = open({ onChange: (c) => changes.push(c) })
+    const touched = again.reconcile({ liveTaskIds: new Set(), agentIds: new Set(['a1']) })
+    expect(touched.map((r) => r.id).sort()).toEqual([t.id, o.id].sort())
+    expect(changes.map((c) => c.kind)).toEqual(['ended', 'ended'])
+    const by = (id: string) => again.rules.find((r) => r.id === id)!
+    expect(by(t.id).endedAt).toBe(now())
+    expect(by(a.id).endedAt).toBeNull()
+    expect(again.evaluate(q())).toMatchObject({ source: 'agent' })
+    // the change reached the file
+    expect(parsePermissions(JSON.parse(readFileSync(file(), 'utf8')))!.find((r) => r.id === t.id)!.endedAt).toBe(now())
+  })
+  it('keeps the rules of a task that is live', () => {
+    const s = open()
+    const t = granted(s, taskRule)
+    expect(open().reconcile({ liveTaskIds: new Set(['t1']), agentIds: new Set(['a1']) })).toEqual([])
+    expect(s.rules.find((r) => r.id === t.id)!.endedAt).toBeNull()
+  })
+  it('revokes agent, task and once rules of an agent that no longer exists, never global rules', () => {
+    const s = open()
+    const a = granted(s, agentWrite)
+    const g = granted(s, { scope: 'global', effect: 'deny', tool: 'Grep' })
+    const again = open()
+    const touched = again.reconcile({ liveTaskIds: new Set(), agentIds: new Set() })
+    expect(touched.map((r) => r.id)).toContain(a.id)
+    expect(again.rules.find((r) => r.id === a.id)!.revokedAt).toBe(now())
+    expect(again.rules.find((r) => r.id === g.id)!.revokedAt).toBeNull()
+  })
+  it('is idempotent and leaves the defaults alone', () => {
+    const s = open()
+    expect(s.reconcile({ liveTaskIds: new Set(), agentIds: new Set() })).toEqual([])
+    expect(s.rules.filter((r) => r.createdBy === 'default' && r.revokedAt === null)).toHaveLength(8)
+  })
+})

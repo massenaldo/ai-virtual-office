@@ -7,6 +7,9 @@ import { parsePermissions } from './permissions/storage'
 import type { PermissionChangedEvent } from '../src/workforce/api'
 import { openEventStream, type SseStream } from './test/sseClient'
 import { startTestServer, tempDataDir, type TestServer } from './test/helpers'
+import { startServer } from './app'
+import { parseConfig } from './config'
+import { silentLogger } from './log'
 import { makeWorkspaceRoot } from './test/workspaces'
 
 // The permission rules in the whole server: the real app on a real port, the mock runtime and a real workspace, driven only
@@ -164,5 +167,47 @@ describe('permission changes over the event stream', () => {
     const kinds: string[] = []
     await stream.until((e) => { if (e.type === 'permission.changed') kinds.push((e as PermissionChangedEvent).kind); return kinds.includes('used') })
     expect(kinds).toEqual(['granted', 'used'])
+  })
+})
+
+describe('permissions across a backend restart', () => {
+  it('ends the task and once rules of an interrupted task, keeps agent rules and the audit history, and refuses to reuse them', async () => {
+    ws = makeWorkspaceRoot(['sandbox'])
+    const dir = tempDataDir()
+    const config = () => { const p = parseConfig({ PORT: '0', DATA_DIR: dir, ...ws!.env }); if (!p.ok) throw new Error(p.errors.join('; ')); return p.config }
+    const first = await startServer(config(), { log: silentLogger, mockTimings: TIMINGS })
+    const api = async (srv: typeof first, method: string, path: string, body?: unknown) => {
+      const res = await fetch(`${srv.url}${path}`, { method, headers: { authorization: `Bearer ${srv.app.apiToken.value}`, ...(method === 'GET' ? {} : { 'content-type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body) })
+      return { status: res.status, body: await res.json() as any }
+    }
+    const started = await api(first, 'POST', '/api/agents/agent-demo-backend/tasks', { title: 'Build API', workspaceId: 'sandbox' })
+    const id = started.body.task.id as string
+    const running = async (srv: typeof first) => ((await api(srv, 'GET', '/api/state')).body.state.tasks as Array<{ id: string; status: string; pendingApproval: any }>).find((t) => t.id === id)!
+    const waitFor = async (srv: typeof first, ok: (t: Awaited<ReturnType<typeof running>>) => boolean) => { for (let i = 0; i < 200 && !ok(await running(srv)); i++) await new Promise((r) => setTimeout(r, 15)) }
+    await waitFor(first, (t) => t.status === 'running')
+    await api(first, 'POST', `/api/demo/tasks/${id}/request-approval`)
+    await waitFor(first, (t) => t.status === 'waiting_for_approval')
+    const p1 = (await running(first)).pendingApproval
+    expect((await api(first, 'POST', `/api/tasks/${id}/approval`, { approvalId: p1.id, decision: 'allow_task', digest: p1.digest })).status).toBe(200)
+    const agentRule = (await api(first, 'POST', '/api/permissions', { scope: 'agent', agentId: 'agent-demo-backend', effect: 'deny', tool: 'Grep' })).body.rule
+    const taskRule = (await api(first, 'GET', '/api/permissions')).body.rules.find((r: any) => r.scope === 'task')
+    expect(taskRule).toMatchObject({ state: 'active', taskId: id })
+    // The process dies mid-task: nothing is closed gracefully, the files stay as they are.
+    await first.close()
+
+    const second = await startServer(config(), { log: silentLogger, mockTimings: TIMINGS })
+    try {
+      const active = (await api(second, 'GET', '/api/permissions')).body.rules as Array<{ id: string; scope: string }>
+      expect(active.some((r) => r.id === taskRule.id)).toBe(false)
+      expect(active.some((r) => r.id === agentRule.id)).toBe(true)
+      const history = (await api(second, 'GET', '/api/permissions/history')).body.rules as Array<{ id: string; state: string }>
+      expect(history.find((r) => r.id === taskRule.id)?.state).toBe('ended')
+      expect((await running(second)).status).toBe('failed')
+      // Fail closed: a Write for the dead task is no longer allowed by that rule.
+      expect(second.app.permissions.evaluate({ agentId: 'agent-demo-backend', taskId: id, tool: 'Write', digest: 'a'.repeat(64), paths: ['x.txt'] })).toMatchObject({ effect: 'ask', source: 'global' })
+      const audit = readFileSync(join(dir, AUDIT_FILE), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as AuditRecord)
+      expect(audit.find((r) => r.action === 'permission.ended' && r.ruleId === taskRule.id)).toMatchObject({ actor: 'system', reason: 'restart', taskId: id })
+      expect(audit.some((r) => r.action === 'permission.granted' && r.ruleId === taskRule.id)).toBe(true)
+    } finally { await second.close() }
   })
 })

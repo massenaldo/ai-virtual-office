@@ -41,6 +41,12 @@ export type PermissionStore = {
   /** True exactly once, and only for an active once rule. Everything is synchronous, so two callers cannot both win. */
   consumeOnce(id: string): boolean
   endTask(taskId: string): PermissionRule[]
+  /**
+   * Fails closed after a restart: ends active task and once rules whose task is not in `liveTaskIds`, and revokes every active
+   * agent, task and once rule of an agent not in `agentIds`. Global rules and agent rules of existing agents are kept (they are
+   * meant to outlive a restart). Returns the rules it changed; the `ended` ones are reported with kind 'ended'.
+   */
+  reconcile(live: { liveTaskIds: ReadonlySet<string>; agentIds: ReadonlySet<string> }): PermissionRule[]
   /** Reports each rule that has newly expired, once. */
   sweep(): PermissionRule[]
   /** Never throws: any error is a deny. */
@@ -160,6 +166,12 @@ export function openPermissionStore({ dataDir, now, log, onChange, writeFile = w
     revokeForAgent: (agentId) => update((r, at) => r.agentId === agentId && r.scope !== 'global' && isActive(r, at), (r, at) => ({ ...r, revokedAt: at }), 'revoked'),
     consumeOnce: (id) => update((r, at) => r.id === id && r.scope === 'once' && isActive(r, at), (r, at) => ({ ...r, usedAt: at }), 'used').length === 1,
     endTask: (taskId) => update((r, at) => r.taskId === taskId && (r.scope === 'task' || r.scope === 'once') && isActive(r, at), (r, at) => ({ ...r, endedAt: at }), 'ended'),
+    reconcile({ liveTaskIds, agentIds }) {
+      const orphanedAgent = (r: PermissionRule) => r.scope !== 'global' && r.agentId !== null && !agentIds.has(r.agentId)
+      const revoked = update((r, at) => orphanedAgent(r) && isActive(r, at), (r, at) => ({ ...r, revokedAt: at }), 'revoked')
+      const ended = update((r, at) => (r.scope === 'task' || r.scope === 'once') && (r.taskId === null || !liveTaskIds.has(r.taskId)) && isActive(r, at), (r, at) => ({ ...r, endedAt: at }), 'ended')
+      return [...revoked, ...ended]
+    },
     sweep() {
       const at = now()
       const fresh = rules.filter((r) => ruleState(r, at) === 'expired' && !reportedExpired.has(r.id))

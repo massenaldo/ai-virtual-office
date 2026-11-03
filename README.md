@@ -75,7 +75,7 @@ You can also run `./scripts/vo.sh [sessionID]` directly without Claude Code.
 
 ## Backend (milestone 3B.1)
 
-A small Node server (`server/`, no framework, no runtime dependencies) owns agents, tasks and activity, runs tasks through a runtime provider, and pushes updates to the browser. **It runs the mock runtime only. The Claude Agent SDK is not installed or integrated, and no real agent execution exists.** `RUNTIME=claude` starts a provider that reports "Claude Agent SDK not installed" and refuses tasks.
+A small Node server (`server/`, no framework; the only runtime dependency is the Claude Agent SDK, used by `RUNTIME=claude`) owns agents, tasks and activity, runs tasks through a runtime provider, and pushes updates to the browser. **The default runtime is the mock.** `RUNTIME=claude` (milestone 3B.5.1) runs a task on the Claude Agent SDK with **no tools at all**: the agent can only answer in text, cannot read, write or run anything, and its answer is shown after the server's redaction and size caps. It needs `ANTHROPIC_API_KEY` on the server, and the SDK's bundled Claude Code binary (about 320 MB in `node_modules`, so `npm run server:start` needs `node_modules` next to `dist-server`). The agent runs as a child process of the server with the server's privileges: **there is no sandbox**. Tools for reading and writing files come in later milestones. See `docs/milestone-3b5-1-report.md`.
 
 **Architecture.** The browser's `WorkforceController` has two implementations behind `useWorkforce`: the local one (browser mock) and `RemoteWorkforceController` (REST for commands, server-sent events for updates, snapshot plus replay recovery, reconnect with backoff). The domain model in `src/workforce/` is shared by both sides.
 
@@ -87,11 +87,12 @@ A small Node server (`server/`, no framework, no runtime dependencies) owns agen
 | `ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Exact browser origins allowed; `none` allows no browser |
 | `DATA_DIR` | `./data` | Where `workforce.json` and `audit.log` live |
 | `WORKSPACE_ROOT`, `WORKSPACES` | unset | Absolute folder and named workspaces (`id:relative/path`) |
-| `RUNTIME` | `mock` | `mock` or `claude` (unavailable) |
+| `RUNTIME` | `mock` | `mock` or `claude` (the Claude Agent SDK, text answers only, needs `ANTHROPIC_API_KEY`) |
 | `TASK_TIMEOUT_MS`, `CANCEL_GRACE_MS`, `APPROVAL_TIMEOUT_MS` | 600000, 5000, 300000 | Task, cancel and approval limits |
 | `ALLOWED_TOOLS` | `Read,Glob,Grep,Write,Edit` | Tool allowlist; write, execute and network tools always need approval |
 | `MAX_MESSAGE_BYTES`, `MAX_TASK_OUTPUT_BYTES`, `EVENT_BUFFER_SIZE`, `AUDIT_LOG_MAX_BYTES` | 32768, 262144, 500, 5242880 | Output and log limits |
-| `ANTHROPIC_API_KEY` | unset | Server only, unused until the Claude provider exists. Never a frontend variable |
+| `ANTHROPIC_API_KEY` | unset | Server only, for `RUNTIME=claude`. Held in a wrapper that cannot print; never in a log, event or response; never a frontend variable |
+| `CLAUDE_MODEL`, `CLAUDE_MAX_TURNS`, `CLAUDE_MAX_BUDGET_USD` | Claude Code default, 12, 0.5 | Model, most model steps and most spend (US dollars, the SDK's own estimate) per task |
 | `API_TOKEN` | generated at each start | Token every API request must send as `Authorization: Bearer <token>`. At least 32 characters, no spaces. Server only: never a `VITE_` variable (refused at start) |
 | `VITE_WORKFORCE_API_URL` | empty | Frontend only. Empty = browser mock; `/` = same-origin backend through the dev proxy |
 

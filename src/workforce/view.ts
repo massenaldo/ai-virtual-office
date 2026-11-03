@@ -115,13 +115,16 @@ export type EnvironmentBadge = { label: string; title: string; tone: 'browser' |
 /** The panel's runtime badge. The copy says plainly that no AI is run in the browser or mock modes. */
 export function environmentBadge(env: RuntimeEnvironment): EnvironmentBadge {
   if (env.kind === 'browser') return { label: 'Mock · browser', title: 'Tasks are simulated in the browser. No AI is run.', tone: 'browser' }
-  if (env.runtime === 'claude') return { label: 'Local backend · Claude (not available)', title: `${env.reason ?? 'Claude Agent SDK not installed'}. Tasks are refused.`, tone: 'unavailable' }
-  if (env.runtime === 'mock') return { label: 'Local backend · mock runtime', title: "Tasks run on the local backend's mock runtime. No Claude SDK is installed and no AI is run.", tone: env.available === false ? 'unavailable' : 'backend' }
+  if (env.runtime === 'claude') {
+    if (env.available === true) return { label: 'Local backend · Claude', title: 'Tasks run on the Claude Agent SDK. In this version the agent has no tools: it can only answer in text.', tone: 'backend' }
+    return { label: 'Local backend · Claude (not available)', title: `${env.reason ?? 'Claude Agent SDK not installed'}. Tasks are refused.`, tone: 'unavailable' }
+  }
+  if (env.runtime === 'mock') return { label: 'Local backend · mock runtime', title: "Tasks run on the local backend's mock runtime. No AI is run.", tone: env.available === false ? 'unavailable' : 'backend' }
   return { label: 'Local backend', title: 'Connecting to the local backend.', tone: 'backend' }
 }
 
 export function environmentNote(env: RuntimeEnvironment): string | null {
-  return env.kind === 'backend' && env.runtime === 'mock' ? 'Mock runtime only; no Claude SDK.' : null
+  return env.kind === 'backend' && env.runtime === 'mock' ? 'Mock runtime only; no AI is run.' : null
 }
 
 /** The connection pill text; null in the browser mock, where there is no connection. */

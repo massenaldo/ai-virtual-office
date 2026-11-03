@@ -1,65 +1,271 @@
 /// <reference types="vite/client" />
-import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { RuntimeEvent } from '../../src/workforce/runtime/types'
 import { createDemoWorkforce } from '../../src/workforce/demo'
 import { assignTask } from '../../src/workforce/operations'
+import type { AgentTask } from '../../src/workforce/types'
+import { recordingLogger } from '../log'
+import { Secret } from '../secret'
+import { fakeQuery, initMessage, resultMessage, textMessage } from '../test/fakeClaudeSession'
 import { testStartContext } from '../test/startContext'
-import { ClaudeAgentRuntimeProvider, claudeUnavailableReason, SDK_INSTALLED } from './claudeAgent'
+import type { ResolvedWorkspace } from '../workspaces'
+import { ClaudeAgentRuntimeProvider, claudeUnavailableReason, isSdkInstalled, type ClaudeProviderOptions } from './claudeAgent'
 
-const allServer = import.meta.glob<string>(['../**/*.ts', '!../**/*.test.ts'], { query: '?raw', import: 'default', eager: true })
-const source = Object.values(import.meta.glob<string>('./claudeAgent.ts', { query: '?raw', import: 'default', eager: true }))[0]
+const KEY = 'sk-ant-api03-canary-0123456789abcdef'
+const demo = createDemoWorkforce('2026-11-03T09:00:00.000Z')
+const agent = demo.agents.find((a) => a.id === 'agent-demo-backend')!
+const workspace = { id: 'sandbox', path: '/srv/workspaces/sandbox-secret-path' } as ResolvedWorkspace
+const taskOf = (title = 'Summarise', description = ''): AgentTask => {
+  const r = assignTask(demo, agent.id, { title, description }, '2026-11-03T09:00:00.000Z', { runtime: 'claude', workspaceId: 'sandbox' })
+  if (!r.ok) throw new Error(r.error)
+  return r.state.tasks[0]
+}
+const tick = () => new Promise((r) => setTimeout(r, 15))
 
-describe('ClaudeAgentRuntimeProvider', () => {
-  it('reports unavailable and refuses to start', async () => {
-    const demo = createDemoWorkforce('2026-10-31T09:00:00.000Z')
-    const r = assignTask(demo, 'agent-demo-backend', { title: 'Build API', description: '' }, '2026-10-31T09:00:00.000Z', { runtime: 'claude' })
-    if (!r.ok) throw new Error(r.error)
-    const provider = new ClaudeAgentRuntimeProvider()
-    const heard: unknown[] = []
-    const off = provider.subscribe((e) => heard.push(e))
-    expect(provider.kind).toBe('claude')
-    expect(provider.availability).toEqual({ available: false, reason: 'Claude Agent SDK not installed' })
-    expect(await provider.start(r.state.tasks[0], testStartContext(demo.agents[0]))).toEqual({ ok: false, error: 'Claude Agent SDK not installed' })
-    expect(provider.status(r.state.tasks[0].id)).toEqual({ state: 'unknown' })
-    expect(provider.result(r.state.tasks[0].id)).toBeNull()
-    provider.cancel('task-1')
-    provider.respondToApproval('task-1', 'a', 'approve')
-    off()
-    await provider.dispose()
-    expect(heard).toEqual([])
-  })
+let dir: string
+beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'vo-claude-')) })
+afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
 
-  it('orders the unavailable reasons', () => {
+function setup(extra: Partial<ClaudeProviderOptions> = {}) {
+  const query = fakeQuery()
+  const log = recordingLogger()
+  const provider = new ClaudeAgentRuntimeProvider({ apiKey: new Secret(KEY), dataDir: dir, query, log, startTimeoutMs: 500, ...extra })
+  const events: RuntimeEvent[] = []
+  provider.subscribe((e) => events.push(e))
+  const notes: string[] = []
+  const ac = new AbortController()
+  const ctx = testStartContext(agent, { workspace, signal: ac.signal, audit: (n) => notes.push(n) })
+  const task = taskOf()
+  return { provider, query, log, events, notes, ctx, task, ac }
+}
+
+/** Starts a session and answers its init message, so the run is going. */
+async function started(s: ReturnType<typeof setup>) {
+  const pending = s.provider.start(s.task, s.ctx)
+  await tick()
+  s.query.sessions[0].send(initMessage())
+  const outcome = await pending
+  return { outcome, session: s.query.sessions[0] }
+}
+
+describe('availability', () => {
+  it('orders the reasons: the SDK first, then the credentials', () => {
     expect(claudeUnavailableReason(false, false)).toBe('Claude Agent SDK not installed')
     expect(claudeUnavailableReason(false, true)).toBe('Claude Agent SDK not installed')
     expect(claudeUnavailableReason(true, false)).toBe('credentials not configured')
-    expect(claudeUnavailableReason(true, true)).toBe('Claude Agent SDK integration is not implemented yet')
+    expect(claudeUnavailableReason(true, true)).toBeNull()
   })
-
-  it('stays not installed even with credentials', () => {
-    expect(new ClaudeAgentRuntimeProvider({ credentialsConfigured: true }).availability).toEqual({ available: false, reason: 'Claude Agent SDK not installed' })
+  it('finds the installed SDK', () => {
+    expect(isSdkInstalled()).toBe(true)
   })
-
-  it('documents the boundary', () => {
-    for (const word of ['ctx.tools.use', 'ctx.workspace.path', 'canUseTool', 'permissionMode', 'settingSources', 'updatedInput', 'in-process SDK MCP', 'AbortController', 'CANCEL_GRACE_MS']) expect(source).toContain(word)
-    expect(source).not.toContain('requestToolApproval')
+  it('is unavailable without a key and refuses to start', async () => {
+    const p = new ClaudeAgentRuntimeProvider({ dataDir: dir, query: fakeQuery() })
+    expect(p.kind).toBe('claude')
+    expect(p.availability).toEqual({ available: false, reason: 'credentials not configured' })
+    expect(await p.start(taskOf(), testStartContext(agent, { workspace }))).toEqual({ ok: false, error: 'credentials not configured' })
   })
-
-  it('points at the gated tools doc, which exists and says it is implemented without an SDK', () => {
-    expect(source).toContain('docs/gated-tools.md')
-    const doc = readFileSync(new URL('../../docs/gated-tools.md', import.meta.url), 'utf8')
-    expect(doc.startsWith('**Status: implemented on the backend as plain handlers')).toBe(true)
-    expect(doc).toContain('vo_write')
-    expect(doc).toContain('vo_edit')
-    expect(doc).toContain('O_NOFOLLOW')
+  it('is unavailable when the SDK is missing, even with a key', () => {
+    expect(new ClaudeAgentRuntimeProvider({ sdkInstalled: false, apiKey: new Secret(KEY), dataDir: dir }).availability).toEqual({ available: false, reason: 'Claude Agent SDK not installed' })
   })
-
-  it('is not wired to the SDK: not installed, no import, still unavailable', () => {
-    expect(SDK_INSTALLED).toBe(false)
-    expect(new ClaudeAgentRuntimeProvider({ credentialsConfigured: true }).availability).toEqual({ available: false, reason: 'Claude Agent SDK not installed' })
-    expect(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).not.toContain('@anthropic-ai')
-    const importers = Object.entries(allServer).filter(([, text]) => /from ['"]@anthropic-ai|require\(['"]@anthropic-ai/.test(text)).map(([file]) => file)
-    expect(importers).toEqual([])
+  it('is available with the SDK and a key', () => {
+    expect(new ClaudeAgentRuntimeProvider({ apiKey: new Secret(KEY), dataDir: dir }).availability).toEqual({ available: true })
+  })
+  it('refuses a task with no workspace', async () => {
+    const s = setup()
+    expect(await s.provider.start(s.task, testStartContext(agent))).toEqual({ ok: false, error: 'The claude runtime needs a workspace.' })
+    expect(s.query.sessions).toHaveLength(0)
   })
 })
 
+describe('the session it asks for', () => {
+  it('has no tools, no settings, no stored session, an empty working folder and a minimal environment', async () => {
+    const s = setup({ settings: { model: 'claude-sonnet-5-5', maxTurns: 5, maxBudgetUsd: 0.25 }, base: { PATH: '/usr/bin', AWS_SECRET_ACCESS_KEY: 'x', API_TOKEN: 't'.repeat(40) } })
+    const { session } = await started(s)
+    const o = session.options
+    expect(o).toMatchObject({ tools: [], allowedTools: [], mcpServers: {}, strictMcpConfig: true, permissionMode: 'dontAsk', settingSources: [], persistSession: false, includePartialMessages: false, maxTurns: 5, maxBudgetUsd: 0.25, model: 'claude-sonnet-5-5' })
+    expect(Object.keys(o.env!).sort()).toEqual(['ANTHROPIC_API_KEY', 'API_TIMEOUT_MS', 'CLAUDE_CODE_DISABLE_AUTO_MEMORY', 'CLAUDE_CODE_MAX_RETRIES', 'CLAUDE_CONFIG_DIR', 'HOME', 'PATH'])
+    expect(o.cwd).toBe(join(dir, 'claude-scratch', s.task.id))
+    expect(o.cwd).not.toContain('sandbox-secret-path')
+    expect(o.env!.CLAUDE_CONFIG_DIR).toBe(join(dir, 'claude-config'))
+    expect(o.additionalDirectories).toBeUndefined()
+    expect(o.systemPrompt).toEqual(expect.stringContaining('no tools'))
+    expect(String(o.systemPrompt)).not.toContain('sandbox-secret-path')
+    expect(session.prompt).toBe('Summarise')
+  })
+  it('leaves the model out when none is configured', async () => {
+    const s = setup()
+    const { session } = await started(s)
+    expect(session.options).not.toHaveProperty('model')
+  })
+  it('denies any tool through the permission callback and a PreToolUse hook', async () => {
+    const s = setup()
+    const { session } = await started(s)
+    await expect(session.options.canUseTool!('Bash', {}, {} as never)).resolves.toMatchObject({ behavior: 'deny' })
+    const hook = session.options.hooks!.PreToolUse![0].hooks[0]
+    await expect(hook({} as never, undefined, { signal: new AbortController().signal })).resolves.toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
+  })
+  it('creates the working folder with no other access and removes it when the session ends', async () => {
+    const s = setup()
+    const { session } = await started(s)
+    expect(existsSync(join(dir, 'claude-scratch', s.task.id))).toBe(true)
+    session.send(resultMessage())
+    session.end()
+    await s.provider.dispose()
+    await tick()
+    expect(existsSync(join(dir, 'claude-scratch', s.task.id))).toBe(false)
+  })
+})
+
+describe('a task that goes well', () => {
+  it('starts, streams the agent text, completes and reports numbers only', async () => {
+    const s = setup()
+    const { outcome, session } = await started(s)
+    expect(outcome).toMatchObject({ ok: true, sessionId: 'sess-1' })
+    expect(outcome.ok && outcome.executionId).toMatch(/^[0-9a-f-]{36}$/)
+    expect(s.provider.status(s.task.id)).toMatchObject({ state: 'running', sessionId: 'sess-1' })
+    session.send(textMessage('Hello there.'))
+    session.send(resultMessage({ result: 'Hello there.' }))
+    session.end()
+    await tick()
+    expect(s.events.map((e) => e.type)).toEqual(['started', 'message', 'completed'])
+    expect(s.events[0]).toMatchObject({ type: 'started', sessionId: 'sess-1' })
+    expect(s.events[2]).toEqual({ type: 'completed', taskId: s.task.id, summary: 'Hello there.' })
+    expect(s.provider.status(s.task.id)).toMatchObject({ state: 'ended', outcome: 'completed' })
+    expect(s.provider.result(s.task.id)).toEqual({ outcome: 'completed', summary: 'Hello there.' })
+    expect(s.notes).toEqual(['Claude session started (session sess-1)', 'Claude session ended: turns=1 cost_usd=0.01'])
+    expect(session.closed).toBeGreaterThan(0)
+  })
+  it('ignores the error the SDK throws after a result, and every message after the end', async () => {
+    const s = setup()
+    const { session } = await started(s)
+    session.send(resultMessage({ is_error: true, api_error_status: 401, result: `Invalid API key ${KEY}` }))
+    session.send(textMessage('late'))
+    session.fail(new Error('Claude Code returned an error result: Invalid API key'))
+    await tick()
+    expect(s.events.map((e) => e.type)).toEqual(['started', 'failed'])
+    expect(s.events[1]).toEqual({ type: 'failed', taskId: s.task.id, error: 'The Claude runtime could not sign in. Check the API key.' })
+    expect(s.provider.result(s.task.id)).toEqual({ outcome: 'failed', error: 'The Claude runtime could not sign in. Check the API key.' })
+  })
+})
+
+describe('a session that must not run', () => {
+  it('fails before it starts when the init message shows a tool, and closes the session', async () => {
+    const s = setup()
+    const pending = s.provider.start(s.task, s.ctx)
+    await tick()
+    s.query.sessions[0].send(initMessage({ tools: ['Bash', 'Write'] }))
+    expect(await pending).toEqual({ ok: false, error: 'The Claude runtime started with an unexpected configuration.' })
+    await tick()
+    expect(s.events).toEqual([])
+    expect(s.query.sessions[0].closed).toBeGreaterThan(0)
+    expect(s.notes[0]).toBe('The Claude session was not started: tools are visible: Bash,Write')
+  })
+  it('fails before it starts when the key is refused (a result with no init)', async () => {
+    const s = setup()
+    const pending = s.provider.start(s.task, s.ctx)
+    await tick()
+    s.query.sessions[0].send(resultMessage({ is_error: true, api_error_status: 401 }))
+    expect(await pending).toEqual({ ok: false, error: 'The Claude runtime could not sign in. Check the API key.' })
+    expect(s.events).toEqual([])
+  })
+  it('fails the task when the model asks for a tool', async () => {
+    const s = setup()
+    const { session } = await started(s)
+    session.send({ type: 'assistant', session_id: 'sess-1', message: { content: [{ type: 'tool_use', id: 'u', name: 'Bash', input: { command: 'rm -rf /' } }] } })
+    await tick()
+    expect(s.events.map((e) => e.type)).toEqual(['started', 'failed'])
+    expect(JSON.stringify(s.events)).not.toContain('rm -rf')
+    expect(session.closed).toBeGreaterThan(0)
+  })
+  it('fails when the session throws before a result, with a fixed sentence and the detail only in the log', async () => {
+    const s = setup()
+    const { session } = await started(s)
+    session.fail(new Error(`spawn failed at /srv/workspaces/sandbox-secret-path with ${KEY}`))
+    await tick()
+    expect(s.events[1]).toEqual({ type: 'failed', taskId: s.task.id, error: 'The Claude runtime stopped with an error.' })
+    expect(JSON.stringify(s.events)).not.toContain('sandbox-secret-path')
+  })
+  it('fails when the session ends without a result', async () => {
+    const s = setup()
+    const { session } = await started(s)
+    session.end()
+    await tick()
+    expect(s.events[1]).toEqual({ type: 'failed', taskId: s.task.id, error: 'The Claude runtime ended without a result.' })
+  })
+  it('gives up when the SDK sends nothing in time', async () => {
+    const s = setup({ startTimeoutMs: 30 })
+    expect(await s.provider.start(s.task, s.ctx)).toEqual({ ok: false, error: 'The Claude runtime did not start in time.' })
+    expect(s.query.sessions[0].closed).toBeGreaterThan(0)
+  })
+  it('fails when the SDK cannot be started at all', async () => {
+    const s = setup({ query: () => { throw new Error(`cannot spawn ${KEY}`) } })
+    expect(await s.provider.start(s.task, s.ctx)).toEqual({ ok: false, error: 'Runtime failed to start.' })
+    expect(existsSync(join(dir, 'claude-scratch', s.task.id))).toBe(false)
+  })
+})
+
+describe('cancel and shutdown', () => {
+  it('cancels a running session once, stops the child, and sends nothing afterwards', async () => {
+    const s = setup()
+    const { session } = await started(s)
+    s.provider.cancel(s.task.id)
+    s.provider.cancel(s.task.id)
+    session.send(textMessage('too late'))
+    await tick()
+    expect(s.events.map((e) => e.type)).toEqual(['started', 'cancelled'])
+    expect(session.options.abortController!.signal.aborted).toBe(true)
+    expect(session.closed).toBeGreaterThan(0)
+    expect(s.provider.status(s.task.id)).toMatchObject({ state: 'ended', outcome: 'cancelled' })
+    expect(s.provider.result(s.task.id)).toEqual({ outcome: 'cancelled' })
+  })
+  it('cancels when the task signal aborts (timeout or forced cancel)', async () => {
+    const s = setup()
+    await started(s)
+    s.ac.abort()
+    await tick()
+    expect(s.events.map((e) => e.type)).toEqual(['started', 'cancelled'])
+  })
+  it('cancels a session that was still starting', async () => {
+    const s = setup()
+    const pending = s.provider.start(s.task, s.ctx)
+    await tick()
+    s.provider.cancel(s.task.id)
+    expect(await pending).toMatchObject({ ok: true })
+    await tick()
+    expect(s.events.map((e) => e.type)).toEqual(['cancelled'])
+  })
+  it('stops every running session on dispose and waits for them', async () => {
+    const s = setup()
+    await started(s)
+    await s.provider.dispose()
+    expect(s.query.sessions[0].closed).toBeGreaterThan(0)
+    expect(s.provider.status(s.task.id)).toMatchObject({ outcome: 'cancelled' })
+  })
+  it('knows nothing about a task it never ran, and has no approvals to answer', () => {
+    const s = setup()
+    expect(s.provider.status('nope')).toEqual({ state: 'unknown' })
+    expect(s.provider.result('nope')).toBeNull()
+    expect(() => s.provider.respondToApproval('t', 'a', 'approve')).not.toThrow()
+  })
+})
+
+describe('secrets', () => {
+  it('never lets the key or a server path reach an event, an audit note or a log line', async () => {
+    const s = setup()
+    const { session } = await started(s)
+    session.send(resultMessage({ is_error: true, api_error_status: 401, result: `bad key ${KEY}` }))
+    session.fail(new Error(`bad key ${KEY}`))
+    await tick()
+    const everything = JSON.stringify([s.events, s.notes])
+    expect(everything).not.toContain(KEY)
+    expect(everything).not.toContain('sandbox-secret-path')
+    expect(s.log.lines.join('\n')).not.toContain('sandbox-secret-path')
+  })
+  it('holds no other way to start a process: the source never names one', () => {
+    const source = readFileSync(new URL('./claudeAgent.ts', import.meta.url), 'utf8')
+    expect(source).not.toMatch(/child_process|spawn\(|exec\(|fork\(/)
+  })
+})

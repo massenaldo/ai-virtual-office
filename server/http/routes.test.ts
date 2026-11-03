@@ -158,8 +158,8 @@ describe('the claude runtime', () => {
   it('refuses tasks and hides demo routes', async () => {
     const c = await startTestServer({ RUNTIME: 'claude' })
     try {
-      expect((await c.api('GET', '/api/health')).body).toMatchObject({ available: false, reason: 'Claude Agent SDK not installed' })
-      expect(await c.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'Build API' })).toMatchObject({ status: 503, body: { error: 'The claude runtime is not available: Claude Agent SDK not installed.' } })
+      expect((await c.api('GET', '/api/health')).body).toMatchObject({ available: false, reason: 'credentials not configured' })
+      expect(await c.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'Build API' })).toMatchObject({ status: 503, body: { error: 'The claude runtime is not available: credentials not configured.' } })
       expect(await c.api('POST', '/api/demo/agents/restore')).toMatchObject({ status: 404, body: { error: 'Not found.' } })
       const created = await c.api('POST', '/api/agents', { name: 'Nova', role: 'R', department: 'backend' })
       expect(created.body.agent.runtimeMode).toBe('real')

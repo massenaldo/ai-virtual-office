@@ -908,3 +908,38 @@ describe('one runtime per task', () => {
     expect(m.runtimeStatuses()).toEqual([{ kind: 'mock', available: true, reason: null }, { kind: 'claude', available: false, reason: 'credentials not configured' }])
   })
 })
+
+describe('routing without a fallback to the default provider', () => {
+  it('answers a mock-raised approval on the mock provider even when claude is the default', async () => {
+    const ws = makeWorkspaceRoot(['sandbox'])
+    try {
+      const claudeP = new FakeProvider({ kind: 'claude' })
+      const mockP = new FakeProvider({ kind: 'mock' })
+      const m = make(claudeP, { workspaceRoot: ws.root, workspaces: [{ id: 'sandbox', relativePath: 'sandbox' }] }, undefined, undefined, [mockP])
+      const b = m.startTask('agent-demo-pm', INPUT, { runtime: 'mock' })
+      await tick()
+      const id = b.ok ? b.task.id : ''
+      mockP.emit({ type: 'started', taskId: id, executionId: 'e' })
+      mockP.emit({ type: 'approval_requested', taskId: id, approvalId: 'ap-1', tool: 'Write', summary: 's' })
+      expect(m.decideApproval(id, 'ap-1', 'approve').ok).toBe(true)
+      expect(mockP.responses).toEqual([{ taskId: id, approvalId: 'ap-1', decision: 'approve' }])
+      expect(claudeP.responses).toEqual([])
+    } finally { ws.cleanup() }
+  })
+
+  it('cancels a leftover claude task of an earlier boot without touching the mock provider', () => {
+    const mockP = new FakeProvider({ kind: 'mock' })
+    const m = make(mockP)
+    const queued = { id: 'task-old', agentId: FORGE, title: 'Old', description: '', status: 'queued', createdAt: NOW, startedAt: null, completedAt: null, resultSummary: null, errorMessage: null, executionId: null, timeoutMs: null, runtime: 'claude', workspaceId: null, sessionId: null, endedReason: null, pendingApproval: null } as AgentTask
+    store.commit({ ...store.state, tasks: [...store.state.tasks, queued], agents: store.state.agents.map((a) => (a.id === FORGE ? { ...a, currentTaskId: 'task-old' } : a)) })
+    const r = m.cancelTask('task-old')
+    expect(r.ok).toBe(true)
+    expect(task('task-old').status).toBe('cancelled')
+    expect(store.state.activities.filter((a) => a.taskId === 'task-old').every((a) => a.source === 'real')).toBe(true)
+    expect(mockP.cancels).toEqual([])
+    const running = { ...queued, id: 'task-old2', status: 'running' as const }
+    store.commit({ ...store.state, tasks: [...store.state.tasks, running], agents: store.state.agents.map((a) => (a.id === 'agent-demo-pm' ? { ...a, currentTaskId: 'task-old2' } : a)) })
+    expect(m.cancelTask('task-old2').ok).toBe(true)
+    expect(mockP.cancels).toEqual([])
+  })
+})

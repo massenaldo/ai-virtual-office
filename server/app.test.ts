@@ -10,6 +10,15 @@ let running: { close(): Promise<void> } | null = null
 afterEach(async () => { await running?.close(); running = null })
 
 describe('app', () => {
+  it('the startup record says whether Claude is registered and nothing secret', async () => {
+    const { startupRecord } = await import('./app')
+    const rec = (env: Record<string, string>) => startupRecord(testConfig({ ...env }), 1, 'generated').detail
+    expect(rec({})).toContain('runtime=mock claude=disabled')
+    expect(rec({ ENABLE_CLAUDE_RUNTIME: 'yes' })).toContain('runtime=mock claude=enabled')
+    expect(rec({ RUNTIME: 'claude', ANTHROPIC_API_KEY: 'sk-secret-123' })).not.toContain('sk-secret-123')
+  })
+
+
   it('GET /api/health reports the mock runtime', async () => {
     const s: TestServer = await startTestServer()
     running = s

@@ -12,7 +12,6 @@ import { ruleState } from '../permissions/engine'
 import type { PermissionStore } from '../permissions/store'
 import type { GrantError } from '../permissions/types'
 import { toRuleView } from '../permissions/view'
-import type { ServerRuntimeProvider } from '../runtime/types'
 import type { WorkforceStore } from '../store'
 import type { ManagerError, TaskManager } from '../taskManager'
 import { parseApproval, parseCreateAgent, parseCreatePermission, parseCreateTask, parseDesk, parsePatchAgent } from './inputs'
@@ -26,7 +25,6 @@ export type RouteDeps = {
   config: ServerConfig
   store: WorkforceStore
   events: EventLog
-  provider: ServerRuntimeProvider
   manager: TaskManager
   permissions: PermissionStore
   now: () => string

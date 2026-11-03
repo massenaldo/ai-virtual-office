@@ -428,3 +428,31 @@ describe('assignTask workspace id', () => {
   })
 })
 
+
+describe('activities are labelled by the runtime of the task, not of the agent', () => {
+  const sources = (s: WorkforceState, taskId: string) => s.activities.filter((a) => a.taskId === taskId).map((a) => a.source)
+  const setup = (agentMode: 'mock' | 'real', runtime: 'mock' | 'claude') => {
+    const { state, id } = withAgent(NOVA, emptyWorkforce())
+    const withMode = { ...state, agents: state.agents.map((a) => ({ ...a, runtimeMode: agentMode })) }
+    const a = assignTask(withMode, id, { title: 'T', description: '' }, NOW, { runtime })
+    if (!a.ok) throw new Error(a.error)
+    return { s: a.state, taskId: a.taskId }
+  }
+
+  it.each([
+    ['mock', 'claude', 'real'],
+    ['real', 'mock', 'mock'],
+    ['mock', 'mock', 'mock'],
+    ['real', 'claude', 'real'],
+  ] as const)('agent %s, task %s: assign, force-cancel and restart recovery say %s', (mode, runtime, expected) => {
+    const { s, taskId } = setup(mode, runtime)
+    expect(sources(s, taskId)).toEqual([expected])
+    expect(sources(cancelTask(s, taskId, LATER), taskId).every((x) => x === expected)).toBe(true)
+    const running = markStarting(s, taskId, NOW)
+    const recovered = recoverInterruptedTasks(running, LATER, 'Interrupted')
+    expect(recovered.tasks[0]!.status).toBe('failed')
+    expect(sources(recovered, taskId).every((x) => x === expected)).toBe(true)
+    const cancelling = requestCancel(markStarting(s, taskId, NOW), taskId, NOW, expected)
+    expect(sources(recoverInterruptedTasks(cancelling, LATER), taskId).every((x) => x === expected)).toBe(true)
+  })
+})

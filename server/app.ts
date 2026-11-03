@@ -54,7 +54,7 @@ export function startupRecord(config: ServerConfig, port: number, tokenSource: A
   return {
     action: 'config.startup',
     actor: 'system',
-    detail: `runtime=${config.runtime} host=${config.host} port=${port} credentialsConfigured=${config.credentialsConfigured} workspaces=${list(config.workspaces.map((w) => w.id))} allowedTools=${list(config.allowedTools)} allowedOrigins=${list(config.allowedOrigins)} auth=${tokenSource}`,
+    detail: `runtime=${config.runtime} claude=${config.runtime === 'claude' || config.enableClaudeRuntime ? 'enabled' : 'disabled'} host=${config.host} port=${port} credentialsConfigured=${config.credentialsConfigured} workspaces=${list(config.workspaces.map((w) => w.id))} allowedTools=${list(config.allowedTools)} allowedOrigins=${list(config.allowedOrigins)} auth=${tokenSource}`,
   }
 }
 
@@ -97,6 +97,7 @@ export function createApp(config: ServerConfig, deps: AppDeps = {}): App {
     const registered = new Map<ServerRuntimeProvider['kind'], ServerRuntimeProvider>()
     registered.set('mock', deps.mockProvider ?? new ServerMockProvider({ timings: deps.mockTimings }))
     if (claudeEnabled) registered.set('claude', deps.claudeProvider ?? new ClaudeAgentRuntimeProvider({ apiKey: config.anthropicApiKey, settings: config.claude, dataDir: config.dataDir, log, protectedRoots: toolPolicyFrom(config).protectedRoots, toolTimeoutMs: config.approvalTimeoutMs + 60000 }))
+    // Test seam: a deps.provider of kind claude registers Claude without ENABLE_CLAUDE_RUNTIME; production wiring never sets it.
     if (deps.provider) registered.set(deps.provider.kind, deps.provider)
     const provider = deps.provider ?? registered.get(config.runtime)!
     const extraProviders = [...registered.values()].filter((p) => p !== provider)
@@ -114,7 +115,7 @@ export function createApp(config: ServerConfig, deps: AppDeps = {}): App {
     const streams = new Set<ServerResponse>()
     const startedAt = now()
     const sessions = createSessionStore({ now: () => Date.parse(now()) })
-    const routes = createRoutes({ config, store, events, provider, manager, permissions, now, startedAt, heartbeatMs: deps.heartbeatMs ?? HEARTBEAT_MS, streams, log, maxStreams: deps.maxStreams, audit, sessions, apiToken: apiToken.value })
+    const routes = createRoutes({ config, store, events, manager, permissions, now, startedAt, heartbeatMs: deps.heartbeatMs ?? HEARTBEAT_MS, streams, log, maxStreams: deps.maxStreams, audit, sessions, apiToken: apiToken.value })
     const onReject = (r: { requestId: string; code: string; method: string; path: string }) => audit.write({ action: 'request.rejected', actor: 'api', requestId: r.requestId, reason: r.code, detail: `${r.method} ${r.path}` })
     const guards = [...createSecurityGuards({ allowedOrigins: config.allowedOrigins, apiToken: apiToken.value, sessions, onReject }), ...(deps.guards ?? [])]
     const responseHeaders = (req: IncomingMessage) => ({ ...securityHeaders(req, config.allowedOrigins), ...(deps.responseHeaders?.(req) ?? {}) })

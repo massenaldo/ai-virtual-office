@@ -133,9 +133,9 @@ export class TaskManager {
     return this.state.tasks.find((t) => t.id === id)
   }
 
-  /** The provider a task runs on: its run's, else the one for its recorded runtime. */
-  private providerOf(task: AgentTask): ServerRuntimeProvider {
-    return this.runs.get(task.id)?.provider ?? this.providers.get(task.runtime) ?? this.providers.get(this.defaultKind)!
+  /** The provider a task runs on: its run's, else the one for its recorded runtime. None when that runtime is not registered (a task left from an earlier boot): never another provider. */
+  private providerOf(task: AgentTask): ServerRuntimeProvider | undefined {
+    return this.runs.get(task.id)?.provider ?? this.providers.get(task.runtime)
   }
 
   /** Builds the event without undefined keys, so a missing field is distinguishable from an empty one. */
@@ -321,7 +321,7 @@ export class TaskManager {
 
     const run = this.runs.get(taskId)
     const provider = this.providerOf(task)
-    this.store.commit(requestCancel(this.state, taskId, this.now(), sourceFor(provider.kind)))
+    this.store.commit(requestCancel(this.state, taskId, this.now(), sourceFor(task.runtime)))
     if (run?.taskTimer) clearTimeout(run.taskTimer)
     if (run) { run.taskTimer = null; this.settleAll(run, CANCELLED) }
     this.report('task.cancel', task, { actor: actorFor(opts), requestId: opts.requestId })
@@ -331,7 +331,7 @@ export class TaskManager {
       return { ok: true, task: this.task(taskId)! }
     }
     // The runtime confirms with a cancelled event (the mock does so at once, so the task may already be cancelled below).
-    provider.cancel(taskId)
+    provider?.cancel(taskId)
     const after = this.task(taskId)
     if (after && after.status === 'cancelling') {
       if (run) run.graceTimer = setTimeout(() => this.forceCancel(taskId), this.config.cancelGraceMs)
@@ -375,7 +375,7 @@ export class TaskManager {
       // Requests already waiting were not part of this question: the new rule must not answer them.
       if (scope !== 'once' && run) for (const q of run.toolQueue) q.skipRules = new Set([...q.skipRules, g.rule.id])
     }
-    this.store.commit(recordDecision(this.state, taskId, approvalId, decision, this.now(), sourceFor(this.providerOf(task).kind)))
+    this.store.commit(recordDecision(this.state, taskId, approvalId, decision, this.now(), sourceFor(task.runtime)))
     if (run) this.clearApproval(run)
     this.report('approval.decided', task, { actor: actorFor(opts), requestId: opts.requestId, decision: choice, ...granted, ...(waiter ? { digest: waiter.digest.slice(0, 12), actionHash: waiter.actionHash } : {}) })
     if (run?.toolWaiter?.approvalId === approvalId) {
@@ -384,7 +384,7 @@ export class TaskManager {
     } else {
       // An approval the (mock) provider raised itself: its reaction arrives as events.
       const provider = this.providerOf(task)
-      if (provider.kind === 'mock') provider.respondToApproval(taskId, approvalId, decision)
+      if (provider?.kind === 'mock') provider.respondToApproval(taskId, approvalId, decision)
     }
     if (run) this.promote(taskId, run)
     return { ok: true, task: this.task(taskId) ?? task }
@@ -399,7 +399,7 @@ export class TaskManager {
     if (cancelledTaskId) {
       if (activeTask) this.report('task.cancel', activeTask, { actor: actorFor(opts), requestId: opts.requestId, detail: 'agent removed' })
       const run = this.runs.get(cancelledTaskId)
-      if (activeTask) this.providerOf(activeTask).cancel(cancelledTaskId)
+      if (activeTask) this.providerOf(activeTask)?.cancel(cancelledTaskId)
       run?.abort.abort()
       this.finalize(cancelledTaskId)
     }
@@ -546,7 +546,7 @@ export class TaskManager {
       this.report('permission.denied', task, { actor: 'runtime', tool, decision: 'deny', reason: 'revoked_or_changed', ...ruleId, ...ids })
       return { ok: false }
     }
-    if (p.source !== 'once' && this.isOnceOnly(this.providerOf(task).kind, tool, paths, this.runs.get(taskId)?.workspace ?? null)) {
+    if (p.source !== 'once' && this.isOnceOnly(task.runtime, tool, paths, this.runs.get(taskId)?.workspace ?? null)) {
       this.report('permission.denied', task, { actor: 'runtime', tool, decision: 'deny', reason: 'exec_sensitive', ...ruleId, ...ids })
       return { ok: false }
     }
@@ -563,7 +563,7 @@ export class TaskManager {
     if (!task) return { ok: false, code: 'not_found', error: 'Task not found.' }
     if (task.status !== 'running') return { ok: false, code: 'conflict', error: 'Task is not running.' }
     const provider = this.providerOf(task)
-    if (!isDemo(provider)) return { ok: false, code: 'unavailable', error: 'Demo controls only work for mock tasks.' }
+    if (!provider || !isDemo(provider)) return { ok: false, code: 'unavailable', error: 'Demo controls only work for mock tasks.' }
     return { ok: true, task, provider }
   }
 

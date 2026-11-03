@@ -51,6 +51,17 @@ describe('readPublicConfig', () => {
     expect(ok({ VO_PASSWORD: PW, RUNTIME: 'claude', VO_ALLOW_PUBLIC_CLAUDE: 'yes' }).allowClaude).toBe(true)
     expect(ok({ VO_PASSWORD: PW, RUNTIME: 'mock' }).allowClaude).toBe(false)
   })
+  it('refuses ENABLE_CLAUDE_RUNTIME=yes unless allowed, with its own sentence', () => {
+    const msg = 'ENABLE_CLAUDE_RUNTIME=yes is not allowed on a public address. Set VO_ALLOW_PUBLIC_CLAUDE=yes only after the security prerequisites in docs/milestone-3b5-prerequisites.md are met.'
+    expect(errors({ VO_PASSWORD: PW, ENABLE_CLAUDE_RUNTIME: 'yes' })).toEqual([msg])
+    expect(errors({ VO_PASSWORD: PW, ENABLE_CLAUDE_RUNTIME: ' yes ' })).toEqual([msg])
+    expect(errors({ VO_PASSWORD: PW, ENABLE_CLAUDE_RUNTIME: 'yes', VO_ALLOW_PUBLIC_CLAUDE: 'no' })).toEqual([msg])
+    expect(ok({ VO_PASSWORD: PW, ENABLE_CLAUDE_RUNTIME: 'yes', VO_ALLOW_PUBLIC_CLAUDE: 'yes' }).allowClaude).toBe(true)
+    for (const v of ['', 'no', 'YES', 'true', '1']) expect(errors({ VO_PASSWORD: PW, ENABLE_CLAUDE_RUNTIME: v })).toEqual([])
+  })
+  it('names both settings when both are set', () => {
+    expect(errors({ VO_PASSWORD: PW, RUNTIME: 'claude', ENABLE_CLAUDE_RUNTIME: 'yes' })).toHaveLength(2)
+  })
   it('reports every error at once', () => {
     expect(errors({ VO_PASSWORD: 'short', PUBLIC_PORT: 'x', PUBLIC_HOST: 'a b', RUNTIME: 'claude' })).toHaveLength(4)
   })

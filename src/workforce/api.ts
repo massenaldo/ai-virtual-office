@@ -94,7 +94,9 @@ export function applyWorkforceEvent(s: WorkforceState, e: WorkforceEvent): Workf
 }
 
 /** The part of GET /api/health the browser reads. */
-export type HealthResponse = { ok: true; version: string; runtime: 'mock' | 'claude'; available: boolean; reason: string | null; credentialsConfigured: boolean; startedAt: string }
+export type RuntimeStatus = { kind: 'mock' | 'claude'; available: boolean; reason: string | null }
+/** `runtimes` and `defaultRuntime` are absent from a server that predates per-task runtimes; `runtime`, `available` and `reason` describe the default one. */
+export type HealthResponse = { ok: true; version: string; runtime: 'mock' | 'claude'; available: boolean; reason: string | null; runtimes?: RuntimeStatus[]; defaultRuntime?: 'mock' | 'claude'; credentialsConfigured: boolean; startedAt: string }
 /** POST/PATCH agents and PUT desk answer with the agent. */
 export type AgentResponse = { agent: Agent }
 

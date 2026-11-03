@@ -11,14 +11,14 @@ export type RuntimeKind = 'mock' | 'claude'
 
 export type ClaudeSettings = { model: string | null; maxTurns: number; maxBudgetUsd: number }
 
-export type ServerConfig = { host: string; port: number; dataDir: string; runtime: RuntimeKind; taskTimeoutMs: number; cancelGraceMs: number; approvalTimeoutMs: number; maxMessageBytes: number; maxTaskOutputBytes: number; eventBufferSize: number; auditLogMaxBytes: number; workspaceRoot: string | null; workspaces: WorkspaceEntry[]; allowedTools: string[]; allowedOrigins: string[]; credentialsConfigured: boolean; /** The Anthropic API key, wrapped so it cannot print; null when none is set. Server only, read by the Claude provider and nowhere else. */ anthropicApiKey: Secret | null; /** Limits and model for the claude runtime. */ claude: ClaudeSettings; /** Most tasks running at once on the claude runtime (each is a child process and a paid model session). The mock runtime is not limited. */ maxConcurrentTasks: number; /** Claude runtime: when false (the default) a Write or Edit can only be approved once. Only the exact value `yes` turns it on. */ allowBroadWriteScopes: boolean; /** Server-only secret, wrapped so it cannot print; null means one is generated at start. */ apiToken: Secret | null }
+export type ServerConfig = { host: string; port: number; dataDir: string; runtime: RuntimeKind; taskTimeoutMs: number; cancelGraceMs: number; approvalTimeoutMs: number; maxMessageBytes: number; maxTaskOutputBytes: number; eventBufferSize: number; auditLogMaxBytes: number; workspaceRoot: string | null; workspaces: WorkspaceEntry[]; allowedTools: string[]; allowedOrigins: string[]; credentialsConfigured: boolean; /** The Anthropic API key, wrapped so it cannot print; null when none is set. Server only, read by the Claude provider and nowhere else. */ anthropicApiKey: Secret | null; /** Limits and model for the claude runtime. */ claude: ClaudeSettings; /** Most tasks running at once on the claude runtime (each is a child process and a paid model session). The mock runtime is not limited. */ maxConcurrentTasks: number; /** Claude runtime: when false (the default) a Write or Edit can only be approved once. Only the exact value `yes` turns it on. */ allowBroadWriteScopes: boolean; /** True when ENABLE_CLAUDE_RUNTIME=yes: the Claude runtime is registered next to the mock, and a task can choose it, even though RUNTIME is not claude. */ enableClaudeRuntime: boolean; /** Server-only secret, wrapped so it cannot print; null means one is generated at start. */ apiToken: Secret | null }
 
 export type Env = Record<string, string | undefined>
 
 type Parsed = { ok: true; config: ServerConfig } | { ok: false; errors: string[] }
 
 /** Every environment variable parseConfig reads, in .env.example order. */
-export const CONFIG_VARIABLES: readonly string[] = ['HOST', 'PORT', 'ALLOWED_ORIGINS', 'DATA_DIR', 'WORKSPACE_ROOT', 'WORKSPACES', 'RUNTIME', 'TASK_TIMEOUT_MS', 'CANCEL_GRACE_MS', 'APPROVAL_TIMEOUT_MS', 'ALLOWED_TOOLS', 'MAX_MESSAGE_BYTES', 'MAX_TASK_OUTPUT_BYTES', 'EVENT_BUFFER_SIZE', 'AUDIT_LOG_MAX_BYTES', 'API_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_MODEL', 'CLAUDE_MAX_TURNS', 'CLAUDE_MAX_BUDGET_USD', 'MAX_CONCURRENT_TASKS', 'ALLOW_BROAD_WRITE_SCOPES']
+export const CONFIG_VARIABLES: readonly string[] = ['HOST', 'PORT', 'ALLOWED_ORIGINS', 'DATA_DIR', 'WORKSPACE_ROOT', 'WORKSPACES', 'RUNTIME', 'TASK_TIMEOUT_MS', 'CANCEL_GRACE_MS', 'APPROVAL_TIMEOUT_MS', 'ALLOWED_TOOLS', 'MAX_MESSAGE_BYTES', 'MAX_TASK_OUTPUT_BYTES', 'EVENT_BUFFER_SIZE', 'AUDIT_LOG_MAX_BYTES', 'API_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_MODEL', 'CLAUDE_MAX_TURNS', 'CLAUDE_MAX_BUDGET_USD', 'MAX_CONCURRENT_TASKS', 'ALLOW_BROAD_WRITE_SCOPES', 'ENABLE_CLAUDE_RUNTIME']
 
 /** Environment names that suggest skipping permission checks. This server has no such switch, so their presence is an error rather than being ignored. */
 export const REFUSED_ENV_PATTERN = /DANGEROUSLY|BYPASS_?PERMISSIONS|SKIP_?PERMISSIONS|PERMISSION_MODE/i
@@ -154,6 +154,7 @@ export function parseConfig(env: Env, cwd: string = process.cwd()): Parsed {
     else errors.push(`MAX_CONCURRENT_TASKS must be an integer from 1 to 32 (got "${rawConcurrent}").`)
   }
   const allowBroadWriteScopes = read(env, 'ALLOW_BROAD_WRITE_SCOPES') === 'yes'
+  const enableClaudeRuntime = read(env, 'ENABLE_CLAUDE_RUNTIME') === 'yes'
   const rawKey = (read(env, 'ANTHROPIC_API_KEY') ?? '').trim()
 
   const ws = parseWorkspaces(read(env, 'WORKSPACE_ROOT'), read(env, 'WORKSPACES'), dataDir)
@@ -162,7 +163,7 @@ export function parseConfig(env: Env, cwd: string = process.cwd()): Parsed {
   if (errors.length > 0) return { ok: false, errors }
   return {
     ok: true,
-    config: { host, port, dataDir, runtime: rawRuntime as RuntimeKind, taskTimeoutMs, cancelGraceMs, approvalTimeoutMs, maxMessageBytes, maxTaskOutputBytes, eventBufferSize, auditLogMaxBytes, workspaceRoot: ws.workspaceRoot, workspaces: ws.workspaces, allowedTools, allowedOrigins, credentialsConfigured: rawKey !== '', anthropicApiKey: rawKey === '' ? null : new Secret(rawKey), claude: { model: claudeModel, maxTurns: claudeMaxTurns, maxBudgetUsd: claudeMaxBudgetUsd }, maxConcurrentTasks, allowBroadWriteScopes, apiToken },
+    config: { host, port, dataDir, runtime: rawRuntime as RuntimeKind, taskTimeoutMs, cancelGraceMs, approvalTimeoutMs, maxMessageBytes, maxTaskOutputBytes, eventBufferSize, auditLogMaxBytes, workspaceRoot: ws.workspaceRoot, workspaces: ws.workspaces, allowedTools, allowedOrigins, credentialsConfigured: rawKey !== '', anthropicApiKey: rawKey === '' ? null : new Secret(rawKey), claude: { model: claudeModel, maxTurns: claudeMaxTurns, maxBudgetUsd: claudeMaxBudgetUsd }, maxConcurrentTasks, allowBroadWriteScopes, enableClaudeRuntime, apiToken },
   }
 }
 

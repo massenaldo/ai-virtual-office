@@ -11,10 +11,11 @@ import { resolveWorkspace, isInside } from './workspaces'
 // What the Claude runtime cannot check for itself: who the server runs as and what else that user can reach. The agent's tools
 // are policy-checked, but the child process and the server share one operating-system user, so a flaw anywhere would run with that
 // user's privileges. These checks make the worst setups impossible to start by accident. They are not a sandbox.
-// Only the claude runtime is checked; the mock runs nothing.
+// Checked whenever the claude runtime is registered (RUNTIME=claude or ENABLE_CLAUDE_RUNTIME=yes); the mock runs nothing.
 
 export type HostFacts = {
-  runtime: ServerConfig['runtime']
+  /** True when the claude provider is registered: RUNTIME=claude or ENABLE_CLAUDE_RUNTIME=yes. */
+  claudeEnabled: boolean
   /** The effective user id; null where the platform has none. */
   uid: number | null
   allowRoot: boolean
@@ -41,7 +42,7 @@ export const HOME_CREDENTIALS = ['.ssh', '.aws', '.config/gcloud', '.azure', '.k
 export function checkHost(f: HostFacts): HostCheck {
   const refuse: string[] = []
   const warn: string[] = []
-  if (f.runtime !== 'claude') return { refuse, warn }
+  if (!f.claudeEnabled) return { refuse, warn }
   // A case-insensitive file system treats /Users/Me and /users/me as one folder, so every comparison is on folded names.
   const inside = (parent: string, child: string): boolean => isInside(foldName(parent), foldName(child))
 
@@ -94,7 +95,7 @@ export function readHostFacts(config: ServerConfig, env: Record<string, string |
   let home = homeRaw
   try { home = realpathSync.native(homeRaw) } catch { /* keep the given path */ }
   const homeCredentials = HOME_CREDENTIALS.filter((name) => existsSync(join(home, name)))
-  return { runtime: config.runtime, uid: typeof process.getuid === 'function' ? process.getuid() : null, allowRoot: env.VO_ALLOW_ROOT === 'yes', dataDir: config.dataDir, dataDirMode, projectDir, home, workspaceRoot: config.workspaceRoot, workspaces, homeCredentials: [...homeCredentials] }
+  return { claudeEnabled: config.runtime === 'claude' || config.enableClaudeRuntime, uid: typeof process.getuid === 'function' ? process.getuid() : null, allowRoot: env.VO_ALLOW_ROOT === 'yes', dataDir: config.dataDir, dataDirMode, projectDir, home, workspaceRoot: config.workspaceRoot, workspaces, homeCredentials: [...homeCredentials] }
 }
 
 /** For the entry points: logs every finding and returns false when the server must not start. */

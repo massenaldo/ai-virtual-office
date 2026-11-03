@@ -3,6 +3,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect } from 'vitest'
+import type { AppDeps } from '../app'
 import { AUDIT_FILE, type AuditRecord } from '../audit'
 import { parseConfig } from '../config'
 import { recordingLogger } from '../log'
@@ -24,10 +25,14 @@ let server: TestServer | null = null
 let wsHandle: ReturnType<typeof makeWorkspaceRoot> | null = null
 const clients: Client[] = []
 
-export type Harness = { query: ReturnType<typeof fakeQuery>; log: ReturnType<typeof recordingLogger>; dir: string; root: string }
+export type Harness = { query: ReturnType<typeof fakeQuery>; log: ReturnType<typeof recordingLogger>; dir: string; root: string; /** True when claude runs next to the mock: a task must then name its runtime. */ mixed: boolean }
 
-/** A server on the claude runtime with a fake session, and a workspace `sandbox` seeded with a few files (or with `seed`). */
-export async function start(env: Record<string, string> = {}, seed?: (root: string) => void, extraWorkspaces: string[] = []): Promise<Harness> {
+/**
+ * A server on the claude runtime with a fake session, and a workspace `sandbox` seeded with a few files (or with `seed`).
+ * With RUNTIME set to something else in `env` (for example mock with ENABLE_CLAUDE_RUNTIME=yes) the fake session is the claude
+ * provider next to the mock, not the default one. `deps` are passed on to the app.
+ */
+export async function start(env: Record<string, string> = {}, seed?: (root: string) => void, extraWorkspaces: string[] = [], deps: AppDeps = {}): Promise<Harness> {
   wsHandle = makeWorkspaceRoot(['sandbox', ...extraWorkspaces])
   const root = wsHandle.path('sandbox')
   if (seed) seed(root)
@@ -47,8 +52,8 @@ export async function start(env: Record<string, string> = {}, seed?: (root: stri
   const probe = parseConfig({ ...full, PORT: '0' })
   if (!probe.ok) throw new Error(probe.errors.join('; '))
   const provider = new ClaudeAgentRuntimeProvider({ apiKey: new Secret(KEY), dataDir: dir, query, log, protectedRoots: toolPolicyFrom(probe.config).protectedRoots, toolTimeoutMs: probe.config.approvalTimeoutMs + 60000 })
-  server = await startTestServer(full, { provider, log })
-  return { query, log, dir, root }
+  server = await startTestServer(full, full.RUNTIME === 'claude' ? { provider, log, ...deps } : { claudeProvider: provider, log, ...deps })
+  return { query, log, dir, root, mixed: full.RUNTIME !== 'claude' }
 }
 
 export async function stop(): Promise<void> {
@@ -75,7 +80,7 @@ export type ToolCall = { isError?: boolean; content: Array<{ text: string }> }
 
 /** Starts a task, answers the session's init, and returns an MCP client on the session's own tool server. */
 export async function session(h: Harness, agent = FORGE, index = 0, workspaceId = 'sandbox') {
-  const r = await api('POST', `/api/agents/${agent}/tasks`, { title: 'Work on the notes', workspaceId })
+  const r = await api('POST', `/api/agents/${agent}/tasks`, { title: 'Work on the notes', workspaceId, ...(h.mixed ? { runtime: 'claude' } : {}) })
   expect(r.status).toBe(202)
   await until(async () => h.query.sessions.length > index)
   const fake = h.query.sessions[index]

@@ -5,7 +5,8 @@ import type { ExecutionResult, ExecutionStatus, ServerRuntimeProvider, StartCont
 /** A scriptable provider for task manager tests: records calls, emits events on demand, and can hold start() open. */
 export class FakeProvider implements ServerRuntimeProvider {
   readonly kind: TaskRuntime
-  readonly availability = { available: true } as const
+  availability: ServerRuntimeProvider['availability'] = { available: true }
+  disposed = false
   starts: Array<{ task: AgentTask; ctx: StartContext }> = []
   cancels: string[] = []
   responses: Array<{ taskId: string; approvalId: string; decision: ApprovalDecision }> = []
@@ -68,6 +69,7 @@ export class FakeProvider implements ServerRuntimeProvider {
   }
 
   async dispose(): Promise<void> {
+    this.disposed = true
     this.listeners.clear()
   }
 }

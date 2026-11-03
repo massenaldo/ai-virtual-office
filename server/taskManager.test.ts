@@ -37,9 +37,9 @@ afterEach(async () => {
 })
 
 let perms: ReturnType<typeof openPermissionStore>
-function make(provider: ServerRuntimeProvider, config: Partial<typeof BASE_CONFIG> = {}, onLifecycle?: TaskManagerOptions['onLifecycle'], allowed: readonly string[] = DEFAULT_ALLOWED_TOOLS): TaskManager {
+function make(provider: ServerRuntimeProvider, config: Partial<typeof BASE_CONFIG> = {}, onLifecycle?: TaskManagerOptions['onLifecycle'], allowed: readonly string[] = DEFAULT_ALLOWED_TOOLS, extraProviders?: ServerRuntimeProvider[]): TaskManager {
   perms = openPermissionStore({ dataDir: dir, now: () => NOW, log: silentLogger, writeFile: () => {} })
-  manager = new TaskManager({ store, provider, permissions: perms, config: { ...BASE_CONFIG, ...config }, policy: { allowedTools: new Set(allowed), protectedRoots: [] }, now: () => NOW, log: silentLogger, onLifecycle })
+  manager = new TaskManager({ store, provider, extraProviders, permissions: perms, config: { ...BASE_CONFIG, ...config }, policy: { allowedTools: new Set(allowed), protectedRoots: [] }, now: () => NOW, log: silentLogger, onLifecycle })
   return manager
 }
 const mock = () => new ServerMockProvider({ timings: { thinkingMs: 100, workingMs: 200 } })
@@ -285,8 +285,8 @@ describe('approvals', () => {
     const m = make(fake)
     const id = started(m)
     fake.emit({ type: 'started', taskId: id, executionId: 'e' })
-    expect(m.requestApproval(id)).toEqual({ ok: false, code: 'unavailable', error: 'Demo controls need RUNTIME=mock.' })
-    expect(m.forceError(id)).toEqual({ ok: false, code: 'unavailable', error: 'Demo controls need RUNTIME=mock.' })
+    expect(m.requestApproval(id)).toEqual({ ok: false, code: 'unavailable', error: 'Demo controls only work for mock tasks.' })
+    expect(m.forceError(id)).toEqual({ ok: false, code: 'unavailable', error: 'Demo controls only work for mock tasks.' })
   })
 
   it('forceError ends a running task failed', async () => {
@@ -737,3 +737,174 @@ describe('tool approvals', () => {
   })
 })
 
+
+describe('one runtime per task', () => {
+  let ws: ReturnType<typeof makeWorkspaceRoot>
+  beforeEach(() => { ws = makeWorkspaceRoot(['sandbox']) })
+  afterEach(() => { ws.cleanup() })
+  const wsConfig = () => ({ workspaceRoot: ws.root, workspaces: [{ id: 'sandbox', relativePath: 'sandbox' }] })
+  const both = (config: Record<string, unknown> = {}, def: 'mock' | 'claude' = 'mock') => {
+    const mockP = new FakeProvider({ kind: 'mock' })
+    const claudeP = new FakeProvider({ kind: 'claude' })
+    const m = make(def === 'mock' ? mockP : claudeP, { ...wsConfig(), ...config } as never, undefined, undefined, [def === 'mock' ? claudeP : mockP])
+    return { m, mockP, claudeP }
+  }
+
+  it('starts each task on the provider it names, and on the default when it names none', async () => {
+    const { m, mockP, claudeP } = both()
+    const a = m.startTask(FORGE, INPUT, { runtime: 'claude', workspaceId: 'sandbox' })
+    const b = m.startTask('agent-demo-pm', INPUT)
+    const c = m.startTask('agent-demo-frontend', INPUT, { runtime: 'mock' })
+    await tick()
+    expect(a.ok && a.task.runtime).toBe('claude')
+    expect(b.ok && b.task.runtime).toBe('mock')
+    expect(c.ok && c.task.runtime).toBe('mock')
+    expect(claudeP.starts.map((s) => s.task.id)).toEqual([a.ok ? a.task.id : ''])
+    expect(mockP.starts).toHaveLength(2)
+  })
+
+  it('uses the default provider kind as the default runtime', async () => {
+    const { m, claudeP } = both({}, 'claude')
+    const r = m.startTask(FORGE, INPUT, { workspaceId: 'sandbox' })
+    await tick()
+    expect(r.ok && r.task.runtime).toBe('claude')
+    expect(claudeP.starts).toHaveLength(1)
+  })
+
+  it('refuses a runtime that is not registered, with a fixed sentence', () => {
+    const m = make(new FakeProvider({ kind: 'mock' }), wsConfig())
+    expect(m.startTask(FORGE, INPUT, { runtime: 'claude', workspaceId: 'sandbox' })).toEqual({ ok: false, code: 'invalid', error: 'The "claude" runtime is not enabled on this server.' })
+    expect(store.state.tasks).toHaveLength(0)
+  })
+
+  it('checks the availability of the chosen provider, not the default', () => {
+    const { m, mockP, claudeP } = both()
+    claudeP.availability = { available: false, reason: 'credentials not configured' }
+    expect(m.startTask(FORGE, INPUT, { runtime: 'claude', workspaceId: 'sandbox' })).toEqual({ ok: false, code: 'unavailable', error: 'The claude runtime is not available: credentials not configured.' })
+    expect(m.startTask(FORGE, INPUT).ok).toBe(true)
+    mockP.availability = { available: false, reason: 'off' }
+    expect(m.startTask('agent-demo-pm', INPUT)).toEqual({ ok: false, code: 'unavailable', error: 'The mock runtime is not available: off.' })
+  })
+
+  it('needs a workspace for a claude task but not for a mock task', () => {
+    const { m } = both()
+    expect(m.startTask(FORGE, INPUT, { runtime: 'claude' })).toEqual({ ok: false, code: 'invalid', error: 'The claude runtime needs a workspace.' })
+    expect(m.startTask(FORGE, INPUT).ok).toBe(true)
+  })
+
+  it('counts only claude runs against the limit', () => {
+    const { m } = both({ maxConcurrentTasks: 1 })
+    expect(m.startTask(FORGE, INPUT).ok).toBe(true)
+    expect(m.startTask('agent-demo-pm', INPUT).ok).toBe(true)
+    expect(m.startTask('agent-demo-frontend', INPUT, { runtime: 'claude', workspaceId: 'sandbox' }).ok).toBe(true)
+    expect(m.startTask('agent-demo-qa', INPUT, { runtime: 'claude', workspaceId: 'sandbox' })).toMatchObject({ ok: false, code: 'conflict' })
+  })
+
+  it('routes cancel to the provider of the task', async () => {
+    const { m, mockP, claudeP } = both()
+    const a = m.startTask(FORGE, INPUT, { runtime: 'claude', workspaceId: 'sandbox' })
+    const b = m.startTask('agent-demo-pm', INPUT)
+    await tick()
+    m.cancelTask(a.ok ? a.task.id : '')
+    expect(claudeP.cancels).toEqual([a.ok ? a.task.id : ''])
+    expect(mockP.cancels).toEqual([])
+    m.cancelTask(b.ok ? b.task.id : '')
+    expect(mockP.cancels).toEqual([b.ok ? b.task.id : ''])
+  })
+
+  it('times out and force-cancels on the right provider, and marks the right source', async () => {
+    const { m, mockP, claudeP } = both({ taskTimeoutMs: 1000, cancelGraceMs: 500 })
+    const a = m.startTask(FORGE, INPUT, { runtime: 'claude', workspaceId: 'sandbox' })
+    await tick()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(claudeP.cancels).toEqual([a.ok ? a.task.id : ''])
+    expect(mockP.cancels).toEqual([])
+    expect(task(a.ok ? a.task.id : '')).toMatchObject({ status: 'failed', endedReason: 'timeout' })
+    const b = m.startTask('agent-demo-pm', INPUT)
+    await tick()
+    m.cancelTask(b.ok ? b.task.id : '')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(task(b.ok ? b.task.id : '').status).toBe('cancelled')
+    expect(mockP.cancels).toEqual([b.ok ? b.task.id : ''])
+    expect(claudeP.cancels).toHaveLength(1)
+  })
+
+  it('answers a mock approval on the mock provider only, and ignores a claude provider that raises one itself', async () => {
+    const { m, mockP, claudeP } = both()
+    const a = m.startTask(FORGE, INPUT, { runtime: 'claude', workspaceId: 'sandbox' })
+    const b = m.startTask('agent-demo-pm', INPUT)
+    await tick()
+    const ida = a.ok ? a.task.id : ''
+    const idb = b.ok ? b.task.id : ''
+    mockP.emit({ type: 'started', taskId: idb, executionId: 'e' })
+    claudeP.emit({ type: 'started', taskId: ida, executionId: 'e' })
+    claudeP.emit({ type: 'approval_requested', taskId: ida, approvalId: 'x', tool: 'Write', summary: 's' })
+    expect(task(ida).status).toBe('running')
+    mockP.emit({ type: 'approval_requested', taskId: idb, approvalId: 'ap-1', tool: 'Write', summary: 's' })
+    expect(task(idb).status).toBe('waiting_for_approval')
+    expect(m.decideApproval(idb, 'ap-1', 'approve').ok).toBe(true)
+    expect(mockP.responses).toEqual([{ taskId: idb, approvalId: 'ap-1', decision: 'approve' }])
+    expect(claudeP.responses).toEqual([])
+  })
+
+  it('does not let a provider drive a task that runs on another provider', async () => {
+    const { m, mockP, claudeP } = both()
+    const a = m.startTask(FORGE, INPUT, { runtime: 'claude', workspaceId: 'sandbox' })
+    await tick()
+    const id = a.ok ? a.task.id : ''
+    mockP.emit({ type: 'failed', taskId: id, error: 'nope' })
+    expect(task(id).status).not.toBe('failed')
+    claudeP.emit({ type: 'failed', taskId: id, error: 'real' })
+    expect(task(id).status).toBe('failed')
+  })
+
+  it('refuses demo controls on a claude task and allows them on a mock task', async () => {
+    const mockP = mock()
+    const claudeP = new FakeProvider({ kind: 'claude' })
+    const m = make(mockP, wsConfig(), undefined, undefined, [claudeP])
+    const a = m.startTask(FORGE, INPUT, { runtime: 'claude', workspaceId: 'sandbox' })
+    const b = m.startTask('agent-demo-pm', INPUT)
+    await vi.advanceTimersByTimeAsync(150)
+    const ida = a.ok ? a.task.id : ''
+    claudeP.emit({ type: 'started', taskId: ida, executionId: 'e' })
+    expect(task(ida).status).toBe('running')
+    expect(m.requestApproval(ida)).toEqual({ ok: false, code: 'unavailable', error: 'Demo controls only work for mock tasks.' })
+    expect(m.forceError(ida)).toEqual({ ok: false, code: 'unavailable', error: 'Demo controls only work for mock tasks.' })
+    expect(m.requestApproval(b.ok ? b.task.id : '').ok).toBe(true)
+  })
+
+  it('refuses demo controls when the provider of the task has none', async () => {
+    const { m, mockP } = both()
+    const b = m.startTask('agent-demo-pm', INPUT)
+    await tick()
+    mockP.emit({ type: 'started', taskId: b.ok ? b.task.id : '', executionId: 'e' })
+    expect(m.requestApproval(b.ok ? b.task.id : '')).toEqual({ ok: false, code: 'unavailable', error: 'Demo controls only work for mock tasks.' })
+  })
+
+  it('throws when two providers share a kind', () => {
+    expect(() => make(new FakeProvider({ kind: 'mock' }), {}, undefined, undefined, [new FakeProvider({ kind: 'mock' })])).toThrow(/runtime/)
+    expect(() => make(new FakeProvider({ kind: 'claude' }), {}, undefined, undefined, [new FakeProvider({ kind: 'mock' }), new FakeProvider({ kind: 'mock' })])).toThrow(/runtime/)
+  })
+
+  it('disposes every provider', async () => {
+    const { m, mockP, claudeP } = both()
+    await m.dispose()
+    expect(mockP.disposed && claudeP.disposed).toBe(true)
+  })
+
+  it('removes an agent by cancelling on the provider of its task', async () => {
+    const { m, mockP, claudeP } = both()
+    const a = m.startTask(FORGE, INPUT, { runtime: 'claude', workspaceId: 'sandbox' })
+    await tick()
+    m.removeAgent(FORGE)
+    expect(claudeP.cancels).toEqual([a.ok ? a.task.id : ''])
+    expect(mockP.cancels).toEqual([])
+  })
+
+  it('lists the status of every runtime and the default', () => {
+    const { m, claudeP } = both()
+    claudeP.availability = { available: false, reason: 'credentials not configured' }
+    expect(m.defaultRuntime).toBe('mock')
+    expect(m.runtimeStatuses()).toEqual([{ kind: 'mock', available: true, reason: null }, { kind: 'claude', available: false, reason: 'credentials not configured' }])
+  })
+})

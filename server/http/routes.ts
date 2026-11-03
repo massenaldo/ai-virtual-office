@@ -68,7 +68,7 @@ function must<T extends { ok: boolean }>(r: T): Extract<T, { ok: true }> {
 }
 
 export function createRoutes(deps: RouteDeps): Route[] {
-  const { config, store, events, provider, manager, permissions, now, startedAt } = deps
+  const { config, store, events, manager, permissions, now, startedAt } = deps
   const agent = (id: string) => store.state.agents.find((a) => a.id === id)
 
   const view = (rule: Parameters<typeof toRuleView>[0]) => toRuleView(rule, now())
@@ -78,8 +78,10 @@ export function createRoutes(deps: RouteDeps): Route[] {
       method: 'GET',
       path: '/api/health',
       handler: () => {
-        const a = provider.availability
-        return { status: 200, body: { ok: true, version: pkg.version, runtime: config.runtime, available: a.available, reason: a.available ? null : a.reason, credentialsConfigured: config.credentialsConfigured, persistence: { ok: store.saveError === null, error: store.saveError }, audit: deps.audit.status, startedAt } }
+        // `runtime`, `available` and `reason` describe the default runtime, as before; `runtimes` lists every registered one.
+        const runtimes = manager.runtimeStatuses()
+        const d = runtimes.find((r) => r.kind === manager.defaultRuntime)!
+        return { status: 200, body: { ok: true, version: pkg.version, runtime: d.kind, available: d.available, reason: d.reason, defaultRuntime: d.kind, runtimes, credentialsConfigured: config.credentialsConfigured, persistence: { ok: store.saveError === null, error: store.saveError }, audit: deps.audit.status, startedAt } }
       },
     },
     {
@@ -151,8 +153,8 @@ export function createRoutes(deps: RouteDeps): Route[] {
       path: '/api/agents/:id/tasks',
       body: 'json',
       handler: ({ params, body, requestId }) => {
-        const { workspaceId, ...input } = parseCreateTask(body as Record<string, unknown>)
-        return { status: 202, body: { task: must(manager.startTask(params.id, input, { workspaceId, requestId })).task } }
+        const { workspaceId, runtime, ...input } = parseCreateTask(body as Record<string, unknown>)
+        return { status: 202, body: { task: must(manager.startTask(params.id, input, { workspaceId, runtime, requestId })).task } }
       },
     },
     {

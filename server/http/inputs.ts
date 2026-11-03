@@ -42,14 +42,15 @@ export function parseDesk(b: Body): { deskId: string | null } {
   return { deskId: v }
 }
 
-export type CreateTaskRequest = TaskInput & { workspaceId: string | null }
+export type CreateTaskRequest = TaskInput & { workspaceId: string | null; /** Absent means the server's default runtime. */ runtime?: 'mock' | 'claude' }
 
 export function parseCreateTask(b: Body): CreateTaskRequest {
-  allow(b, ['title', 'description', 'workspaceId'])
+  allow(b, ['title', 'description', 'workspaceId', 'runtime'])
   const description = 'description' in b ? text(b, 'description') : ''
   const workspaceId = b.workspaceId === undefined ? null : b.workspaceId
   if (workspaceId !== null && typeof workspaceId !== 'string') throw bad('"workspaceId" must be a string or null.')
-  return { title: text(b, 'title'), description, workspaceId }
+  if (b.runtime !== undefined && b.runtime !== 'mock' && b.runtime !== 'claude') throw bad('"runtime" must be "mock" or "claude".')
+  return { title: text(b, 'title'), description, workspaceId, ...(b.runtime === undefined ? {} : { runtime: b.runtime }) }
 }
 
 const APPROVAL_CHOICES: readonly ApprovalChoice[] = ['allow_once', 'allow_task', 'allow_agent', 'reject', 'approve', 'deny']

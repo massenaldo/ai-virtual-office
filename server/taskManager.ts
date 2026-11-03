@@ -46,7 +46,10 @@ const WORKSPACE_COPY = (reason: WorkspaceReason, id: unknown): string => {
 
 export type TaskManagerOptions = {
   store: WorkforceStore
+  /** The DEFAULT provider: its kind is the runtime a task gets when it names none. */
   provider: ServerRuntimeProvider
+  /** Other providers, at most one per kind; a task can choose any registered kind. */
+  extraProviders?: ServerRuntimeProvider[]
   policy: ToolPolicy
   /** The permission rules: they decide, together with the policy, what each tool request gets. */
   permissions: PermissionStore
@@ -66,7 +69,7 @@ export const unavailableMessage = (kind: TaskRuntime, reason: string) => `The ${
 type Timer = ReturnType<typeof setTimeout>
 
 /** Everything the manager holds for one task while it is active; deleted when the task ends. */
-type Run = { abort: AbortController; taskTimer: Timer | null; approvalTimer: Timer | null; approvalId: string | null; graceTimer: Timer | null; outputBytes: number; outputClosed: boolean; launched: boolean; workspace: ResolvedWorkspace | null; toolWaiter: { approvalId: string; tool: string; digest: string; actionHash: string; onceOnly: boolean; resolve: (r: ToolGateResult) => void } | null; toolQueue: Array<{ request: ToolRequest; digest: string; /** Rules granted while this request waited: they do not answer it, a person does. */ skipRules: ReadonlySet<string>; resolve: (r: ToolGateResult) => void }> }
+type Run = { provider: ServerRuntimeProvider; abort: AbortController; taskTimer: Timer | null; approvalTimer: Timer | null; approvalId: string | null; graceTimer: Timer | null; outputBytes: number; outputClosed: boolean; launched: boolean; workspace: ResolvedWorkspace | null; toolWaiter: { approvalId: string; tool: string; digest: string; actionHash: string; onceOnly: boolean; resolve: (r: ToolGateResult) => void } | null; toolQueue: Array<{ request: ToolRequest; digest: string; /** Rules granted while this request waited: they do not answer it, a person does. */ skipRules: ReadonlySet<string>; resolve: (r: ToolGateResult) => void }> }
 
 const ONCE_ONLY_SENTENCE = 'This change can only be allowed once.'
 const CANCELLED: ToolGateResult = { behavior: 'deny', outcome: 'cancelled', message: 'The task is no longer running.' }
@@ -79,7 +82,8 @@ const isDemo = (p: ServerRuntimeProvider): p is DemoProvider => 'requestApproval
  */
 export class TaskManager {
   private readonly store: WorkforceStore
-  private readonly provider: ServerRuntimeProvider
+  private readonly providers = new Map<TaskRuntime, ServerRuntimeProvider>()
+  private readonly defaultKind: TaskRuntime
   private readonly config: TaskManagerOptions['config']
   private readonly policy: ToolPolicy
   private readonly permissions: PermissionStore
@@ -89,21 +93,36 @@ export class TaskManager {
   private readonly runs = new Map<string, Run>()
   /** Calls that are running now, by the permission rule that allowed them. */
   private readonly inflight = new Map<string, Set<AbortController>>()
-  private readonly unsubscribe: () => void
-  private readonly source
+  private readonly unsubscribes: Array<() => void> = []
 
   constructor(opts: TaskManagerOptions) {
     this.store = opts.store
-    this.provider = opts.provider
     this.config = opts.config
     this.policy = opts.policy
     this.permissions = opts.permissions
     this.now = opts.now
     this.log = opts.log
     this.onLifecycle = opts.onLifecycle
-    this.source = sourceFor(opts.provider.kind)
-    // Only the mock may raise an approval on its own (its demo without a workspace); a real runtime asks through the tool gate.
-    this.unsubscribe = opts.provider.subscribe((event) => { if (event.type === 'approval_requested' && opts.provider.kind !== 'mock') return; this.onEvent(event) })
+    this.defaultKind = opts.provider.kind
+    for (const provider of [opts.provider, ...(opts.extraProviders ?? [])]) {
+      if (this.providers.has(provider.kind)) throw new Error(`Two providers for the "${provider.kind}" runtime.`)
+      this.providers.set(provider.kind, provider)
+    }
+    for (const provider of this.providers.values()) {
+      // Only the mock may raise an approval on its own (its demo without a workspace); a real runtime asks through the tool gate.
+      // A provider only drives the tasks that run on it.
+      this.unsubscribes.push(provider.subscribe((event) => { if (event.type === 'approval_requested' && provider.kind !== 'mock') return; this.onEvent(event, provider) }))
+    }
+  }
+
+  /** The runtime a task gets when it names none. */
+  get defaultRuntime(): TaskRuntime {
+    return this.defaultKind
+  }
+
+  /** Whether each registered runtime can take a task now, mock first. */
+  runtimeStatuses(): Array<{ kind: TaskRuntime; available: boolean; reason: string | null }> {
+    return [...this.providers.values()].sort((a, b) => (a.kind === b.kind ? 0 : a.kind === 'mock' ? -1 : 1)).map((p) => ({ kind: p.kind, available: p.availability.available, reason: p.availability.available ? null : p.availability.reason }))
   }
 
   private get state(): WorkforceState {
@@ -112,6 +131,11 @@ export class TaskManager {
 
   private task(id: string): AgentTask | undefined {
     return this.state.tasks.find((t) => t.id === id)
+  }
+
+  /** The provider a task runs on: its run's, else the one for its recorded runtime. */
+  private providerOf(task: AgentTask): ServerRuntimeProvider {
+    return this.runs.get(task.id)?.provider ?? this.providers.get(task.runtime) ?? this.providers.get(this.defaultKind)!
   }
 
   /** Builds the event without undefined keys, so a missing field is distinguishable from an empty one. */
@@ -124,9 +148,12 @@ export class TaskManager {
   }
 
   /** Synchronous: the task is `starting` when this returns, and the provider start continues in the background. */
-  startTask(agentId: string, input: TaskInput, opts: CallOptions & { workspaceId?: string | null } = {}): ManagerResult<{ task: AgentTask }> {
-    const availability = this.provider.availability
-    if (!availability.available) return { ok: false, code: 'unavailable', error: unavailableMessage(this.provider.kind, availability.reason) }
+  startTask(agentId: string, input: TaskInput, opts: CallOptions & { workspaceId?: string | null; runtime?: TaskRuntime } = {}): ManagerResult<{ task: AgentTask }> {
+    const kind = opts.runtime ?? this.defaultKind
+    const provider = this.providers.get(kind)
+    if (!provider) return { ok: false, code: 'invalid', error: `The "${String(kind)}" runtime is not enabled on this server.` }
+    const availability = provider.availability
+    if (!availability.available) return { ok: false, code: 'unavailable', error: unavailableMessage(kind, availability.reason) }
     const agent = this.state.agents.find((a) => a.id === agentId)
     if (!agent) return { ok: false, code: 'not_found', error: 'Agent not found.' }
     const invalid = validateTaskInput(input)
@@ -146,18 +173,18 @@ export class TaskManager {
       }
       workspace = resolved.workspace
     }
-    if (this.provider.kind === 'claude' && workspace === null) return { ok: false, code: 'invalid', error: 'The claude runtime needs a workspace.' }
+    if (kind === 'claude' && workspace === null) return { ok: false, code: 'invalid', error: 'The claude runtime needs a workspace.' }
     if (activeTaskFor(this.state, agentId)) return { ok: false, code: 'conflict', error: `${agent.name} already has an active task.` }
     // Each claude task is a child process and a paid model session, so they are counted; the mock is not.
     const limit = this.config.maxConcurrentTasks
-    if (this.provider.kind === 'claude' && limit !== undefined && this.runs.size >= limit) return { ok: false, code: 'conflict', error: `${limit === 1 ? 'A Claude task is' : `${limit} Claude tasks are`} already running, which is the limit. Wait for one to finish.` }
+    if (kind === 'claude' && limit !== undefined && this.claudeRuns() >= limit) return { ok: false, code: 'conflict', error: `${limit === 1 ? 'A Claude task is' : `${limit} Claude tasks are`} already running, which is the limit. Wait for one to finish.` }
 
-    const assigned = assignTask(this.state, agentId, input, this.now(), { runtime: this.provider.kind, timeoutMs: this.config.taskTimeoutMs, workspaceId: workspace?.id ?? null })
+    const assigned = assignTask(this.state, agentId, input, this.now(), { runtime: kind, timeoutMs: this.config.taskTimeoutMs, workspaceId: workspace?.id ?? null })
     if (!assigned.ok) return { ok: false, code: 'invalid', error: assigned.error }
     this.store.commit(assigned.state)
     this.store.commit(markStarting(this.state, assigned.taskId, this.now()))
 
-    const run: Run = { abort: new AbortController(), taskTimer: null, approvalTimer: null, approvalId: null, graceTimer: null, outputBytes: 0, outputClosed: false, launched: false, workspace, toolWaiter: null, toolQueue: [] }
+    const run: Run = { provider, abort: new AbortController(), taskTimer: null, approvalTimer: null, approvalId: null, graceTimer: null, outputBytes: 0, outputClosed: false, launched: false, workspace, toolWaiter: null, toolQueue: [] }
     this.runs.set(assigned.taskId, run)
     run.taskTimer = setTimeout(() => this.onTaskTimeout(assigned.taskId), this.config.taskTimeoutMs)
     const task = this.task(assigned.taskId)!
@@ -166,16 +193,23 @@ export class TaskManager {
     return { ok: true, task }
   }
 
+  /** Runs that are on the claude runtime: the only ones the concurrency limit counts. */
+  private claudeRuns(): number {
+    let n = 0
+    for (const run of this.runs.values()) if (run.provider.kind === 'claude') n++
+    return n
+  }
+
   /** The duplicate guard: a task launches only while `starting`, once, and only if the provider isn't already running it. */
   private async launch(taskId: string): Promise<void> {
     const run = this.runs.get(taskId)
     const task = this.task(taskId)
     const agent = task && this.state.agents.find((a) => a.id === task.agentId)
-    if (!run || run.launched || !task || !agent || task.status !== 'starting' || this.provider.status(taskId).state === 'running') return
+    if (!run || run.launched || !task || !agent || task.status !== 'starting' || run.provider.status(taskId).state === 'running') return
     run.launched = true
     let outcome
     try {
-      outcome = await this.provider.start(task, {
+      outcome = await run.provider.start(task, {
         agent,
         signal: run.abort.signal,
         workspace: run.workspace,
@@ -207,16 +241,16 @@ export class TaskManager {
     }
     // The task was cancelled, timed out or removed while the runtime was still starting: stop what just began.
     const now = this.task(taskId)
-    if (!now || (now.status !== 'starting' && now.status !== 'running' && now.status !== 'waiting_for_approval')) this.provider.cancel(taskId)
+    if (!now || (now.status !== 'starting' && now.status !== 'running' && now.status !== 'waiting_for_approval')) run.provider.cancel(taskId)
   }
 
-  private onEvent(event: RuntimeEvent): void {
+  private onEvent(event: RuntimeEvent, from?: ServerRuntimeProvider): void {
     const run = this.runs.get(event.taskId)
-    if (!run) return
+    if (!run || (from !== undefined && run.provider !== from)) return
     const capped = this.cap(run, event)
     if (!capped) return
     const before = this.state
-    const next = applyRuntimeEvent(before, capped, this.now(), this.source)
+    const next = applyRuntimeEvent(before, capped, this.now(), sourceFor(run.provider.kind))
     if (next === before) return
     this.store.commit(next)
     this.afterChange(event.taskId, run)
@@ -259,8 +293,8 @@ export class TaskManager {
     const task = this.task(taskId)
     if (!run || !task || !isActiveTask(task)) return
     run.taskTimer = null
-    this.store.commit(timeOutTask(this.state, taskId, this.now(), this.source))
-    this.provider.cancel(taskId)
+    this.store.commit(timeOutTask(this.state, taskId, this.now(), sourceFor(run.provider.kind)))
+    run.provider.cancel(taskId)
     run.abort.abort()
     this.finalize(taskId)
     this.report('task.timeout', task)
@@ -271,8 +305,8 @@ export class TaskManager {
     const task = this.task(taskId)
     if (!run || !task || task.status !== 'waiting_for_approval' || task.pendingApproval?.id !== approvalId) return
     run.approvalTimer = null
-    this.store.commit(applyRuntimeEvent(this.state, { type: 'failed', taskId, error: APPROVAL_TIMEOUT_MESSAGE(this.config.approvalTimeoutMs) }, this.now(), this.source))
-    this.provider.cancel(taskId)
+    this.store.commit(applyRuntimeEvent(this.state, { type: 'failed', taskId, error: APPROVAL_TIMEOUT_MESSAGE(this.config.approvalTimeoutMs) }, this.now(), sourceFor(run.provider.kind)))
+    run.provider.cancel(taskId)
     run.abort.abort()
     this.settleAll(run, { behavior: 'deny', outcome: 'expired', message: APPROVAL_TIMEOUT_MESSAGE(this.config.approvalTimeoutMs) })
     this.finalize(taskId)
@@ -286,7 +320,8 @@ export class TaskManager {
     if (task.status === 'cancelling') return { ok: true, task }
 
     const run = this.runs.get(taskId)
-    this.store.commit(requestCancel(this.state, taskId, this.now(), this.source))
+    const provider = this.providerOf(task)
+    this.store.commit(requestCancel(this.state, taskId, this.now(), sourceFor(provider.kind)))
     if (run?.taskTimer) clearTimeout(run.taskTimer)
     if (run) { run.taskTimer = null; this.settleAll(run, CANCELLED) }
     this.report('task.cancel', task, { actor: actorFor(opts), requestId: opts.requestId })
@@ -296,7 +331,7 @@ export class TaskManager {
       return { ok: true, task: this.task(taskId)! }
     }
     // The runtime confirms with a cancelled event (the mock does so at once, so the task may already be cancelled below).
-    this.provider.cancel(taskId)
+    provider.cancel(taskId)
     const after = this.task(taskId)
     if (after && after.status === 'cancelling') {
       if (run) run.graceTimer = setTimeout(() => this.forceCancel(taskId), this.config.cancelGraceMs)
@@ -340,7 +375,7 @@ export class TaskManager {
       // Requests already waiting were not part of this question: the new rule must not answer them.
       if (scope !== 'once' && run) for (const q of run.toolQueue) q.skipRules = new Set([...q.skipRules, g.rule.id])
     }
-    this.store.commit(recordDecision(this.state, taskId, approvalId, decision, this.now(), this.source))
+    this.store.commit(recordDecision(this.state, taskId, approvalId, decision, this.now(), sourceFor(this.providerOf(task).kind)))
     if (run) this.clearApproval(run)
     this.report('approval.decided', task, { actor: actorFor(opts), requestId: opts.requestId, decision: choice, ...granted, ...(waiter ? { digest: waiter.digest.slice(0, 12), actionHash: waiter.actionHash } : {}) })
     if (run?.toolWaiter?.approvalId === approvalId) {
@@ -348,7 +383,8 @@ export class TaskManager {
       this.settleTool(run, decision === 'approve' ? { behavior: 'allow', outcome: 'approved' } : { behavior: 'deny', outcome: 'denied', message: 'Denied by a human reviewer.' })
     } else {
       // An approval the (mock) provider raised itself: its reaction arrives as events.
-      if (this.provider.kind === 'mock') this.provider.respondToApproval(taskId, approvalId, decision)
+      const provider = this.providerOf(task)
+      if (provider.kind === 'mock') provider.respondToApproval(taskId, approvalId, decision)
     }
     if (run) this.promote(taskId, run)
     return { ok: true, task: this.task(taskId) ?? task }
@@ -363,7 +399,7 @@ export class TaskManager {
     if (cancelledTaskId) {
       if (activeTask) this.report('task.cancel', activeTask, { actor: actorFor(opts), requestId: opts.requestId, detail: 'agent removed' })
       const run = this.runs.get(cancelledTaskId)
-      this.provider.cancel(cancelledTaskId)
+      if (activeTask) this.providerOf(activeTask).cancel(cancelledTaskId)
       run?.abort.abort()
       this.finalize(cancelledTaskId)
     }
@@ -417,7 +453,7 @@ export class TaskManager {
     if (d.decision === 'deny') return refuse(d.reason)
 
     const evaluated = this.permissions.evaluate({ agentId: task.agentId, taskId, tool, digest, workspaceId: run.workspace?.id ?? null, paths: d.paths?.map((x) => x.relative) ?? [] })
-    const onceOnly = this.isOnceOnly(tool, d.paths, run.workspace)
+    const onceOnly = this.isOnceOnly(run.provider.kind, tool, d.paths, run.workspace)
     // A standing rule never answers a change to a file that tools run, nor a request that was already waiting when the rule was granted.
     const p = evaluated.effect === 'allow' && evaluated.source !== 'once' && (onceOnly || (evaluated.ruleId !== null && skipRules.has(evaluated.ruleId)))
       ? { ...evaluated, effect: 'ask' as const }
@@ -446,10 +482,10 @@ export class TaskManager {
   }
 
   /** Write and Edit that may only be approved once: any write unless broad scopes are on, else a file that tools run on their own. Fail closed: no checked path, or any error, counts as sensitive. */
-  private isOnceOnly(tool: string, paths: ReadonlyArray<{ readonly relative: string }> | undefined, workspace: ResolvedWorkspace | null): boolean {
+  private isOnceOnly(kind: TaskRuntime, tool: string, paths: ReadonlyArray<{ readonly relative: string }> | undefined, workspace: ResolvedWorkspace | null): boolean {
     if (tool !== 'Write' && tool !== 'Edit') return false
     // A list of files that tools run can never be complete, so by default the Claude runtime never takes a broad write approval.
-    if (this.provider.kind === 'claude' && this.config.allowBroadWriteScopes !== true) return true
+    if (kind === 'claude' && this.config.allowBroadWriteScopes !== true) return true
     try {
       return !workspace || !paths || paths.length === 0 || paths.some((x) => isExecSensitive(x.relative, workspace.path))
     } catch {
@@ -510,7 +546,7 @@ export class TaskManager {
       this.report('permission.denied', task, { actor: 'runtime', tool, decision: 'deny', reason: 'revoked_or_changed', ...ruleId, ...ids })
       return { ok: false }
     }
-    if (p.source !== 'once' && this.isOnceOnly(tool, paths, this.runs.get(taskId)?.workspace ?? null)) {
+    if (p.source !== 'once' && this.isOnceOnly(this.providerOf(task).kind, tool, paths, this.runs.get(taskId)?.workspace ?? null)) {
       this.report('permission.denied', task, { actor: 'runtime', tool, decision: 'deny', reason: 'exec_sensitive', ...ruleId, ...ids })
       return { ok: false }
     }
@@ -526,8 +562,9 @@ export class TaskManager {
     const task = this.task(taskId)
     if (!task) return { ok: false, code: 'not_found', error: 'Task not found.' }
     if (task.status !== 'running') return { ok: false, code: 'conflict', error: 'Task is not running.' }
-    if (!isDemo(this.provider)) return { ok: false, code: 'unavailable', error: 'Demo controls need RUNTIME=mock.' }
-    return { ok: true, task, provider: this.provider }
+    const provider = this.providerOf(task)
+    if (!isDemo(provider)) return { ok: false, code: 'unavailable', error: 'Demo controls only work for mock tasks.' }
+    return { ok: true, task, provider }
   }
 
   requestApproval(taskId: string): ManagerResult {
@@ -596,13 +633,13 @@ export class TaskManager {
   }
 
   async dispose(): Promise<void> {
-    this.unsubscribe()
+    for (const unsubscribe of this.unsubscribes.splice(0)) unsubscribe()
     for (const run of this.runs.values()) {
       for (const timer of [run.taskTimer, run.approvalTimer, run.graceTimer]) if (timer) clearTimeout(timer)
       this.settleAll(run, CANCELLED)
       run.abort.abort()
     }
     this.runs.clear()
-    await this.provider.dispose()
+    await Promise.all([...this.providers.values()].map((p) => p.dispose()))
   }
 }

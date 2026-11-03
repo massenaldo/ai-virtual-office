@@ -26,5 +26,9 @@ export function readPublicConfig(env: Record<string, string | undefined>): Publi
     errors.push('RUNTIME=claude is not allowed on a public address. Set VO_ALLOW_PUBLIC_CLAUDE=yes only after the security prerequisites in docs/milestone-3b5-3-report.md are met.')
   }
 
+  if (trimmed('ENABLE_CLAUDE_RUNTIME') === 'yes' && !allowClaude) {
+    errors.push('ENABLE_CLAUDE_RUNTIME=yes is not allowed on a public address. Set VO_ALLOW_PUBLIC_CLAUDE=yes only after the security prerequisites in docs/milestone-3b5-prerequisites.md are met.')
+  }
+
   return errors.length > 0 ? { ok: false, errors } : { ok: true, host, port, password, allowClaude }
 }

@@ -9,7 +9,7 @@ import { assignTask } from '../../src/workforce/operations'
 import type { AgentTask } from '../../src/workforce/types'
 import { recordingLogger } from '../log'
 import { Secret } from '../secret'
-import { fakeQuery, initMessage, resultMessage, textMessage } from '../test/fakeClaudeSession'
+import { fakeQuery, initMessage, OUR_TOOLS, resultMessage, textMessage } from '../test/fakeClaudeSession'
 import { testStartContext } from '../test/startContext'
 import type { ResolvedWorkspace } from '../workspaces'
 import { ClaudeAgentRuntimeProvider, claudeUnavailableReason, isSdkInstalled, type ClaudeProviderOptions } from './claudeAgent'
@@ -32,7 +32,7 @@ afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
 function setup(extra: Partial<ClaudeProviderOptions> = {}) {
   const query = fakeQuery()
   const log = recordingLogger()
-  const provider = new ClaudeAgentRuntimeProvider({ apiKey: new Secret(KEY), dataDir: dir, query, log, startTimeoutMs: 500, ...extra })
+  const provider = new ClaudeAgentRuntimeProvider({ apiKey: new Secret(KEY), dataDir: dir, query, log, startTimeoutMs: 500, protectedRoots: [dir], ...extra })
   const events: RuntimeEvent[] = []
   provider.subscribe((e) => events.push(e))
   const notes: string[] = []
@@ -81,31 +81,53 @@ describe('availability', () => {
 })
 
 describe('the session it asks for', () => {
-  it('has no tools, no settings, no stored session, an empty working folder and a minimal environment', async () => {
+  it('has our tools only, no settings, no stored session, an empty working folder and a minimal environment', async () => {
     const s = setup({ settings: { model: 'claude-sonnet-5-5', maxTurns: 5, maxBudgetUsd: 0.25 }, base: { PATH: '/usr/bin', AWS_SECRET_ACCESS_KEY: 'x', API_TOKEN: 't'.repeat(40) } })
     const { session } = await started(s)
     const o = session.options
-    expect(o).toMatchObject({ tools: [], allowedTools: [], mcpServers: {}, strictMcpConfig: true, permissionMode: 'dontAsk', settingSources: [], persistSession: false, includePartialMessages: false, maxTurns: 5, maxBudgetUsd: 0.25, model: 'claude-sonnet-5-5' })
+    expect(o).toMatchObject({ tools: [], strictMcpConfig: true, permissionMode: 'dontAsk', settingSources: [], persistSession: false, includePartialMessages: false, maxTurns: 5, maxBudgetUsd: 0.25, model: 'claude-sonnet-5-5' })
+    expect(o.allowedTools).toEqual(OUR_TOOLS)
+    expect(Object.keys(o.mcpServers!)).toEqual(['vo'])
+    expect(o.mcpServers!.vo).toMatchObject({ type: 'sdk', name: 'vo' })
     expect(Object.keys(o.env!).sort()).toEqual(['ANTHROPIC_API_KEY', 'API_TIMEOUT_MS', 'CLAUDE_CODE_DISABLE_AUTO_MEMORY', 'CLAUDE_CODE_MAX_RETRIES', 'CLAUDE_CONFIG_DIR', 'HOME', 'PATH'])
     expect(o.cwd).toBe(join(dir, 'claude-scratch', s.task.id))
     expect(o.cwd).not.toContain('sandbox-secret-path')
     expect(o.env!.CLAUDE_CONFIG_DIR).toBe(join(dir, 'claude-config'))
     expect(o.additionalDirectories).toBeUndefined()
-    expect(o.systemPrompt).toEqual(expect.stringContaining('no tools'))
+    expect(String(o.systemPrompt)).toContain('vo_read')
     expect(String(o.systemPrompt)).not.toContain('sandbox-secret-path')
     expect(session.prompt).toBe('Summarise')
   })
-  it('leaves the model out when none is configured', async () => {
+  it('pre-approves exactly three read tools, none of which can write or run anything', async () => {
+    const s = setup()
+    const { session } = await started(s)
+    expect(session.options.allowedTools).toEqual(['mcp__vo__vo_read', 'mcp__vo__vo_glob', 'mcp__vo__vo_grep'])
+    expect(session.options.allowedTools!.join(' ')).not.toMatch(/write|edit|run|bash|web/i)
+  })
+  it('gives the SDK a tool-call timeout longer than the approval wait', async () => {
+    const s = setup({ toolTimeoutMs: 123456 })
+    const { session } = await started(s)
+    expect((session.options.mcpServers!.vo as { timeout?: number }).timeout).toBe(123456)
+    const d = setup()
+    const { session: def } = await started(d)
+    expect((def.options.mcpServers!.vo as { timeout?: number }).timeout).toBe(360000)
+  })
+  it('leaves the model and the API address out unless configured', async () => {
     const s = setup()
     const { session } = await started(s)
     expect(session.options).not.toHaveProperty('model')
+    expect(session.options.env).not.toHaveProperty('ANTHROPIC_BASE_URL')
   })
-  it('denies any tool through the permission callback and a PreToolUse hook', async () => {
+  it('denies every tool that is not ours through the permission callback and the PreToolUse hook, and lets ours through to the gate', async () => {
     const s = setup()
     const { session } = await started(s)
     await expect(session.options.canUseTool!('Bash', {}, {} as never)).resolves.toMatchObject({ behavior: 'deny' })
     const hook = session.options.hooks!.PreToolUse![0].hooks[0]
-    await expect(hook({} as never, undefined, { signal: new AbortController().signal })).resolves.toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
+    const call = (input: unknown) => hook(input as never, undefined, { signal: new AbortController().signal })
+    for (const bad of ['Bash', 'Write', 'mcp__vo__vo_write', 'mcp__other__vo_read']) await expect(call({ tool_name: bad })).resolves.toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
+    await expect(call({})).resolves.toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
+    await expect(call(null)).resolves.toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } })
+    for (const good of OUR_TOOLS) await expect(call({ tool_name: good })).resolves.toEqual({})
   })
   it('creates the working folder with no other access and removes it when the session ends', async () => {
     const s = setup()
@@ -117,6 +139,11 @@ describe('the session it asks for', () => {
     await tick()
     expect(existsSync(join(dir, 'claude-scratch', s.task.id))).toBe(false)
   })
+  it('points the SDK at a scripted API only when told to', async () => {
+    const s = setup({ apiBaseUrl: 'http://127.0.0.1:9' })
+    const { session } = await started(s)
+    expect(session.options.env).toMatchObject({ ANTHROPIC_BASE_URL: 'http://127.0.0.1:9' })
+  })
 })
 
 describe('a task that goes well', () => {
@@ -126,13 +153,17 @@ describe('a task that goes well', () => {
     expect(outcome).toMatchObject({ ok: true, sessionId: 'sess-1' })
     expect(outcome.ok && outcome.executionId).toMatch(/^[0-9a-f-]{36}$/)
     expect(s.provider.status(s.task.id)).toMatchObject({ state: 'running', sessionId: 'sess-1' })
+    session.send({ type: 'assistant', session_id: 'sess-1', message: { content: [{ type: 'tool_use', id: 'u1', name: 'mcp__vo__vo_read', input: { file_path: 'plan.md' } }] } })
+    session.send({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'u1', content: 'file text' }] } })
     session.send(textMessage('Hello there.'))
     session.send(resultMessage({ result: 'Hello there.' }))
     session.end()
     await tick()
-    expect(s.events.map((e) => e.type)).toEqual(['started', 'message', 'completed'])
+    expect(s.events.map((e) => e.type)).toEqual(['started', 'progress', 'progress', 'message', 'completed'])
+    expect(s.events[1]).toEqual({ type: 'progress', taskId: s.task.id, step: 'working', message: 'Reading a file' })
+    expect(JSON.stringify(s.events)).not.toContain('plan.md')
     expect(s.events[0]).toMatchObject({ type: 'started', sessionId: 'sess-1' })
-    expect(s.events[2]).toEqual({ type: 'completed', taskId: s.task.id, summary: 'Hello there.' })
+    expect(s.events[4]).toEqual({ type: 'completed', taskId: s.task.id, summary: 'Hello there.' })
     expect(s.provider.status(s.task.id)).toMatchObject({ state: 'ended', outcome: 'completed' })
     expect(s.provider.result(s.task.id)).toEqual({ outcome: 'completed', summary: 'Hello there.' })
     expect(s.notes).toEqual(['Claude session started (session sess-1)', 'Claude session ended: turns=1 cost_usd=0.01'])
@@ -152,16 +183,31 @@ describe('a task that goes well', () => {
 })
 
 describe('a session that must not run', () => {
-  it('fails before it starts when the init message shows a tool, and closes the session', async () => {
+  it('fails before it starts when the init message shows a tool that is not ours, and closes the session', async () => {
     const s = setup()
     const pending = s.provider.start(s.task, s.ctx)
     await tick()
-    s.query.sessions[0].send(initMessage({ tools: ['Bash', 'Write'] }))
+    s.query.sessions[0].send(initMessage({ tools: [...OUR_TOOLS, 'Bash', 'Write'] }))
     expect(await pending).toEqual({ ok: false, error: 'The Claude runtime started with an unexpected configuration.' })
     await tick()
     expect(s.events).toEqual([])
     expect(s.query.sessions[0].closed).toBeGreaterThan(0)
-    expect(s.notes[0]).toBe('The Claude session was not started: tools are visible: Bash,Write')
+    expect(s.notes[0]).toBe('The Claude session was not started: unexpected tools are visible: Bash,Write')
+  })
+  it.each([
+    ['one of our tools is missing', { tools: ['mcp__vo__vo_read'] }, 'tools are missing'],
+    ['no tool is listed', { tools: [] }, 'tools are missing'],
+    ['another MCP server is attached', { mcp_servers: [{ name: 'vo', status: 'connected' }, { name: 'x', status: 'connected' }] }, 'unexpected mcp servers'],
+    ['our server did not connect', { mcp_servers: [{ name: 'vo', status: 'failed' }] }, 'not connected'],
+    ['the mode is not dontAsk', { permissionMode: 'acceptEdits' }, 'permission mode'],
+  ])('fails before it starts when %s', async (_n, over, word) => {
+    const s = setup()
+    const pending = s.provider.start(s.task, s.ctx)
+    await tick()
+    s.query.sessions[0].send(initMessage(over))
+    expect(await pending).toEqual({ ok: false, error: 'The Claude runtime started with an unexpected configuration.' })
+    expect(s.notes[0]).toContain(word)
+    expect(s.query.sessions[0].closed).toBeGreaterThan(0)
   })
   it('fails before it starts when the key is refused (a result with no init)', async () => {
     const s = setup()
@@ -171,7 +217,7 @@ describe('a session that must not run', () => {
     expect(await pending).toEqual({ ok: false, error: 'The Claude runtime could not sign in. Check the API key.' })
     expect(s.events).toEqual([])
   })
-  it('fails the task when the model asks for a tool', async () => {
+  it('fails the task when the model asks for a tool that is not ours', async () => {
     const s = setup()
     const { session } = await started(s)
     session.send({ type: 'assistant', session_id: 'sess-1', message: { content: [{ type: 'tool_use', id: 'u', name: 'Bash', input: { command: 'rm -rf /' } }] } })
@@ -199,6 +245,12 @@ describe('a session that must not run', () => {
     const s = setup({ startTimeoutMs: 30 })
     expect(await s.provider.start(s.task, s.ctx)).toEqual({ ok: false, error: 'The Claude runtime did not start in time.' })
     expect(s.query.sessions[0].closed).toBeGreaterThan(0)
+  })
+  it('refuses to start without a protected root, so a mis-wired server cannot expose its data folder', async () => {
+    const s = setup({ protectedRoots: [] })
+    expect(await s.provider.start(s.task, s.ctx)).toEqual({ ok: false, error: 'Runtime failed to start.' })
+    expect(s.query.sessions).toHaveLength(0)
+    expect(existsSync(join(dir, 'claude-scratch', s.task.id))).toBe(false)
   })
   it('fails when the SDK cannot be started at all', async () => {
     const s = setup({ query: () => { throw new Error(`cannot spawn ${KEY}`) } })

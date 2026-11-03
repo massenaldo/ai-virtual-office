@@ -15,6 +15,10 @@ describe('buildChildEnv', () => {
   it('turns auto memory off and bounds API waits and retries', () => {
     expect(env).toMatchObject({ CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', API_TIMEOUT_MS: '120000', CLAUDE_CODE_MAX_RETRIES: '2' })
   })
+  it('points the SDK at a scripted API only when one is given', () => {
+    expect(buildChildEnv({ apiKey: 'k', home: '/h', configDir: '/c', base: {}, apiBaseUrl: 'http://127.0.0.1:9' })).toMatchObject({ ANTHROPIC_BASE_URL: 'http://127.0.0.1:9' })
+    expect(env).not.toHaveProperty('ANTHROPIC_BASE_URL')
+  })
   it('leaves out PATH when the server has none', () => {
     expect(buildChildEnv({ apiKey: 'k', home: '/h', configDir: '/c', base: {} })).not.toHaveProperty('PATH')
   })

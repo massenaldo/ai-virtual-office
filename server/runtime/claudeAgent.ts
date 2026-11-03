@@ -10,35 +10,44 @@ import { silentLogger, type Logger } from '../log'
 import type { Secret } from '../secret'
 import { buildChildEnv } from './claudeEnv'
 import { createMessageMapper, initProblem } from './claudeMessages'
+import { createVoServer, MODEL_TOOL_NAMES, TOOL_LABELS, VO_SERVER_NAME, type SdkToolApi } from './claudeTools'
 import { buildPrompt, buildSystemPrompt } from './claudePrompt'
 import type { ExecutionResult, ExecutionStatus, ServerRuntimeProvider, StartContext, StartOutcome } from './types'
 
 /**
- * The provider for the Claude Agent SDK (3B.5.1: the foundation). One `query()` and one SDK session per task.
+ * The provider for the Claude Agent SDK. One `query()` and one SDK session per task.
  *
- * What the model can do in this stage: answer in text. It has no tools at all, so it cannot read, write or run anything.
- * That is enforced in layers, and a failure of any one stops the task instead of running it:
- *  1. `tools: []` removes every built-in tool from the model's context, and `mcpServers: {}` with `strictMcpConfig` leaves no other source.
- *  2. The session's own `init` message must list no tools, no MCP server and the `dontAsk` mode, or the task fails before it starts.
- *  3. `dontAsk` denies anything not pre-approved (nothing is), `canUseTool` and a `PreToolUse` hook deny again, and an assistant
- *     message that asks for a tool ends the task.
+ * What the model can do (3B.5.2): answer in text and use three read-only tools, `vo_read`, `vo_glob` and `vo_grep`, served by
+ * an in-process MCP server over the gated tool handlers (claudeTools.ts). It cannot write or run anything.
  *
- * Where the real gate comes in (3B.5.2 and later): the tool handlers in server/tools/gatedTools.ts call `ctx.tools.use`, so the
- * server's permission engine decides, not the SDK. The SDK is configured so it has nothing else to approve. See
- * docs/milestone-3b5-planning.md section 8 and docs/gated-tools.md.
+ * The server's permission engine is authoritative, not the SDK's. Every tool handler calls `ctx.tools.use`, so the policy,
+ * the permission rules, the approval and the use-time re-check all happen in our process, right before the file operation. The
+ * SDK is configured so it has nothing of its own to decide, and anything unexpected stops the task (fail closed):
+ *  1. `tools: []` removes every built-in tool; `mcpServers` holds only our server and `strictMcpConfig` ignores every other source.
+ *  2. `allowedTools` pre-approves exactly our three tools (the gate decides inside them); `dontAsk` denies everything else.
+ *  3. The session's own `init` message must list exactly those tools, exactly our server, and the `dontAsk` mode, or the task
+ *     fails before it starts.
+ *  4. A `PreToolUse` hook and `canUseTool` deny any tool that is not ours; an assistant message that calls one ends the task.
+ * See docs/milestone-3b5-planning.md section 8.
  *
  * Process: the SDK starts its bundled Claude Code binary as a child process; this file never starts a process itself. The child
- * gets an empty scratch folder as its working directory (never the workspace), a minimal environment (claudeEnv.ts), no settings
- * files, no stored session and no auto memory. Nothing the SDK says is forwarded as is: see claudeMessages.ts.
+ * gets an empty scratch folder as its working directory (never the workspace, which only the gated tools touch), a minimal
+ * environment (claudeEnv.ts), no settings files, no stored session and no auto memory. Nothing the SDK says is forwarded as is:
+ * see claudeMessages.ts.
  *
- * There is no OS-level isolation here. The child runs as the server's user.
+ * There is no OS-level isolation here. The child runs as the server's user; the workspace checks are policy, not a sandbox.
  */
 
 const SDK_PACKAGE = '@anthropic-ai/claude-agent-sdk'
-const NO_TOOLS = 'No tools are available in this session.'
 /** How long the SDK may take to send its first message. */
 const START_TIMEOUT_MS = 30000
 const KEEP_ENDED = 200
+
+/** A PreToolUse input for one of our own tools. Anything else, or anything malformed, is not. */
+function isOurTool(input: unknown): boolean {
+  const name = (input as { tool_name?: unknown } | null)?.tool_name
+  return typeof name === 'string' && MODEL_TOOL_NAMES.includes(name)
+}
 
 /** Whether the SDK package can be found from here. The server starts without it and reports the runtime unavailable. */
 export function isSdkInstalled(): boolean {
@@ -74,15 +83,24 @@ export type ClaudeProviderOptions = {
   startTimeoutMs?: number
   /** The environment PATH is taken from. */
   base?: Record<string, string | undefined>
+  /** Real paths no tool may touch (the data folder). Required by the gated tools. */
+  protectedRoots?: readonly string[]
+  /** How long the SDK waits for one tool call. Must exceed the approval timeout, or the SDK gives up while the gate still waits. */
+  toolTimeoutMs?: number
+  /** Where the SDK's API calls go (a test seam for a local scripted API); null or absent means Anthropic's own endpoint. */
+  apiBaseUrl?: string | null
 }
 
 type Outcome = 'running' | 'completed' | 'failed' | 'cancelled'
 type SessionRecord = { executionId: string; sessionId: string | null; abort: AbortController; session: SessionQuery | null; outcome: Outcome; summary: string; error: string; cancelled: boolean; scratch: string; done: Promise<void> }
 
-async function loadSdkQuery(): Promise<QueryFn> {
+async function loadSdk(): Promise<{ query: QueryFn; api: SdkToolApi }> {
   const sdk = await import('@anthropic-ai/claude-agent-sdk')
-  return sdk.query as unknown as QueryFn
+  return { query: sdk.query as unknown as QueryFn, api: sdk }
 }
+
+/** Passed to the child so the SDK's own approval step has nothing to decide for our tools and denies everything else. */
+const DENY_UNKNOWN_TOOL = 'That tool is not available.'
 
 export class ClaudeAgentRuntimeProvider implements ServerRuntimeProvider {
   readonly kind = 'claude' as const
@@ -94,6 +112,9 @@ export class ClaudeAgentRuntimeProvider implements ServerRuntimeProvider {
   private readonly log: Logger
   private readonly startTimeoutMs: number
   private readonly base: NonNullable<ClaudeProviderOptions['base']>
+  private readonly protectedRoots: readonly string[]
+  private readonly toolTimeoutMs: number
+  private readonly apiBaseUrl: string | null
   private readonly records = new Map<string, SessionRecord>()
   private readonly ended: string[] = []
   private readonly listeners = new Set<(event: RuntimeEvent) => void>()
@@ -106,6 +127,10 @@ export class ClaudeAgentRuntimeProvider implements ServerRuntimeProvider {
     this.log = opts.log ?? silentLogger
     this.startTimeoutMs = opts.startTimeoutMs ?? START_TIMEOUT_MS
     this.base = opts.base ?? process.env
+    this.protectedRoots = opts.protectedRoots ?? []
+    // Without an explicit value, long enough for the default approval timeout (5 minutes) plus a minute.
+    this.toolTimeoutMs = opts.toolTimeoutMs ?? 360000
+    this.apiBaseUrl = opts.apiBaseUrl ?? null
     const reason = claudeUnavailableReason(opts.sdkInstalled ?? (opts.query !== undefined || isSdkInstalled()), this.apiKey !== null)
     this.availability = reason === null ? { available: true } : { available: false, reason }
   }
@@ -123,10 +148,13 @@ export class ClaudeAgentRuntimeProvider implements ServerRuntimeProvider {
     const rec: SessionRecord = { executionId, sessionId: null, abort, session: null, outcome: 'running', summary: '', error: '', cancelled: false, scratch, done: Promise.resolve() }
 
     let run: QueryFn
+    let server: ReturnType<typeof createVoServer>
     try {
       mkdirSync(scratch, { recursive: true, mode: 0o700 })
       mkdirSync(configDir, { recursive: true, mode: 0o700 })
-      run = this.queryFn ?? (await loadSdkQuery())
+      const sdk = await loadSdk()
+      run = this.queryFn ?? sdk.query
+      server = createVoServer(sdk.api, ctx, { protectedRoots: this.protectedRoots, timeoutMs: this.toolTimeoutMs })
     } catch (error) {
       this.log.error(`The Claude runtime could not prepare task ${taskId}`, error)
       rmSync(scratch, { recursive: true, force: true })
@@ -136,14 +164,15 @@ export class ClaudeAgentRuntimeProvider implements ServerRuntimeProvider {
     const options: Options = {
       abortController: abort,
       cwd: scratch,
-      env: buildChildEnv({ apiKey: this.apiKey.reveal(), home: scratch, configDir, base: this.base }),
+      env: buildChildEnv({ apiKey: this.apiKey.reveal(), home: scratch, configDir, base: this.base, apiBaseUrl: this.apiBaseUrl }),
       tools: [],
-      allowedTools: [],
-      mcpServers: {},
+      allowedTools: [...MODEL_TOOL_NAMES],
+      mcpServers: { [VO_SERVER_NAME]: server },
       strictMcpConfig: true,
       permissionMode: 'dontAsk',
-      canUseTool: () => Promise.resolve({ behavior: 'deny', message: NO_TOOLS }),
-      hooks: { PreToolUse: [{ hooks: [() => Promise.resolve({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: NO_TOOLS } })] }] },
+      // Backstop: with dontAsk and exactly these allowed tools nothing should ever reach here.
+      canUseTool: () => Promise.resolve({ behavior: 'deny', message: DENY_UNKNOWN_TOOL }),
+      hooks: { PreToolUse: [{ hooks: [(input) => Promise.resolve(isOurTool(input) ? {} : { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: DENY_UNKNOWN_TOOL } })] }] },
       settingSources: [],
       persistSession: false,
       maxTurns: this.settings.maxTurns,
@@ -184,7 +213,7 @@ export class ClaudeAgentRuntimeProvider implements ServerRuntimeProvider {
 
   /** Reads the session to its end. Everything the task manager hears about the session passes through here. */
   private async consume(taskId: string, rec: SessionRecord, ctx: StartContext, settle: (o: StartOutcome) => void, isReady: () => boolean): Promise<void> {
-    const mapper = createMessageMapper(taskId)
+    const mapper = createMessageMapper(taskId, TOOL_LABELS)
     const session = rec.session!
     const finish = (outcome: Exclude<Outcome, 'running'>, event: RuntimeEvent | null, detail: { summary?: string; error?: string } = {}) => {
       if (rec.outcome !== 'running') return
@@ -202,7 +231,7 @@ export class ClaudeAgentRuntimeProvider implements ServerRuntimeProvider {
         if (rec.cancelled || rec.outcome !== 'running') continue
         const mapped = mapper.map(message)
         if (mapped.init) {
-          const problem = initProblem(message)
+          const problem = initProblem(message, { tools: MODEL_TOOL_NAMES, mcpServers: [VO_SERVER_NAME] })
           if (problem !== null) {
             ctx.audit(`The Claude session was not started: ${problem}`)
             this.log.error(`The Claude session for task ${taskId} did not match the configuration: ${problem}`)

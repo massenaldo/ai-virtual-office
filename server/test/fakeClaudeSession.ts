@@ -32,7 +32,8 @@ export class FakeSession implements SessionQuery {
   }
 }
 
-export const initMessage = (over: Record<string, unknown> = {}) => ({ type: 'system', subtype: 'init', session_id: 'sess-1', tools: [], mcp_servers: [], permissionMode: 'dontAsk', ...over })
+export const OUR_TOOLS = ['mcp__vo__vo_read', 'mcp__vo__vo_glob', 'mcp__vo__vo_grep']
+export const initMessage = (over: Record<string, unknown> = {}) => ({ type: 'system', subtype: 'init', session_id: 'sess-1', tools: OUR_TOOLS, mcp_servers: [{ name: 'vo', status: 'connected', source: 'sdk' }], permissionMode: 'dontAsk', ...over })
 export const textMessage = (text: string) => ({ type: 'assistant', session_id: 'sess-1', message: { role: 'assistant', content: [{ type: 'text', text }] } })
 export const resultMessage = (over: Record<string, unknown> = {}) => ({ type: 'result', subtype: 'success', is_error: false, session_id: 'sess-1', result: 'All done.', total_cost_usd: 0.01, num_turns: 1, ...over })
 

@@ -3,7 +3,7 @@
  * is listed here reaches it: no server token, no cloud credentials, no SSH agent, no inspector flags. The key is passed in
  * by the provider (read once from the server's config) and never taken from `base`.
  */
-export function buildChildEnv(opts: { apiKey: string; home: string; configDir: string; base: Record<string, string | undefined> }): Record<string, string> {
+export function buildChildEnv(opts: { apiKey: string; home: string; configDir: string; base: Record<string, string | undefined>; /** A local scripted API for tests; absent means Anthropic's own endpoint. */ apiBaseUrl?: string | null }): Record<string, string> {
   const env: Record<string, string> = {
     ANTHROPIC_API_KEY: opts.apiKey,
     HOME: opts.home,
@@ -15,5 +15,6 @@ export function buildChildEnv(opts: { apiKey: string; home: string; configDir: s
     CLAUDE_CODE_MAX_RETRIES: '2',
   }
   if (opts.base.PATH !== undefined) env.PATH = opts.base.PATH
+  if (opts.apiBaseUrl) env.ANTHROPIC_BASE_URL = opts.apiBaseUrl
   return env
 }

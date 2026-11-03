@@ -49,7 +49,7 @@ export type TaskManagerOptions = {
   policy: ToolPolicy
   /** The permission rules: they decide, together with the policy, what each tool request gets. */
   permissions: PermissionStore
-  config: Pick<ServerConfig, 'taskTimeoutMs' | 'cancelGraceMs' | 'approvalTimeoutMs' | 'maxMessageBytes' | 'maxTaskOutputBytes' | 'workspaceRoot' | 'workspaces'> & { dataDir?: string }
+  config: Pick<ServerConfig, 'taskTimeoutMs' | 'cancelGraceMs' | 'approvalTimeoutMs' | 'maxMessageBytes' | 'maxTaskOutputBytes' | 'workspaceRoot' | 'workspaces'> & { dataDir?: string; /** Claude runtime only: how many tasks may run at once. Absent means no limit. */ maxConcurrentTasks?: number }
   now: () => string
   log: Logger
   /** Audit seam: called for each lifecycle step the manager takes. */
@@ -146,6 +146,9 @@ export class TaskManager {
     }
     if (this.provider.kind === 'claude' && workspace === null) return { ok: false, code: 'invalid', error: 'The claude runtime needs a workspace.' }
     if (activeTaskFor(this.state, agentId)) return { ok: false, code: 'conflict', error: `${agent.name} already has an active task.` }
+    // Each claude task is a child process and a paid model session, so they are counted; the mock is not.
+    const limit = this.config.maxConcurrentTasks
+    if (this.provider.kind === 'claude' && limit !== undefined && this.runs.size >= limit) return { ok: false, code: 'conflict', error: `${limit === 1 ? 'A Claude task is' : `${limit} Claude tasks are`} already running, which is the limit. Wait for one to finish.` }
 
     const assigned = assignTask(this.state, agentId, input, this.now(), { runtime: this.provider.kind, timeoutMs: this.config.taskTimeoutMs, workspaceId: workspace?.id ?? null })
     if (!assigned.ok) return { ok: false, code: 'invalid', error: assigned.error }

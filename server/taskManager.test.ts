@@ -441,6 +441,35 @@ describe('workspaces at task start', () => {
     expect(m.startTask(FORGE, INPUT)).toEqual({ ok: false, code: 'invalid', error: 'The claude runtime needs a workspace.' })
   })
 
+  it('limits how many claude tasks run at once, frees the slot when one ends, and never limits the mock', async () => {
+    const claude = new FakeProvider({ kind: 'claude' })
+    const m = make(claude, { ...wsConfig(), maxConcurrentTasks: 1 } as never)
+    const first = m.startTask(FORGE, INPUT, { workspaceId: 'sandbox' })
+    expect(first.ok).toBe(true)
+    await tick()
+    expect(m.startTask('agent-demo-pm', INPUT, { workspaceId: 'sandbox' })).toEqual({ ok: false, code: 'conflict', error: 'A Claude task is already running, which is the limit. Wait for one to finish.' })
+    expect(store.state.tasks).toHaveLength(1)
+    if (first.ok) m.cancelTask(first.task.id)
+    claude.confirmCancel = true
+    await tick()
+    claude.emit({ type: 'cancelled', taskId: first.ok ? first.task.id : '' })
+    await tick()
+    expect(m.startTask('agent-demo-pm', INPUT, { workspaceId: 'sandbox' }).ok).toBe(true)
+  })
+
+  it('words the limit for several tasks, and applies none to the mock runtime', () => {
+    const claude = make(new FakeProvider({ kind: 'claude' }), { ...wsConfig(), maxConcurrentTasks: 2 } as never)
+    expect(claude.startTask(FORGE, INPUT, { workspaceId: 'sandbox' }).ok).toBe(true)
+    expect(claude.startTask('agent-demo-pm', INPUT, { workspaceId: 'sandbox' }).ok).toBe(true)
+    expect(claude.startTask('agent-demo-frontend', INPUT, { workspaceId: 'sandbox' })).toEqual({ ok: false, code: 'conflict', error: '2 Claude tasks are already running, which is the limit. Wait for one to finish.' })
+  })
+
+  it('does not count mock tasks against the limit', () => {
+    const m = make(mock(), { maxConcurrentTasks: 1 } as never)
+    expect(m.startTask(FORGE, INPUT).ok).toBe(true)
+    expect(m.startTask('agent-demo-pm', INPUT).ok).toBe(true)
+  })
+
   it('reports the actor from the request id', () => {
     const events: Array<Record<string, unknown>> = []
     const m = make(new FakeProvider(), {}, (e) => events.push(e as Record<string, unknown>))

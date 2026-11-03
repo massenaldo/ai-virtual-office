@@ -222,11 +222,15 @@ describe('shortDigest', () => {
 
 
 describe('allowedScopes', () => {
-  it('offers every scope for file tools', () => {
-    for (const tool of ['Read', 'Write', 'Edit', 'Glob', 'Grep']) expect(allowedScopes(tool)).toEqual(['once', 'task', 'agent'])
+  const DIGEST = 'ab'.repeat(32)
+  it('offers every scope for file tools with a real action', () => {
+    for (const tool of ['Read', 'Write', 'Edit', 'Glob', 'Grep']) expect(allowedScopes(tool, DIGEST)).toEqual(['once', 'task', 'agent'])
   })
   it('offers Once only for execute and network tools', () => {
-    for (const tool of ['Bash', 'WebFetch', 'WebSearch']) expect(allowedScopes(tool)).toEqual(['once'])
+    for (const tool of ['Bash', 'WebFetch', 'WebSearch']) expect(allowedScopes(tool, DIGEST)).toEqual(['once'])
+  })
+  it('offers Once only when the approval has no digest (a simulated request)', () => {
+    expect(allowedScopes('Write', null)).toEqual(['once'])
   })
 })
 

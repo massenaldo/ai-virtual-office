@@ -51,6 +51,12 @@ describe('AgentDetail approval card', () => {
     expect(reject).not.toContain('disabled')
   })
 
+  it('offers Once only for a simulated approval with no digest', () => {
+    const h = view(waiting('Write', null), loaded())
+    expect(h.match(/type="radio"/g)).toHaveLength(1)
+    expect(h).toContain('A simulated request can only be allowed once')
+  })
+
   it('does not hold Allow back when there is no review to open', () => {
     const h = view(waiting('Bash', null), loaded())
     expect(h.split('<button').find((b) => b.includes('</svg> Allow</button>'))).not.toContain('disabled')

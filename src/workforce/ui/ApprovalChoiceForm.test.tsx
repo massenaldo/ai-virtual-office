@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import ApprovalChoiceForm, { type ApprovalChoiceFormProps } from './ApprovalChoiceForm'
 
-const props = (over: Partial<ApprovalChoiceFormProps> = {}): ApprovalChoiceFormProps => ({ approvalId: 'ap1', tool: 'Write', agentName: 'Nova', scope: 'once', onScope: () => {}, canAllow: true, busy: false, onAllow: () => {}, onReject: () => {}, ...over })
+const props = (over: Partial<ApprovalChoiceFormProps> = {}): ApprovalChoiceFormProps => ({ approvalId: 'ap1', tool: 'Write', digest: 'ab'.repeat(32), agentName: 'Nova', scope: 'once', onScope: () => {}, canAllow: true, busy: false, onAllow: () => {}, onReject: () => {}, ...over })
 const html = (over?: Partial<ApprovalChoiceFormProps>) => renderToStaticMarkup(<ApprovalChoiceForm {...props(over)}/>)
 const button = (h: string, label: string) => h.split('<button').find((b) => b.includes(`</svg> ${label}</button>`)) ?? ''
 
@@ -21,6 +21,12 @@ describe('ApprovalChoiceForm', () => {
     const h = html({ tool })
     expect(h.match(/type="radio"/g)).toHaveLength(1)
     expect(h).toContain('can only be allowed once')
+  })
+
+  it('offers Once only for a simulated approval (no digest), whatever the tool', () => {
+    const h = html({ digest: null })
+    expect(h.match(/type="radio"/g)).toHaveLength(1)
+    expect(h).toContain('A simulated request can only be allowed once')
   })
 
   it('a leftover choice that the tool does not allow falls back to Once', () => {

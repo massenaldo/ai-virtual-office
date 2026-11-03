@@ -176,8 +176,11 @@ export function formatReviewLines(text: string): ReviewLine[] {
 /** Approve is available only after the full change has been opened; with no review (a simulated approval, Bash) it always is. */
 export const approveEnabled = (review: unknown, opened: boolean): boolean => review === null || opened
 
-/** The scopes a person may give an allow for a tool. Execute and network tools are Once only; the server refuses anything broader. */
-export const allowedScopes = (tool: string): Array<'once' | 'task' | 'agent'> => ['Bash', 'WebFetch', 'WebSearch'].includes(tool) ? ['once'] : ['once', 'task', 'agent']
+/**
+ * The scopes a person may give an allow for an approval. Execute and network tools are Once only, and so is an approval without a
+ * digest (a simulated one: there is no exact action to grant from); the server refuses anything broader in both cases.
+ */
+export const allowedScopes = (tool: string, digest: string | null): Array<'once' | 'task' | 'agent'> => digest === null || ['Bash', 'WebFetch', 'WebSearch'].includes(tool) ? ['once'] : ['once', 'task', 'agent']
 
 export type PermissionIcon = 'allowed' | 'denied' | 'ask' | 'expired' | 'revoked' | 'used' | 'ended'
 /** The word and icon shown for a rule; colour only adds to them. */

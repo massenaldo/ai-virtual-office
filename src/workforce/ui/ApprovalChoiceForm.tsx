@@ -8,6 +8,8 @@ const LABEL: Record<Scope, string> = { once: 'Once', task: 'This task', agent: '
 export type ApprovalChoiceFormProps = {
   approvalId: string
   tool: string
+  /** The pending approval's action digest; null for a simulated approval. */
+  digest: string | null
   agentName: string
   scope: Scope
   onScope(scope: Scope): void
@@ -19,8 +21,8 @@ export type ApprovalChoiceFormProps = {
 }
 
 /** The backend's way to answer an approval: how far the allow reaches, then Allow or Reject. The server checks the digest, the scope and the tool's ceiling again. */
-export default function ApprovalChoiceForm({ approvalId, tool, agentName, scope, onScope, canAllow, busy, onAllow, onReject }: ApprovalChoiceFormProps) {
-  const scopes = allowedScopes(tool)
+export default function ApprovalChoiceForm({ approvalId, tool, digest, agentName, scope, onScope, canAllow, busy, onAllow, onReject }: ApprovalChoiceFormProps) {
+  const scopes = allowedScopes(tool, digest)
   // A stale choice (from an earlier approval of a broader tool) never shows as selected.
   const chosen: Scope = scopes.includes(scope) ? scope : 'once'
   return <>
@@ -31,7 +33,7 @@ export default function ApprovalChoiceForm({ approvalId, tool, agentName, scope,
         <span>{LABEL[s]}</span>
       </label>)}
     </fieldset>
-    {scopes.length === 1 && <small className="panel-hint">{tool} can only be allowed once; the server refuses anything broader.</small>}
+    {scopes.length === 1 && <small className="panel-hint">{digest === null ? 'A simulated request' : tool} can only be allowed once; the server refuses anything broader.</small>}
     <p className="scope-sentence" role="status">{scopeSentence(chosen, tool, agentName)}</p>
     <div className="panel-actions">
       <button type="button" className="panel-button primary" disabled={busy || !canAllow} onClick={onAllow}><Check size={13}/> Allow</button>

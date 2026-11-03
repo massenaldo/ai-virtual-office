@@ -1,6 +1,7 @@
 import { DEPARTMENTS } from '../layout/catalog'
 import type { OfficeLayout } from '../layout/types'
 import type { DeskMarker } from '../scene/labels'
+import type { PermissionRuleView } from './api'
 import type { ConnectionStatus, RuntimeEnvironment, WorkforceSnapshot } from './controller'
 import { activeTaskFor, agentAtDesk } from './operations'
 import type { Preserved, WorkforceLoadProblem } from './storage'
@@ -176,3 +177,36 @@ export const approveEnabled = (review: unknown, opened: boolean): boolean => rev
 
 /** The scopes a person may give an allow for a tool. Execute and network tools are Once only; the server refuses anything broader. */
 export const allowedScopes = (tool: string): Array<'once' | 'task' | 'agent'> => ['Bash', 'WebFetch', 'WebSearch'].includes(tool) ? ['once'] : ['once', 'task', 'agent']
+
+export type PermissionIcon = 'allowed' | 'denied' | 'ask' | 'expired' | 'revoked' | 'used' | 'ended'
+/** The word and icon shown for a rule; colour only adds to them. */
+export function permissionStateText(rule: PermissionRuleView): { label: string; icon: PermissionIcon } {
+  if (rule.state === 'active') return rule.effect === 'allow' ? { label: 'Allowed', icon: 'allowed' } : rule.effect === 'deny' ? { label: 'Denied', icon: 'denied' } : { label: 'Approval required', icon: 'ask' }
+  return { label: { expired: 'Expired', revoked: 'Revoked', used: 'Used', ended: 'Ended' }[rule.state], icon: rule.state }
+}
+
+export const PERMISSION_SCOPE_LABEL: Record<PermissionRuleView['scope'], string> = { global: 'All agents', agent: 'One agent', task: 'One task', once: 'One use' }
+
+/** The Global tab shows global rules; an agent's tab shows every rule that names that agent (agent, task and once). */
+export const rulesForTab = (rules: PermissionRuleView[], tab: string): PermissionRuleView[] => rules.filter((r) => (tab === 'global' ? r.scope === 'global' : r.agentId === tab))
+
+export function revokePrompt(rule: PermissionRuleView, agentName: string | null): { title: string; message: string } {
+  const covered = `${rule.effect === 'allow' ? 'Allow' : rule.effect === 'deny' ? 'Deny' : 'Ask'} ${rule.tool}${rule.pathPattern ? ` on ${rule.pathPattern}` : ''}`
+  const lines = [`${covered}. Calls this rule covered are decided by the remaining rules; if none matches, they are denied.`]
+  if (rule.createdBy === 'default') lines.push('This is a built-in default rule.')
+  if (rule.scope === 'task' || rule.scope === 'once') lines.push('A call this rule allowed that is still running is stopped.')
+  return { title: `Revoke ${rule.tool}${agentName ? ` for ${agentName}` : ''}?`, message: lines.join(' ') }
+}
+
+export const revokeAgentPrompt = (agentName: string, count: number): { title: string; message: string } => ({
+  title: `Revoke all permissions for ${agentName}?`,
+  message: `This revokes ${count} active ${count === 1 ? 'rule' : 'rules'} for ${agentName}, including grants for tasks that are running. Global rules stay.`,
+})
+
+/** Tasks that are waiting for a person's decision, with the agent they belong to. */
+export function waitingApprovals(s: WorkforceState): Array<{ agentId: string; agentName: string; taskId: string; tool: string; summary: string }> {
+  return s.tasks.flatMap((t) => {
+    const agent = s.agents.find((a) => a.id === t.agentId)
+    return t.status === 'waiting_for_approval' && t.pendingApproval && agent ? [{ agentId: agent.id, agentName: agent.name, taskId: t.id, tool: t.pendingApproval.tool, summary: t.pendingApproval.summary }] : []
+  })
+}

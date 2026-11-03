@@ -3,8 +3,9 @@ import css from '../styles.css?raw'
 import { createDefaultLayout } from '../layout/defaultLayout'
 import type { OfficeLayout } from '../layout/types'
 import { createDemoWorkforce } from './demo'
+import type { PermissionRuleView } from './api'
 import { addActivity, assignTask, cancelTask } from './operations'
-import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskClickTarget, deskMarkers, shortDigest, environmentBadge, environmentNote, connectionLabel, agentStatusText, workforceNotice, TASK_RUNTIME_LABEL, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, allowedScopes, removalPrompt, TASK_STATUS_LABEL } from './view'
+import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskClickTarget, deskMarkers, shortDigest, environmentBadge, environmentNote, connectionLabel, agentStatusText, workforceNotice, TASK_RUNTIME_LABEL, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, allowedScopes, permissionStateText, rulesForTab, revokePrompt, revokeAgentPrompt, waitingApprovals, removalPrompt, TASK_STATUS_LABEL } from './view'
 
 const NOW = '2026-10-30T09:00:00.000Z'
 const layout = createDefaultLayout()
@@ -226,5 +227,59 @@ describe('allowedScopes', () => {
   })
   it('offers Once only for execute and network tools', () => {
     for (const tool of ['Bash', 'WebFetch', 'WebSearch']) expect(allowedScopes(tool)).toEqual(['once'])
+  })
+})
+
+const prule = (over: Partial<PermissionRuleView> = {}): PermissionRuleView => ({ id: 'p1', scope: 'global', effect: 'allow', tool: 'Read', agentId: null, taskId: null, pathPattern: null, createdAt: NOW, createdBy: 'user', expiresAt: null, revokedAt: null, usedAt: null, endedAt: null, reason: null, state: 'active', ...over })
+
+describe('permissionStateText', () => {
+  it('names an active rule by its effect, with a word and an icon', () => {
+    expect(permissionStateText(prule({ effect: 'allow' }))).toEqual({ label: 'Allowed', icon: 'allowed' })
+    expect(permissionStateText(prule({ effect: 'deny' }))).toEqual({ label: 'Denied', icon: 'denied' })
+    expect(permissionStateText(prule({ effect: 'ask' }))).toEqual({ label: 'Approval required', icon: 'ask' })
+  })
+  it('names an inactive rule by how it ended, whatever its effect', () => {
+    for (const state of ['expired', 'revoked', 'used', 'ended'] as const) expect(permissionStateText(prule({ state, effect: 'deny' }))).toEqual({ label: { expired: 'Expired', revoked: 'Revoked', used: 'Used', ended: 'Ended' }[state], icon: state })
+  })
+})
+
+describe('rulesForTab', () => {
+  const rules = [prule({ id: 'g' }), prule({ id: 'a1', scope: 'agent', agentId: 'ag1' }), prule({ id: 't1', scope: 'task', agentId: 'ag1', taskId: 'tk' }), prule({ id: 'a2', scope: 'agent', agentId: 'ag2' })]
+  it('the global tab lists global rules only', () => expect(rulesForTab(rules, 'global').map((r) => r.id)).toEqual(['g']))
+  it('an agent tab lists every rule of that agent, whatever its scope', () => expect(rulesForTab(rules, 'ag1').map((r) => r.id)).toEqual(['a1', 't1']))
+  it('an unknown agent has none', () => expect(rulesForTab(rules, 'nobody')).toEqual([]))
+})
+
+describe('revokePrompt', () => {
+  it('names the tool and what the rule covered', () => {
+    const p = revokePrompt(prule({ scope: 'agent', tool: 'Write', pathPattern: 'src/**', agentId: 'ag1' }), 'Nova')
+    expect(p.title).toBe('Revoke Write for Nova?')
+    expect(p.message).toContain('src/**')
+    expect(p.message).toContain('denied')
+  })
+  it('says a built-in default can be revoked and what follows', () => {
+    expect(revokePrompt(prule({ createdBy: 'default' }), null).message).toContain('built-in')
+  })
+  it('warns that a task or once rule also stops a call that is running', () => {
+    expect(revokePrompt(prule({ scope: 'task', taskId: 'tk', agentId: 'ag1' }), 'Nova').message).toContain('running')
+    expect(revokePrompt(prule({ scope: 'global' }), null).message).not.toContain('running')
+  })
+})
+
+describe('revokeAgentPrompt', () => {
+  it('counts the rules', () => {
+    expect(revokeAgentPrompt('Nova', 1)).toEqual({ title: 'Revoke all permissions for Nova?', message: 'This revokes 1 active rule for Nova, including grants for tasks that are running. Global rules stay.' })
+    expect(revokeAgentPrompt('Nova', 3).message).toContain('3 active rules')
+  })
+})
+
+describe('waitingApprovals', () => {
+  it('lists tasks that wait for a decision, with their agent', () => {
+    const s = structuredClone(demo)
+    const t = { ...s.tasks[0] ?? ({} as never) }
+    const agent = s.agents[0]
+    const waiting = { ...t, id: 'tk-w', agentId: agent.id, status: 'waiting_for_approval' as const, pendingApproval: { id: 'ap', tool: 'Write', summary: 'Write src/a.ts', requestedAt: NOW, digest: null, review: null } }
+    expect(waitingApprovals({ ...s, tasks: [waiting] })).toEqual([{ agentId: agent.id, agentName: agent.name, taskId: 'tk-w', tool: 'Write', summary: 'Write src/a.ts' }])
+    expect(waitingApprovals({ ...s, tasks: [{ ...waiting, status: 'running', pendingApproval: null }] })).toEqual([])
   })
 })

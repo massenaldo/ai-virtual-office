@@ -169,3 +169,20 @@ textarea.field-input{resize:vertical;min-height:54px;font-family:inherit}
 .ws-trail{color:#e5b878;background:#3a3025}
 .ws-cr{color:#c5baff}
 .review-flag{margin:6px 0 0;font-size:10px;color:#f1d6a6}
+.permission-tabs{display:flex;gap:4px;flex-wrap:wrap;margin:4px 0 8px}
+.permission-tab{background:#141c27;border:1px solid #29323e;border-radius:5px;color:#aab4c3;font-size:10px;padding:3px 8px}
+.permission-tab.selected{background:#29253e;border-color:#6b5fc9;color:#e9edf4;font-weight:700}
+.permission-tab:focus-visible,.panel-link:focus-visible{outline:2px solid #a89af5;outline-offset:2px}
+.permission-list{list-style:none;margin:0 0 8px;padding:0;display:flex;flex-direction:column;gap:6px}
+.permission-row{background:#141c27;border:1px solid #29323e;border-left-width:3px;border-radius:6px;padding:7px 9px}
+.permission-row.allow{border-left-color:#4f9c72}
+.permission-row.deny{border-left-color:#c85a5a}
+.permission-row.ask{border-left-color:#c9a255}
+.permission-row.inactive{opacity:.8;border-left-color:#4a5463}
+.permission-row-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.permission-row-head strong{color:#e9edf4;font-size:11px;overflow-wrap:anywhere}
+.permission-state{display:inline-flex;align-items:center;gap:4px}
+.permission-facts{margin:6px 0;display:grid;gap:2px}
+.permission-facts div{display:flex;gap:6px;font-size:10px;line-height:1.4}
+.permission-facts dt{color:#8e9bad;min-width:48px}
+.permission-facts dd{margin:0;color:#c3ccd9;overflow-wrap:anywhere}

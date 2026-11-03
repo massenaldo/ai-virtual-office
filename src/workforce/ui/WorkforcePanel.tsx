@@ -1,4 +1,5 @@
 import type { DialogRequest } from '../../editor/useEditorActions'
+import { ArrowLeft, Shield } from 'lucide-react'
 import type { OfficeLayout } from '../../layout/types'
 import type { Workforce } from '../useWorkforce'
 import { connectionLabel, deskLabel, environmentBadge, environmentNote, removalPrompt } from '../view'
@@ -7,8 +8,9 @@ import AgentForm from './AgentForm'
 import AgentList from './AgentList'
 import AssignDesk from './AssignDesk'
 import PairingForm from './PairingForm'
+import PermissionsPanel from './PermissionsPanel'
 
-export type WorkforceView = { kind: 'list' } | { kind: 'create' } | { kind: 'detail' | 'edit'; agentId: string } | { kind: 'assign'; deskId: string }
+export type WorkforceView = { kind: 'list' } | { kind: 'create' } | { kind: 'detail' | 'edit'; agentId: string } | { kind: 'assign'; deskId: string } | { kind: 'permissions'; tab: string }
 
 export type WorkforcePanelProps = { workforce: Workforce | null; layout: OfficeLayout; view: WorkforceView; onViewChange(v: WorkforceView): void; onFocusDesk(deskId: string): void; openDialog(d: DialogRequest): void }
 
@@ -35,7 +37,7 @@ export default function WorkforcePanel({ workforce, layout, view, onViewChange: 
   const agent = agentId ? state.agents.find((a) => a.id === agentId) : undefined
   const assignDesk = view.kind === 'assign' ? layout.furniture.find((f) => f.id === view.deskId && f.type === 'desk') : undefined
   // A removed agent or a desk that left the layout falls back to the list.
-  const shown: WorkforceView = (agentId && !agent) || (view.kind === 'assign' && !assignDesk) ? { kind: 'list' } : view
+  const shown: WorkforceView = (agentId && !agent) || (view.kind === 'assign' && !assignDesk) ? { kind: 'list' } : view.kind === 'permissions' && view.tab !== 'global' && !state.agents.some((a) => a.id === view.tab) ? { kind: 'permissions', tab: 'global' } : view
   const list = () => setView({ kind: 'list' })
 
   const remove = (id: string) => {
@@ -50,6 +52,13 @@ export default function WorkforcePanel({ workforce, layout, view, onViewChange: 
     {!pairing && workforce.connectionError && workforce.connection === 'offline' && <p className="form-error" role="alert">{workforce.connectionError}</p>}
     {pairing && <PairingForm onPair={pairing} note={workforce.pairingNote}/>}
     {waiting && !pairing && <p className="panel-hint">{workforce.connection === 'misconfigured' ? 'The backend address is not configured.' : 'Waiting for the local backend…'}</p>}
+    {!waiting && !pairing && shown.kind === 'list' && <button className="panel-link" onClick={() => setView({ kind: 'permissions', tab: 'global' })}><Shield size={13}/> Permissions{workforce.permissions ? ` (${workforce.permissions.active.length} active)` : ''}</button>}
+    {!waiting && !pairing && shown.kind === 'permissions' && (workforce.permissions
+      ? <PermissionsPanel state={state} permissions={workforce.permissions} tab={shown.tab} onTab={(tab) => setView({ kind: 'permissions', tab })} onBack={list} onOpenAgent={(id) => setView({ kind: 'detail', agentId: id })} actions={actions} openDialog={openDialog}/>
+      : <>
+        <button className="panel-link" onClick={list}><ArrowLeft size={13}/> All agents</button>
+        <p className="panel-hint">Permissions are managed by the local backend. This browser-only demo has no permission rules; start the app with npm run dev:full to see them.</p>
+      </>)}
     {!waiting && !pairing && shown.kind === 'list' && <AgentList state={state} layout={layout} onOpen={(id) => setView({ kind: 'detail', agentId: id })} onCreate={() => setView({ kind: 'create' })} onRestoreDemo={actions.restoreDemoAgents}/>}
     {!pairing && shown.kind === 'create' && <>
       <div className="field-group-label">New agent</div>

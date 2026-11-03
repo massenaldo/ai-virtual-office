@@ -29,7 +29,6 @@ describe('password check', () => {
   it.each([
     ['wrong password', basic('u', 'nope')],
     ['empty password', basic('u', '')],
-    ['missing header', undefined],
     ['empty header', ''],
     ['bearer scheme', `Bearer ${PASSWORD}`],
     ['raw password', PASSWORD],
@@ -43,7 +42,7 @@ describe('password check', () => {
   it('locks out after 8 failures, even for the right password, and lifts after lockoutMs', () => {
     const { check, advance } = setup()
     for (let i = 0; i < 7; i++) expect(check(basic('u', 'bad'))).toEqual({ ok: false, status: 401 })
-    expect(check(basic('u', 'bad'))).toEqual({ ok: false, status: 401 })
+    expect(check(basic('u', 'bad'))).toEqual({ ok: false, status: 401, justLocked: true })
     const locked = check(basic('u', PASSWORD))
     expect(locked).toEqual({ ok: false, status: 429, retryAfterS: 300 })
     advance(120_000)
@@ -66,10 +65,30 @@ describe('password check', () => {
     expect(check(basic('u', PASSWORD))).toEqual({ ok: true })
   })
 
+  it('answers a header-less request with 401 but never counts it', () => {
+    const { check } = setup()
+    for (let i = 0; i < 20; i++) expect(check(undefined)).toEqual({ ok: false, status: 401 })
+    expect(check(basic('u', PASSWORD))).toEqual({ ok: true })
+  })
+
+  it('counts wrong passwords around header-less requests', () => {
+    const { check } = setup()
+    for (let i = 0; i < 7; i++) check(basic('u', 'bad'))
+    for (let i = 0; i < 20; i++) check(undefined)
+    expect(check(basic('u', 'bad'))).toEqual({ ok: false, status: 401, justLocked: true })
+    expect(check(basic('u', PASSWORD))).toMatchObject({ status: 429 })
+  })
+
+  it('answers a header-less request 429 during a lockout', () => {
+    const { check } = setup({ failureLimit: 1 })
+    check(basic('u', 'bad'))
+    expect(check(undefined)).toMatchObject({ ok: false, status: 429 })
+  })
+
   it('counts a malformed header as a failure', () => {
     const { check } = setup({ failureLimit: 2 })
     check('garbage')
-    check(undefined)
+    check('')
     expect(check(basic('u', PASSWORD))).toMatchObject({ ok: false, status: 429 })
   })
 

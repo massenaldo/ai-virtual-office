@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createServer, type Server } from 'node:http'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { recordingLogger } from '../log'
 import { startGateway } from './gateway'
@@ -92,5 +93,71 @@ describe('gateway', () => {
     expect(logged).not.toContain(PASSWORD)
     expect(logged).not.toContain('wrong-password-xyz')
     expect(logged).not.toContain(Buffer.from(`u:${PASSWORD}`).toString('base64'))
+  })
+
+  it('logs every new lock, not only the first', async () => {
+    const before = log.lines.filter((l) => l.includes('Too many wrong passwords')).length
+    for (let round = 0; round < 2; round++) {
+      for (let i = 0; i < 8; i++) await get('/', auth('wrong-password-xyz'))
+      expect((await get('/', auth())).status).toBe(429)
+      clock += 300_000
+    }
+    expect(log.lines.filter((l) => l.includes('Too many wrong passwords')).length - before).toBe(2)
+  })
+
+  it('does not lock out on header-less requests', async () => {
+    for (let i = 0; i < 20; i++) expect((await get('/')).status).toBe(401)
+    expect((await get('/', auth())).status).toBe(200)
+  })
+})
+
+describe('gateway security headers', () => {
+  let stub: Server
+  let g: Awaited<ReturnType<typeof startGateway>>
+  const expectHeaders = (res: Response, label: string) => {
+    expect(res.headers.get('x-frame-options'), label).toBe('DENY')
+    expect(res.headers.get('content-security-policy'), label).toBe("frame-ancestors 'none'")
+    expect(res.headers.get('referrer-policy'), label).toBe('no-referrer')
+  }
+
+  beforeEach(async () => {
+    stub = createServer((req, res) => {
+      // A backend that tries to loosen them must not win.
+      const loosen = { 'x-frame-options': 'SAMEORIGIN', 'content-security-policy': 'frame-ancestors *', 'referrer-policy': 'unsafe-url' }
+      if (req.url === '/api/events') {
+        res.writeHead(200, { ...loosen, 'content-type': 'text/event-stream' })
+        res.write(': hi\n\n')
+        return
+      }
+      res.writeHead(200, { ...loosen, 'content-type': 'application/json' })
+      res.end('{}')
+    })
+    await new Promise<void>((r) => stub.listen(0, '127.0.0.1', r))
+    const port = (stub.address() as import('node:net').AddressInfo).port
+    g = await startGateway({ password: PASSWORD, staticDir: dir, backend: { host: '127.0.0.1', port }, readToken: () => 'tok', log, host: '127.0.0.1', port: 0 })
+  })
+
+  afterEach(async () => {
+    await g.close()
+    stub.closeAllConnections()
+    await new Promise<void>((r) => stub.close(() => r()))
+  })
+
+  const call = (path: string, headers: Record<string, string> = {}, method = 'GET') => fetch(`${g.url}${path}`, { method, headers })
+
+  it('sets them on every kind of response', async () => {
+    const api = { ...auth(), 'sec-fetch-site': 'same-origin' }
+    expectHeaders(await call('/'), '401')
+    expectHeaders(await call('/', auth()), 'static')
+    expectHeaders(await call('/nope.txt', auth()), 'static 404')
+    expectHeaders(await call('/', auth(), 'POST'), '405')
+    expectHeaders(await call('/apiX', api), 'api variant 404')
+    const proxied = await call('/api/state', api)
+    expect(proxied.status).toBe(200)
+    expectHeaders(proxied, 'proxied api')
+    const sse = await call('/api/events', api)
+    expect(sse.headers.get('content-type')).toContain('text/event-stream')
+    expectHeaders(sse, 'event stream')
+    await sse.body?.cancel()
   })
 })

@@ -3,7 +3,7 @@ import { createHash, timingSafeEqual } from 'node:crypto'
 // The gateway's only credential. HTTP Basic carries it on every request, so the check is cheap and constant-time, and
 // failures are throttled globally (not per address: behind the published port every client looks alike).
 
-export type PasswordResult = { ok: true } | { ok: false; status: 401 | 429; retryAfterS?: number }
+export type PasswordResult = { ok: true } | { ok: false; status: 401 | 429; retryAfterS?: number; justLocked?: true }
 
 export type PasswordCheckOptions = { password: string; now?: () => number; failureLimit?: number; windowMs?: number; lockoutMs?: number }
 
@@ -32,6 +32,8 @@ export function createPasswordCheck(opts: PasswordCheckOptions): { check(authori
       const t = now()
       // During a lockout nothing is compared, so a right password cannot be confirmed by guessing, and the lock is not extended.
       if (t < lockedUntil) return { ok: false, status: 429, retryAfterS: Math.ceil((lockedUntil - t) / 1000) }
+      // No Authorization header tests no password (first visits, link previews, scanners): challenge, but do not count it.
+      if (header === undefined) return { ok: false, status: 401 }
       const given = basicPassword(header)
       // Always hash and compare, so a malformed header takes about as long as a wrong password.
       if (timingSafeEqual(digest(given ?? ''), expected) && given !== null) return { ok: true }
@@ -40,6 +42,7 @@ export function createPasswordCheck(opts: PasswordCheckOptions): { check(authori
       if (failures.length >= failureLimit) {
         failures = []
         lockedUntil = t + lockoutMs
+        return { ok: false, status: 401, justLocked: true }
       }
       return { ok: false, status: 401 }
     },

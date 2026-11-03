@@ -53,6 +53,8 @@ export function createApiProxy(opts: ApiProxyOptions): (req: IncomingMessage, re
       const out: Record<string, string | string[]> = {}
       for (const [name, value] of Object.entries(up.headers)) if (value !== undefined && !HOP_BY_HOP.has(name) && !name.startsWith('access-control-')) out[name] = value
       out['cache-control'] = 'no-store'
+      // The gateway's own framing and referrer headers (set before this) must survive whatever the backend sends.
+      for (const name of ['x-frame-options', 'content-security-policy', 'referrer-policy']) delete out[name]
       const streaming = String(up.headers['content-type'] ?? '').startsWith('text/event-stream')
       if (streaming) out['x-accel-buffering'] = 'no'
       res.writeHead(up.statusCode ?? 502, out)

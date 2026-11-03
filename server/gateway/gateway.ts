@@ -31,21 +31,22 @@ export function createGateway(opts: GatewayOptions): { handler(req: IncomingMess
   const passwords = createPasswordCheck({ password: opts.password, now: opts.now })
   const serveStatic = createStaticHandler({ root: opts.staticDir })
   const proxy = createApiProxy({ backend: opts.backend, readToken: opts.readToken, log })
-  let locked = false
 
   return {
     handler(req, res) {
       res.setHeader('cache-control', 'no-store')
+      // Never framed (clickjacking against cached Basic credentials) and never leaking the address in a Referer.
+      res.setHeader('x-frame-options', 'DENY')
+      res.setHeader('content-security-policy', "frame-ancestors 'none'")
+      res.setHeader('referrer-policy', 'no-referrer')
       const verdict = passwords.check(req.headers.authorization)
       if (!verdict.ok) {
+        if (verdict.justLocked) log.warn('Too many wrong passwords; refusing all attempts for a while.')
         if (verdict.status === 429) {
-          if (!locked) log.warn('Too many wrong passwords; refusing all attempts for a while.')
-          locked = true
           return sendJson(res, 429, 'Too many attempts. Try again later.', { 'retry-after': String(verdict.retryAfterS ?? 300) })
         }
         return sendJson(res, 401, 'A password is required.', { 'www-authenticate': WWW_AUTHENTICATE })
       }
-      locked = false
       const url = req.url ?? '/'
       // Anything that reads as the API, plain or not, goes to the proxy, which refuses the variants itself.
       if (classifyPath(url) !== 'other') return proxy(req, res)

@@ -35,14 +35,14 @@ To use the backend with a separately started frontend, run `npm run server`, the
 `npm run start:public` starts the backend and a small password gateway in one process. The gateway serves the built app and forwards `/api/*` (including the live event stream) to the backend, so the whole app is reachable through one address.
 
 1. Build once: `npm run build:public`. It builds the app to call the same-origin `/api` (`VITE_WORKFORCE_API_URL=/`), and writes `dist/`.
-2. Pick a password of at least 12 characters. Do not put it in a file you commit.
+2. Choose a password of at least 12 characters, for example `openssl rand -base64 24`. Put it in a file, not on the command line (a command line lands in your shell history): add the line `VO_PASSWORD=<the password>` to `.env` in the project root (it is gitignored), then run `chmod 600 .env`.
 3. Run it inside tmux, so it keeps running when you close the terminal:
    ```bash
    tmux new -s vo
-   VO_PASSWORD='your-long-password' npm run start:public
+   npm run start:public
    ```
-   Detach with Ctrl-b d. Come back with `tmux attach -t vo`.
-4. In the InstaBox dashboard, publish port 3000. Open the address InstaBox gives you.
+   Detach with Ctrl-b d. Come back with `tmux attach -t vo`. Instead of `.env`, you can type the password without echo inside tmux first: `read -rs VO_PASSWORD && export VO_PASSWORD`, then `npm run start:public`.
+4. In the InstaBox dashboard, publish port 3000. Open only the HTTPS address InstaBox gives you for that port; the gateway itself speaks plain HTTP, so never send the password over an `http://` address.
 5. The browser shows a username and password prompt. Type any username and the password.
 
 | Variable | Default | Meaning |
@@ -57,7 +57,7 @@ The backend keeps listening on `127.0.0.1:8787` (`HOST`/`PORT`); only the gatewa
 
 **What it protects.** Every request needs the password, including the app files, `/api/health` and the event stream. The comparison is constant-time. Live updates use server-sent events through the same URL, so nothing else needs to be published. `/api/*` requests are only forwarded when the browser marks them same-origin.
 
-**What it does not.** There is one shared password and no per-user accounts or roles: anyone who has it can do everything the app can. Wrong passwords are throttled globally, not per visitor, so anyone can lock the owner out for 5 minutes just by guessing; wait it out. HTTPS comes from InstaBox; the gateway itself speaks plain HTTP, so do not expose its port by other means.
+**What it does not.** There is one shared password and no per-user accounts or roles: anyone who has it can do everything the app can. Wrong passwords are throttled globally, not per visitor (8 wrong guesses lock everyone out for 5 minutes; requests with no password at all are not counted). So an attacker who keeps sending wrong passwords can keep the owner locked out for as long as they keep it up: every 5 minutes it unlocks, and a few more wrong guesses lock it again. Restarting resets the counter but does not help while they continue. The only fix is to stop the attacker, for example by unpublishing the port in the InstaBox dashboard. Basic auth has no log-out: on a shared computer use a private window. HTTPS comes from InstaBox; do not expose the gateway's port by other means.
 
 **`RUNTIME=claude` is refused on the public address by default.** The entry script exits with an error. A public page would mean real model spend and file writes reachable from the internet, while the security prerequisites in `docs/milestone-3b5-3-report.md` (a real-key run, an independent review, the OS-user decision) are still open. Set `VO_ALLOW_PUBLIC_CLAUDE=yes` only once they are met.
 

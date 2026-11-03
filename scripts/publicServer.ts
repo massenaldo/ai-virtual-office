@@ -63,7 +63,7 @@ try {
   log.error(code === 'EADDRINUSE' ? `Port ${pub.port} is already in use.` : error instanceof Error ? error.message : String(error))
   process.exit(1)
 }
-log.info(`AI Virtual Office (runtime: ${parsed.config.runtime}) is open at ${gateway.url}; it asks for the password (any username).`)
+log.info(`AI Virtual Office (runtime: ${parsed.config.runtime}) listening on ${pub.host}:${gateway.port}; open the HTTPS address InstaBox gives you for this port (any username, the password).`)
 log.info(`The backend stays on ${backend.url} and is not reachable from outside.`)
 
 const stop = () => { void Promise.all([gateway.close(), backend.close()]).then(() => process.exit(0)) }

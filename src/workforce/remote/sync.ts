@@ -1,4 +1,4 @@
-import { applyWorkforceEvent, parseEventId, WORKFORCE_EVENT_TYPES, type HealthResponse, type PermissionChangedEvent, type PermissionsResponse, type StateResponse, type WorkforceEvent } from '../api'
+import { applyWorkforceEvent, parseEventId, WORKFORCE_EVENT_TYPES, type HealthResponse, type PermissionChangedEvent, type PermissionsResponse, type StateResponse, type WorkforceEvent, type WorkspacesResponse } from '../api'
 import type { WorkforceSnapshot } from '../controller'
 import { emptyWorkforce } from '../operations'
 import { applyPermissionEvent, emptyPermissions, parsePermissionLists, withLists, type PermissionsState } from '../permissions'
@@ -9,7 +9,7 @@ export type EventSourceLike = {
   addEventListener(type: string, listener: (event: { data?: string }) => void): void
   close(): void
 }
-export type SyncSnapshot = Pick<WorkforceSnapshot, 'state' | 'loadProblem' | 'preserved' | 'saveError' | 'environment' | 'connection' | 'lastSyncedAt' | 'connectionError' | 'needsPairing' | 'pairingNote'> & { permissions: PermissionsState }
+export type SyncSnapshot = Pick<WorkforceSnapshot, 'state' | 'loadProblem' | 'preserved' | 'saveError' | 'environment' | 'connection' | 'lastSyncedAt' | 'connectionError' | 'needsPairing' | 'pairingNote'> & { permissions: PermissionsState; workspaces: string[] | null }
 /** How the snapshot answered a (re)connect: ok (or superseded), 401, or any other failure. */
 export type ReconnectOutcome = 'ok' | 'unauthorized' | 'failed'
 export type RemoteSync = {
@@ -35,7 +35,7 @@ export function createRemoteSync(opts: { client: ApiClient; createEventSource: (
   const { client } = opts
   const now = opts.now ?? (() => new Date().toISOString())
   const listeners = new Set<() => void>()
-  let snap: SyncSnapshot = { state: emptyWorkforce(), loadProblem: null, preserved: null, saveError: null, environment: { kind: 'backend', runtime: null, available: null, reason: null }, connection: 'connecting', lastSyncedAt: null, connectionError: null, needsPairing: false, pairingNote: null, permissions: emptyPermissions() }
+  let snap: SyncSnapshot = { state: emptyWorkforce(), loadProblem: null, preserved: null, saveError: null, environment: { kind: 'backend', runtime: null, available: null, reason: null }, connection: 'connecting', lastSyncedAt: null, connectionError: null, needsPairing: false, pairingNote: null, permissions: emptyPermissions(), workspaces: null }
   let generation = 0
   let cursor: { boot: string; seq: number } | null = null
   let stream: EventSourceLike | null = null
@@ -122,6 +122,15 @@ export function createRemoteSync(opts: { client: ApiClient; createEventSource: (
     publish({ permissions: events.reduce(applyPermissionEvent, withLists(snap.permissions, lists.active, lists.history)) })
   }
 
+  /** The registered workspace ids for the task form. A failed or malformed answer leaves the form without a choice (the server still decides every task). */
+  async function loadWorkspaces(g: number, signal: AbortSignal): Promise<void> {
+    const r = await client.get<WorkspacesResponse>('/api/workspaces', signal)
+    if (g !== generation) return
+    const list = r.ok ? (r.body as { workspaces?: unknown } | undefined)?.workspaces : null
+    const ids = Array.isArray(list) && list.every((w) => typeof w === 'object' && w !== null && typeof (w as { id?: unknown }).id === 'string') ? (list as { id: string }[]).map((w) => w.id) : []
+    publish({ workspaces: ids })
+  }
+
   async function connect(): Promise<ReconnectOutcome> {
     if (disposed) return 'ok'
     stop()
@@ -150,6 +159,7 @@ export function createRemoteSync(opts: { client: ApiClient; createEventSource: (
     stream = source
     for (const name of [...WORKFORCE_EVENT_TYPES, 'permission.changed']) source.addEventListener(name, (e) => onFrame(g, name, e.data))
     void loadPermissions(g, controller.signal)
+    void loadWorkspaces(g, controller.signal)
     source.addEventListener('open', () => {
       if (g !== generation) return
       attempt = 0

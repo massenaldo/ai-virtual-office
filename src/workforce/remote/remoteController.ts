@@ -50,7 +50,7 @@ export function createRemoteWorkforceController(opts: RemoteControllerOptions): 
 
   const misconfigured: Omit<WorkforceSnapshot, 'commandError'> = {
     state: emptyWorkforce(), loadProblem: null, preserved: null, saveError: null,
-    environment: { kind: 'backend', runtime: null, available: null, reason: null }, connection: 'misconfigured' satisfies ConnectionStatus, lastSyncedAt: null, connectionError: null, needsPairing: false, pairingNote: null, permissions: null,
+    environment: { kind: 'backend', runtime: null, available: null, reason: null }, connection: 'misconfigured' satisfies ConnectionStatus, lastSyncedAt: null, connectionError: null, needsPairing: false, pairingNote: null, permissions: null, workspaces: null,
   }
 
   // useSyncExternalStore needs the same object back until something changed.

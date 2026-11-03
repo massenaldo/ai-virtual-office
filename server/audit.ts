@@ -18,7 +18,7 @@ export type AuditAction =
   | 'config.startup' | 'task.start' | 'task.cancel' | 'task.force_cancelled' | 'task.timeout'
   | 'approval.requested' | 'approval.decided' | 'approval.timeout'
   | 'tool.allowed' | 'tool.denied' | 'tool.asked' | 'tool.stale' | 'workspace.rejected' | 'request.rejected' | 'runtime.note'
-  | 'permission.granted' | 'permission.denied' | 'permission.revoked' | 'permission.expired' | 'permission.used'
+  | 'permission.granted' | 'permission.denied' | 'permission.revoked' | 'permission.expired' | 'permission.used' | 'permission.ended'
   | 'session.created' | 'session.ended' | 'session.rejected'
 
 export type AuditActor = 'api' | 'system' | 'runtime'

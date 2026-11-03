@@ -31,6 +31,24 @@ function start(opts: { down?: boolean; lastEventId?: string; before?: (b: Return
 beforeEach(() => { vi.useFakeTimers(); FakeEventSource.reset() })
 afterEach(() => { sync?.dispose(); vi.useRealTimers() })
 
+describe('createRemoteSync: workspaces', () => {
+  it('is null until the backend answers, then holds the registered ids', async () => {
+    start({ before: (b) => b.respond('GET', '/api/workspaces', 200, { workspaces: [{ id: 'sandbox' }, { id: 'docs' }] }) })
+    expect(sync.getSnapshot().workspaces).toBeNull()
+    await flush()
+    expect(sync.getSnapshot().workspaces).toEqual(['sandbox', 'docs'])
+  })
+  it('falls back to no choice when the list fails or is malformed', async () => {
+    start({ before: (b) => b.respond('GET', '/api/workspaces', 500, { error: 'No.' }) })
+    await flush()
+    expect(sync.getSnapshot().workspaces).toEqual([])
+    sync.dispose()
+    start({ before: (b) => b.respond('GET', '/api/workspaces', 200, { workspaces: [{ id: 1 }, 'x'] }) })
+    await flush()
+    expect(sync.getSnapshot().workspaces).toEqual([])
+  })
+})
+
 describe('createRemoteSync: snapshot and stream', () => {
   it('starts connecting with an empty state', () => {
     start()

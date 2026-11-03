@@ -32,6 +32,8 @@ export type WorkforceSnapshot = {
   pairingNote: string | null
   /** The backend's permission rules, kept live; null in browser mode (the local mock has no permission engine) and when the backend address is misconfigured. */
   permissions: PermissionsState | null
+  /** The ids of the workspaces the backend registered, for the task form; null in browser mode (the local mock touches no files). Only a hint: the backend checks every id again. */
+  workspaces: string[] | null
 }
 export type ActionResult = { ok: true } | { ok: false; error: string }
 
@@ -42,7 +44,8 @@ export type WorkforceController = {
   updateAgent(id: string, patch: Partial<AgentInput>): Awaitable<ActionResult>
   removeAgent(id: string): void
   assignDesk(agentId: string, deskId: string | null): Awaitable<ActionResult>
-  startTask(agentId: string, input: TaskInput): Awaitable<ActionResult>
+  /** workspaceId: backend mode only; the server accepts only a workspace it registered and refuses anything else. */
+  startTask(agentId: string, input: TaskInput, opts?: { workspaceId?: string | null }): Awaitable<ActionResult>
   cancelTask(taskId: string): Awaitable<ActionResult>
   /** digest: the pending approval's action digest, sent back so the server can check it is the same action. */
   decideApproval(taskId: string, approvalId: string, decision: ApprovalChoice, digest?: string | null): Awaitable<ActionResult>
@@ -71,7 +74,7 @@ export function createWorkforceController(opts: { storage: KV | null; now?: () =
   const loaded = loadWorkforce(opts.storage, now())
   const listeners = new Set<() => void>()
   let current = loaded.state
-  let snapshot: WorkforceSnapshot = { state: current, loadProblem: loaded.problem, preserved: loaded.preserved, saveError: null, environment: { kind: 'browser' }, connection: 'local', lastSyncedAt: null, commandError: null, connectionError: null, needsPairing: false, pairingNote: null, permissions: null }
+  let snapshot: WorkforceSnapshot = { state: current, loadProblem: loaded.problem, preserved: loaded.preserved, saveError: null, environment: { kind: 'browser' }, connection: 'local', lastSyncedAt: null, commandError: null, connectionError: null, needsPairing: false, pairingNote: null, permissions: null, workspaces: null }
   let disposed = false
 
   const publish = (patch: Partial<WorkforceSnapshot>) => {

@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { recordingLogger } from './log'
 import { findSecretInConfig, redactingLogger, redactSecrets, scrub } from './redact'
+import { measureScaling } from './test/scaling'
+
+/** Hostile inputs, sized so the smaller run takes a few milliseconds. Cost must grow about linearly with the size, never faster. */
+const expectLinear = (name: string, make: (n: number) => string, small: number) => {
+  const r = measureScaling(make, redactSecrets, { small })
+  expect(r.ratio, `${name}: ${r.smallMs.toFixed(1)} ms then ${r.largeMs.toFixed(1)} ms for 8x the input (n=${r.n})`).toBeLessThan(r.limit)
+}
 
 describe('redactSecrets', () => {
   it.each([
@@ -59,13 +66,11 @@ describe('redactSecrets: more secret shapes', () => {
     expect(redactSecrets(input)).toBe(input)
   })
 
-  it('stays fast on long near-matches', () => {
-    const t0 = Date.now()
-    redactSecrets(`https://${'a'.repeat(50000)}`)
-    redactSecrets(`Basic ${'A'.repeat(50000)}`)
-    redactSecrets('--password '.repeat(20000))
-    redactSecrets(`ghp_${'a'.repeat(50000)}`)
-    expect(Date.now() - t0).toBeLessThan(500)
+  it('costs about linear time on long near-matches', () => {
+    expectLinear('url start', (n) => `https://${'a'.repeat(n)}`, 200000)
+    expectLinear('basic', (n) => `Basic ${'A'.repeat(n)}`, 200000)
+    expectLinear('password flags', (n) => '--password '.repeat(n), 5000)
+    expectLinear('ghp', (n) => `ghp_${'a'.repeat(n)}`, 200000)
   })
 })
 
@@ -109,14 +114,13 @@ describe('redactSecrets: JWT, Slack, Google, PEM, -p and URL passwords', () => {
     expect(redactSecrets('https://u:p1@h1/x;redis://:p2@h2;ssh://git@h3')).toBe('https://[REDACTED]@h1/x;redis://[REDACTED]@h2;ssh://git@h3')
   })
 
-  it('finds a JWT anywhere in a run of text and stays linear on hostile input', () => {
+  it('finds a JWT anywhere in a run of text and costs about linear time on hostile input', () => {
     expect(redactSecrets(`x=${JWT}&y=1`)).toContain('[REDACTED]')
     expect(redactSecrets(`a${JWT}`)).toContain(JWT.slice(0, 20))
-    for (const text of ['eyJ-'.repeat(250000), 'eyJ'.repeat(300000), `eyJ${'a'.repeat(200000)}`, `${'eyJaaaaaaaaaaaa.'.repeat(60000)}`]) {
-      const t0 = performance.now()
-      redactSecrets(text)
-      expect(performance.now() - t0).toBeLessThan(250)
-    }
+    expectLinear('eyJ-', (n) => 'eyJ-'.repeat(n), 25000)
+    expectLinear('eyJ', (n) => 'eyJ'.repeat(n), 25000)
+    expectLinear('eyJ then a run', (n) => `eyJ${'a'.repeat(n)}`, 200000)
+    expectLinear('header-like repeats', (n) => 'eyJaaaaaaaaaaaa.'.repeat(n), 8000)
   })
 
   it('redacts a private key block that scrub cuts short', () => {
@@ -148,19 +152,12 @@ describe('redactSecrets: JWT, Slack, Google, PEM, -p and URL passwords', () => {
     expect(redactSecrets(input)).toBe(input)
   })
 
-  it('stays fast on hostile input', () => {
-    const slow: Array<[string, string]> = [
-      ['unterminated key lines', '-----BEGIN RSA PRIVATE KEY-----\n'.repeat(3125)],
-      ['url start without @', `https://a:${'x'.repeat(100000)}`],
-      ['jwt-like repeats', 'eyJ.'.repeat(25000)],
-      ['xox repeats', 'xox-'.repeat(25000)],
-      ['many urls', 'https://a:b '.repeat(8000)],
-    ]
-    for (const [name, text] of slow) {
-      const t0 = performance.now()
-      redactSecrets(text)
-      expect(performance.now() - t0, name).toBeLessThan(50)
-    }
+  it('costs about linear time on hostile input', () => {
+    expectLinear('unterminated key lines', (n) => '-----BEGIN RSA PRIVATE KEY-----\n'.repeat(n), 800)
+    expectLinear('url start without @', (n) => `https://a:${'x'.repeat(n)}`, 200000)
+    expectLinear('jwt-like repeats', (n) => 'eyJ.'.repeat(n), 6000)
+    expectLinear('xox repeats', (n) => 'xox-'.repeat(n), 6000)
+    expectLinear('many urls', (n) => 'https://a:b '.repeat(n), 2000)
   })
 })
 
@@ -201,12 +198,10 @@ describe('findSecretInConfig', () => {
 })
 
 describe('redactSecrets cost', () => {
-  it('stays fast on long runs of secret-looking words', () => {
-    const t0 = Date.now()
-    redactSecrets('token'.repeat(50000))
-    redactSecrets('key '.repeat(60000))
-    redactSecrets('a'.repeat(300000) + 'password=x')
-    expect(Date.now() - t0).toBeLessThan(500)
+  it('costs about linear time on long runs of secret-looking words', () => {
+    expectLinear('token', (n) => 'token'.repeat(n), 50000)
+    expectLinear('key', (n) => 'key '.repeat(n), 60000)
+    expectLinear('long name before a match', (n) => 'a'.repeat(n) + 'password=x', 300000)
   })
 
   it('still redacts a long key name', () => {

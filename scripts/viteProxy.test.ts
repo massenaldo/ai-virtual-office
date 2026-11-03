@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { request } from 'node:http'
 import { join, resolve } from 'node:path'
 import type { AddressInfo } from 'node:net'
@@ -118,6 +118,13 @@ describe('Vite dev server → proxy → backend', () => {
 
   it('never shows the token and still does not serve the data folder', async () => {
     for (const text of bodies) expect(text).not.toContain(token)
-    expect([403, 404]).toContain((await call('GET', '/data/api-token', { headers: SAME })).status)
+    // A real file in the project's data folder, so a 403 here is the deny rule and not a missing file falling back to the app.
+    const probe = resolve('data', 'zz-proxy-probe.txt')
+    mkdirSync(resolve('data'), { recursive: true })
+    let created = false
+    try { writeFileSync(probe, 'probe', { flag: 'wx' }); created = true } catch { /* already there: check it as is */ }
+    try {
+      expect([403, 404]).toContain((await call('GET', '/data/zz-proxy-probe.txt', { headers: SAME })).status)
+    } finally { if (created) rmSync(probe, { force: true }) }
   })
 })

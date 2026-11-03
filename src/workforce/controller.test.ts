@@ -100,7 +100,7 @@ describe('createWorkforceController', () => {
   })
 
   it('reports the browser environment and a local connection', () => {
-    expect(c.getSnapshot()).toMatchObject({ permissions: null, environment: { kind: 'browser' }, connection: 'local', lastSyncedAt: null, commandError: null, connectionError: null })
+    expect(c.getSnapshot()).toMatchObject({ permissions: null, workspaces: null, environment: { kind: 'browser' }, connection: 'local', lastSyncedAt: null, commandError: null, connectionError: null })
   })
 
   it.each([['allow_agent', 'Approved'], ['reject', 'Denied']] as const)('maps the scoped choice %s to the local decision', (choice, verb) => {

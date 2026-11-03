@@ -14,14 +14,16 @@ import { StatusDot } from './AgentList'
 
 export type AgentDetailProps = { workforce: Workforce; layout: OfficeLayout; agent: Agent; onBack(): void; onEdit(): void; onRemove(): void; onFocusDesk(): void }
 
-function TaskForm({ onStart }: { onStart(input: TaskInput): Awaitable<string | null> }) {
+/** The server registers the workspaces and checks every id again; this list only saves the person from typing one. */
+export function TaskForm({ workspaces, onStart }: { workspaces: string[] | null; onStart(input: TaskInput, opts?: { workspaceId?: string | null }): Awaitable<string | null> }) {
   const [input, setInput] = useState<TaskInput>({ title: '', description: '' })
+  const [workspaceId, setWorkspaceId] = useState('')
   const [error, setError] = useState<string | null>(null)
   const { busy, run } = useBusy()
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     if (busy) return
-    const result = await run(() => onStart(input))
+    const result = await run(() => onStart(input, workspaceId === '' ? undefined : { workspaceId }))
     if (result === undefined) return
     setError(result)
     if (result === null) setInput({ title: '', description: '' })
@@ -29,6 +31,15 @@ function TaskForm({ onStart }: { onStart(input: TaskInput): Awaitable<string | n
   return <form onSubmit={submit} noValidate>
     <label className="field"><span>Title</span><input className="field-input" value={input.title} maxLength={TITLE_MAX} placeholder="e.g. Draft the sprint plan" onChange={(e) => setInput({ ...input, title: e.target.value })}/></label>
     <label className="field"><span>Description</span><textarea className="field-input" rows={3} value={input.description} maxLength={DESCRIPTION_MAX} onChange={(e) => setInput({ ...input, description: e.target.value })}/></label>
+    {workspaces && workspaces.length > 0 && <>
+      <label className="field"><span>Workspace</span>
+        <select className="field-input" value={workspaceId} onChange={(e) => setWorkspaceId(e.target.value)}>
+          <option value="">No workspace (simulated approvals can only be allowed once)</option>
+          {workspaces.map((id) => <option key={id} value={id}>{id}</option>)}
+        </select>
+      </label>
+      <p className="panel-hint">A workspace is a folder the backend was set up with. The task's file requests are checked against it, and an approval is tied to it.</p>
+    </>}
     {error && <p className="form-error" role="alert">{error}</p>}
     <div className="panel-actions"><button type="submit" className="panel-button primary" disabled={busy}><Play size={13}/> Start simulated task</button></div>
   </form>
@@ -67,8 +78,8 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
     const r = await cancel.run(() => actions.cancelTask(task.id))
     if (r !== undefined) setActionError(r.ok ? null : r.error)
   }
-  const start = async (input: TaskInput) => {
-    const r = await actions.startTask(agent.id, input)
+  const start = async (input: TaskInput, opts?: { workspaceId?: string | null }) => {
+    const r = await actions.startTask(agent.id, input, opts)
     return r.ok ? null : r.error
   }
 
@@ -105,7 +116,7 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
     {task ? <div className={`task-card ${task.status}`}>
       <div className="task-card-head"><strong>{task.title}</strong><span className="agent-chip">{TASK_STATUS_LABEL[task.status]}</span></div>
       {task.description && <p>{task.description}</p>}
-      <small>{task.startedAt ? `Started ${formatTime(task.startedAt)}` : `Queued ${formatTime(task.createdAt)}`}{task.completedAt && ` · Ended ${formatTime(task.completedAt)}`} · {TASK_RUNTIME_LABEL[task.runtime]}</small>
+      <small>{task.startedAt ? `Started ${formatTime(task.startedAt)}` : `Queued ${formatTime(task.createdAt)}`}{task.completedAt && ` · Ended ${formatTime(task.completedAt)}`} · {TASK_RUNTIME_LABEL[task.runtime]}{task.workspaceId && ` · Workspace ${task.workspaceId}`}</small>
       {task.resultSummary && <p className="task-result">{task.resultSummary}</p>}
       {task.errorMessage && <p className="task-error">{task.errorMessage}</p>}
     </div> : <p className="panel-hint">No task yet.</p>}
@@ -132,7 +143,7 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
           <button className="panel-button danger" onClick={() => actions.forceError(task.id)}><OctagonX size={13}/> Simulate error</button>
         </div>
       </>}
-    </> : <TaskForm onStart={start}/>}
+    </> : <TaskForm workspaces={workforce.workspaces} onStart={start}/>}
 
     <div className="field-group-label section">Activity</div>
     {timeline.length === 0 ? <p className="panel-hint">No activity yet.</p> : <ol className="activity-list">{timeline.map((a) => <li key={a.id}>

@@ -7,7 +7,7 @@ import { createDemoWorkforce } from '../demo'
 import { emptyPermissions, withLists, type PermissionsState } from '../permissions'
 import type { ToolReview } from '../types'
 import type { Workforce } from '../useWorkforce'
-import AgentDetail from './AgentDetail'
+import AgentDetail, { TaskForm } from './AgentDetail'
 
 const NOW = '2026-11-03T09:00:00.000Z'
 const layout = createDefaultLayout()
@@ -68,5 +68,24 @@ describe('AgentDetail approval card', () => {
     expect(view(demo, loaded([{ id: 'p', scope: 'agent', effect: 'allow', tool: 'Read', agentId: agent.id, taskId: null, pathPattern: null, createdAt: NOW, createdBy: 'user', expiresAt: null, revokedAt: null, usedAt: null, endedAt: null, reason: null, state: 'active' }]))).toContain('1 permission rule</span>')
     expect(view(demo, loaded())).toContain('No permission rules</span>')
     expect(view(demo, emptyPermissions())).not.toContain('permission rule')
+  })
+})
+
+describe('TaskForm workspace choice', () => {
+  const form = (workspaces: string[] | null) => renderToStaticMarkup(<TaskForm workspaces={workspaces} onStart={() => null}/>)
+  it('offers No workspace and every registered id, with no workspace chosen by default', () => {
+    const h = form(['sandbox', 'docs'])
+    expect(h).toContain('<span>Workspace</span>')
+    expect(h).toContain('<option value="" selected="">No workspace')
+    expect(h).toContain('<option value="sandbox">sandbox</option>')
+    expect(h).toContain('<option value="docs">docs</option>')
+  })
+  it('shows no choice in browser mode or when the backend has no workspace', () => {
+    expect(form(null)).not.toContain('Workspace')
+    expect(form([])).not.toContain('Workspace')
+  })
+  it('names the task\'s workspace on its card', () => {
+    const s = { ...demo, tasks: [{ ...waiting('Write', review).tasks[0], status: 'running' as const, pendingApproval: null, workspaceId: 'sandbox' }], agents: demo.agents.map((a) => (a.id === agent.id ? { ...a, currentTaskId: 'tk', status: 'working' as const } : a)) }
+    expect(view(s, loaded())).toContain('Workspace sandbox')
   })
 })

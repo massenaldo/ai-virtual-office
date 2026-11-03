@@ -40,12 +40,9 @@
 - [ ] **Step 3:** Run `npx vitest run server/e2e/realServer.test.ts` three times; expect all pass each time (flake check).
 - [ ] **Step 4:** Commit `test(e2e): permissions over the real server and event stream`.
 
-### Task 2: Real-browser check
+### Task 2: Browser check (dropped)
 
-**Files:** Create `docs/screenshots/3b4-g/*.png`.
-
-- [ ] **Step 1:** Run `npm run dev:full`; with Playwright (headless) open the app, pair, start a task, request the demo approval, screenshot the approval card with scope choices, choose "this task", screenshot the permissions panel, revoke the rule, screenshot again. If any step fails, record it as a finding and fix with a `fix:` commit if small.
-- [ ] **Step 2:** Commit `docs: stage G browser screenshots`.
+Playwright is not installed on this machine and stage F already holds real-browser screenshots of the scope choice, the panel and revoke (`docs/screenshots/3b4-f/`). Not repeated; stated as a limit in the report.
 
 ### Task 3: Closing report
 

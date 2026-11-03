@@ -1,5 +1,7 @@
 # Milestone 3B.4 — Final Audit and Completion Report
 
+> **Superseded status:** this is the audit as of 2026-11-02, before stages D to G. For the current state see `docs/milestone-3b4-report.md`.
+
 Date: 2026-11-02. Audited commit: `a942801` on `main` (PR #48 merged). Read-only audit: no source, configuration or dependency was changed, and no host command, SDK or Claude agent was run.
 
 ## 1. Executive summary

@@ -9,7 +9,7 @@ const DEFAULTS: ReadonlyArray<readonly [tool: string, effect: PermissionEffect]>
 
 export function defaultRules(now: string): PermissionRule[] {
   return DEFAULTS.map(([tool, effect]) => ({
-    id: `default-${tool.toLowerCase()}`, scope: 'global', effect, tool, agentId: null, taskId: null, pathPattern: null, workspaceId: null, digest: null,
+    id: `default-${tool.toLowerCase()}`, scope: 'global', effect, tool, agentId: null, taskId: null, pathPattern: null, workspaceId: null, runtime: null, digest: null,
     createdAt: now, createdBy: 'default', expiresAt: null, revokedAt: null, usedAt: null, endedAt: null, reason: null,
   }))
 }

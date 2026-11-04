@@ -7,7 +7,7 @@ import type { PermissionRule } from './types'
 const NOW = '2026-11-01T10:00:00.000Z'
 const DIGEST = 'c'.repeat(64)
 const base = (o: Partial<PermissionRule>): PermissionRule => ({
-  id: 'x1', scope: 'global', effect: 'allow', tool: 'Read', agentId: null, taskId: null, pathPattern: null, workspaceId: null, digest: null,
+  id: 'x1', scope: 'global', effect: 'allow', tool: 'Read', agentId: null, taskId: null, pathPattern: null, workspaceId: null, runtime: null, digest: null,
   createdAt: NOW, createdBy: 'user', expiresAt: null, revokedAt: null, usedAt: null, endedAt: null, reason: null, ...o,
 })
 const file = (rules: unknown[], schemaVersion: unknown = 1) => ({ schemaVersion, rules })
@@ -22,7 +22,7 @@ describe('defaultRules', () => {
     expect(rules.map((r) => r.id)).toEqual(['default-read', 'default-glob', 'default-grep', 'default-write', 'default-edit', 'default-bash', 'default-webfetch', 'default-websearch'])
   })
   it('evaluates like the policy of today', () => {
-    const q = { agentId: 'a', taskId: 't', digest: DIGEST, workspaceId: null, paths: ['x'] }
+    const q = { agentId: 'a', taskId: 't', digest: DIGEST, workspaceId: null, runtime: null, paths: ['x'] }
     const rules = defaultRules(NOW)
     expect(evaluate(rules, { ...q, tool: 'Read' }, NOW).effect).toBe('allow')
     expect(evaluate(rules, { ...q, tool: 'Write' }, NOW).effect).toBe('ask')
@@ -78,5 +78,21 @@ describe('workspaceId in a stored rule', () => {
   })
   it.each([[5], [''], [{}], [['a']], ['x'.repeat(65)]])('rejects the whole file for workspaceId %j', (bad) => {
     expect(parsePermissions(file([base({ id: 'b1', workspaceId: bad as never })]))).toBeNull()
+  })
+})
+
+describe('runtime in a stored rule', () => {
+  const { runtime: _r, ...legacy } = base({ id: 'old1' })
+  it('loads a rule written before the field existed, with runtime null', () => {
+    const rules = parsePermissions(file([legacy]))
+    expect(rules).not.toBeNull()
+    expect(rules![0].runtime).toBeNull()
+  })
+  it.each([['mock'], ['claude'], [null]])('round-trips runtime %j', (runtime) => {
+    const rule = base({ id: 'w1', scope: 'agent', agentId: 'a1', tool: 'Write', runtime: runtime as never })
+    expect(parsePermissions(JSON.parse(serializePermissions([rule])))).toEqual([rule])
+  })
+  it.each([[5], [''], ['gpt'], [{}], [['mock']], [true]])('rejects the whole file for runtime %j', (bad) => {
+    expect(parsePermissions(file([base({ id: 'b1', runtime: bad as never })]))).toBeNull()
   })
 })

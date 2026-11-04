@@ -83,3 +83,14 @@ describe('workspaceId in a rule view', () => {
     expect(lists({ ...rule('a'), workspaceId: bad })).toBeNull()
   })
 })
+
+describe('runtime in a rule view', () => {
+  const lists = (r: unknown) => parsePermissionLists({ rules: [r] }, { rules: [] })
+  it('accepts mock, claude, null and a missing field (an older server)', () => {
+    for (const runtime of ['mock', 'claude', null]) expect(lists(rule('a', { runtime } as never))).not.toBeNull()
+    expect(lists(rule('a'))).not.toBeNull()
+  })
+  it.each([[5], [{}], [['mock']], [false], ['gpt'], ['']])('rejects %j', (bad) => {
+    expect(lists({ ...rule('a'), runtime: bad })).toBeNull()
+  })
+})

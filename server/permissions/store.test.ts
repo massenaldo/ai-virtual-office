@@ -16,7 +16,7 @@ const now = () => new Date(clock).toISOString()
 const file = () => join(dir, PERMISSIONS_FILE)
 const open = (extra: Partial<PermissionStoreOptions> = {}) => openPermissionStore({ dataDir: dir, now, log: silentLogger, ...extra })
 const D = (c: string) => c.repeat(64)
-const q = (o: Partial<PermissionQuery> = {}): PermissionQuery => ({ agentId: 'a1', taskId: 't1', tool: 'Write', digest: D('a'), workspaceId: 'w1', paths: ['src/x.ts'], ...o })
+const q = (o: Partial<PermissionQuery> = {}): PermissionQuery => ({ agentId: 'a1', taskId: 't1', tool: 'Write', digest: D('a'), workspaceId: 'w1', runtime: null, paths: ['src/x.ts'], ...o })
 const agentWrite: GrantInput = { scope: 'agent', effect: 'allow', tool: 'Write', agentId: 'a1' }
 const once = (c: string): GrantInput => ({ scope: 'once', effect: 'allow', tool: 'Write', agentId: 'a1', taskId: 't1', digest: D(c) })
 const granted = (s: ReturnType<typeof open>, i: GrantInput) => { const r = s.grant(i); if (!r.ok) throw new Error(r.error); return r.rule }
@@ -238,5 +238,19 @@ describe('workspace on grants', () => {
     const r = granted(s, { ...agentWrite, workspaceId: 'w1' })
     expect(s.reconcile({ liveTaskIds: new Set(), agentIds: new Set(['a1']) })).toEqual([])
     expect(s.rules.find((x) => x.id === r.id)!.revokedAt).toBeNull()
+  })
+})
+
+describe('runtime on grants', () => {
+  it('keeps the runtime a grant names, and null otherwise', () => {
+    const s = open()
+    expect(granted(s, { ...agentWrite, runtime: 'mock' }).runtime).toBe('mock')
+    expect(granted(s, agentWrite).runtime).toBeNull()
+  })
+  it('survives a restart, and the rule answers only its runtime', () => {
+    granted(open(), { ...agentWrite, runtime: 'mock' })
+    const again = open()
+    expect(again.evaluate(q({ runtime: 'mock' }))).toMatchObject({ effect: 'allow', source: 'agent' })
+    expect(again.evaluate(q({ runtime: 'claude' })).effect).toBe('ask')
   })
 })

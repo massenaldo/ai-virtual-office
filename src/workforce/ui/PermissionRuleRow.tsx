@@ -22,6 +22,7 @@ export default function PermissionRuleRow({ rule, agentName, onRevoke }: { rule:
     <dl className="permission-facts">
       <div><dt>Covers</dt><dd>{PERMISSION_SCOPE_LABEL[rule.scope]}{agentName && rule.scope !== 'global' ? ` · ${agentName}` : ''}</dd></div>
       {rule.workspaceId && <div><dt>Workspace</dt><dd>{rule.workspaceId}</dd></div>}
+      {rule.runtime && <div><dt>Runtime</dt><dd>{rule.runtime === 'mock' ? 'Mock tasks' : 'Claude tasks'}</dd></div>}
       {rule.pathPattern && <div><dt>Paths</dt><dd>{rule.pathPattern}</dd></div>}
       <div><dt>Created</dt><dd>{when(rule.createdAt)} · {rule.createdBy === 'default' ? 'built-in default' : rule.createdBy === 'user' ? 'by you' : 'by the system'}</dd></div>
       {rule.expiresAt && <div><dt>Expires</dt><dd>{when(rule.expiresAt)}</dd></div>}

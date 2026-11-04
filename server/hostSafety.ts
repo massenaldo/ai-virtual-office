@@ -107,10 +107,10 @@ export function enforceHostSafety(config: ServerConfig, log: Logger, env: Record
 }
 
 
-/** Agent and task rules that allow Write or Edit in every workspace: made before rules were bound to a workspace. */
+/** Agent and task rules that allow Write or Edit in every workspace or for tasks of every runtime: made before rules were bound to either. */
 export function countUnboundWriteRules(rules: readonly PermissionRule[], at: string): number {
-  return rules.filter((r) => (r.scope === 'agent' || r.scope === 'task') && r.effect === 'allow' && (r.tool === 'Write' || r.tool === 'Edit') && r.workspaceId === null && ruleState(r, at) === 'active').length
+  return rules.filter((r) => (r.scope === 'agent' || r.scope === 'task') && r.effect === 'allow' && (r.tool === 'Write' || r.tool === 'Edit') && (r.workspaceId === null || r.runtime === null) && ruleState(r, at) === 'active').length
 }
 
 export const UNBOUND_WRITE_RULES_WARNING = (count: number): string =>
-  `${count} active agent or task permission ${count === 1 ? 'rule allows' : 'rules allow'} file writes in every workspace (they were made before workspace binding). Review and revoke them in the permissions panel.`
+  `${count} active agent or task permission ${count === 1 ? 'rule allows' : 'rules allow'} file writes without being limited to one workspace and one runtime (they were made before those limits existed). Review and revoke them in the permissions panel.`

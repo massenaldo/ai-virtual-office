@@ -1,8 +1,8 @@
-import { copyFileSync, mkdirSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WORKFORCE_FILE } from '../store'
-import { api, session, srv, start, stop, tasks, until, type Harness } from '../test/claudeHarness'
+import { api, pendingApproval, session, srv, start, stop, tasks, until, workspaceRoot, type Harness } from '../test/claudeHarness'
 import { startTestServer, tempDataDir } from '../test/helpers'
 
 // Mock and Claude tasks side by side in one real server: RUNTIME=mock is the default, ENABLE_CLAUDE_RUNTIME=yes adds the Claude
@@ -109,5 +109,87 @@ describe('mock and claude tasks in one server', () => {
     } finally {
       await again.close()
     }
+  })
+})
+
+// A simulated approval must never become a permission that real Claude writes could use.
+describe('mock approvals and Claude writes do not share permissions', () => {
+  const BROAD = { ...MIXED, ALLOW_BROAD_WRITE_SCOPES: 'yes' }
+  const decide = (id: string, p: { id: string; digest: string | null }, decision: string) => api('POST', `/api/tasks/${id}/approval`, { approvalId: p.id, decision, digest: p.digest })
+  const cancel = async (id: string) => { expect((await api('POST', `/api/tasks/${id}/cancel`)).status).toBe(202); await until(async () => (await statusOf(id)) === 'cancelled') }
+  const rules = async () => (await api('GET', '/api/permissions')).body.rules as Array<{ scope: string; tool: string; runtime: string | null }>
+
+  async function mockDemoApproval() {
+    const r = await api('POST', `/api/agents/${FORGE}/tasks`, { title: 'Mock job', runtime: 'mock', workspaceId: 'sandbox' })
+    expect(r.status).toBe(202)
+    const id = r.body.task.id as string
+    await until(async () => (await statusOf(id)) === 'running')
+    expect((await api('POST', `/api/demo/tasks/${id}/request-approval`)).status).toBe(202)
+    return { id, pending: await pendingApproval(id) }
+  }
+
+  it('offers a mock approval once only, and refuses allow_agent and allow_task, when Claude is registered', async () => {
+    await boot(BROAD)
+    const { id, pending } = await mockDemoApproval()
+    expect(pending).toMatchObject({ tool: 'Write', onceOnly: true })
+    for (const choice of ['allow_agent', 'allow_task']) {
+      expect(await decide(id, pending, choice)).toMatchObject({ status: 422 })
+    }
+    expect((await rules()).filter((r) => r.scope === 'agent' || r.scope === 'task')).toEqual([])
+    expect((await decide(id, pending, 'allow_once')).status).toBe(200)
+  })
+
+  it('a mock approval does not let a later Claude vo_write through without asking', async () => {
+    await boot(BROAD)
+    const { id, pending } = await mockDemoApproval()
+    await decide(id, pending, 'allow_agent')
+    await decide(id, pending, 'allow_once')
+    await cancel(id)
+    const c = await session(h)
+    const call = c.call('vo_write', { file_path: 'src/real.ts', content: 'real\n' })
+    const p = await pendingApproval(c.id)
+    expect(p).toMatchObject({ tool: 'Write' })
+    expect(existsSync(join(workspaceRoot(), 'sandbox', 'src', 'real.ts'))).toBe(false)
+    await decide(c.id, p, 'reject')
+    expect((await call).isError).toBe(true)
+  })
+
+  it('a rule granted with the mock runtime never answers a Claude write, whatever its scope', async () => {
+    await boot(BROAD)
+    const app = srv().app
+    for (const scope of ['agent'] as const) expect(app.permissions.grant({ scope, effect: 'allow', tool: 'Write', agentId: FORGE, runtime: 'mock', createdBy: 'user' }).ok).toBe(true)
+    const c = await session(h)
+    const call = c.call('vo_write', { file_path: 'src/real.ts', content: 'real\n' })
+    const p = await pendingApproval(c.id)
+    expect(existsSync(join(workspaceRoot(), 'sandbox', 'src', 'real.ts'))).toBe(false)
+    await decide(c.id, p, 'reject')
+    await call
+  })
+
+  it('a Claude allow_agent still covers later Claude tasks, is recorded as a Claude rule, and does not cover a mock approval', async () => {
+    await boot(BROAD)
+    const a = await session(h)
+    const first = a.call('vo_write', { file_path: 'one.txt', content: '1\n' })
+    await decide(a.id, await pendingApproval(a.id), 'allow_agent')
+    expect((await first).isError).toBeUndefined()
+    expect(await rules()).toEqual(expect.arrayContaining([expect.objectContaining({ scope: 'agent', tool: 'Write', runtime: 'claude' })]))
+    await cancel(a.id)
+    const b = await session(h, FORGE, 1)
+    expect((await b.call('vo_write', { file_path: 'two.txt', content: '2\n' })).isError).toBeUndefined()
+    expect(readFileSync(join(workspaceRoot(), 'sandbox', 'two.txt'), 'utf8')).toBe('2\n')
+    await cancel(b.id)
+    const m = await mockDemoApproval()
+    expect(m.pending.tool).toBe('Write')
+  })
+
+  it('a mock-only server keeps offering the broad choices on a simulated approval', async () => {
+    await boot({ RUNTIME: 'mock' })
+    const r = await api('POST', `/api/agents/${FORGE}/tasks`, { title: 'Mock job', workspaceId: 'sandbox' })
+    const id = r.body.task.id as string
+    await until(async () => (await statusOf(id)) === 'running')
+    await api('POST', `/api/demo/tasks/${id}/request-approval`)
+    const pending = await pendingApproval(id)
+    expect(pending.onceOnly).not.toBe(true)
+    expect((await decide(id, pending, 'allow_agent')).status).toBe(200)
   })
 })

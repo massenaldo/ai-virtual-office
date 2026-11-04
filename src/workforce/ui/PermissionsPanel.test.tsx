@@ -80,6 +80,13 @@ describe('PermissionsBody', () => {
     expect(free).toContain('aria-label="Revoke Write all agents"')
   })
 
+  it('shows which runtime made a rule; a rule for every runtime shows none', () => {
+    const html = body(withLists(emptyPermissions(), [rule('a', { tool: 'Write', runtime: 'mock' }), rule('b', { tool: 'Edit', runtime: 'claude' }), rule('c', { tool: 'Read' })], []))
+    expect(html.match(/<dt>Runtime<\/dt>/g)).toHaveLength(2)
+    expect(html).toContain('Mock tasks')
+    expect(html).toContain('Claude tasks')
+  })
+
   it('shows rule text as text, never as markup', () => {
     const p = withLists(emptyPermissions(), [rule('x', { reason: '<img src=x onerror=alert(1)>', pathPattern: '<script>1</script>', tool: '<b>T</b>' })], [])
     const html = body(p)

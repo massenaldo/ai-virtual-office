@@ -35,6 +35,8 @@ export type PermissionRuleView = {
   pathPattern: string | null
   /** The workspace the rule is bound to; missing or null means every workspace. */
   workspaceId?: string | null
+  /** The runtime of the task whose approval made the rule; missing or null means tasks of every runtime. */
+  runtime?: 'mock' | 'claude' | null
   createdAt: string
   createdBy: 'default' | 'user' | 'system'
   expiresAt: string | null

@@ -164,18 +164,19 @@ describe('checkHost compares folded names', () => {
 
 describe('countUnboundWriteRules', () => {
   const at = '2026-01-01T00:00:00.000Z'
-  const rule = (o: Partial<PermissionRule>): PermissionRule => ({ id: 'r', scope: 'agent', effect: 'allow', tool: 'Write', agentId: 'a', taskId: null, pathPattern: null, workspaceId: null, digest: null, createdAt: at, createdBy: 'user', expiresAt: null, revokedAt: null, usedAt: null, endedAt: null, reason: null, ...o })
-  it('counts active agent and task allow rules for Write or Edit that have no workspace', () => {
+  const rule = (o: Partial<PermissionRule>): PermissionRule => ({ id: 'r', scope: 'agent', effect: 'allow', tool: 'Write', agentId: 'a', taskId: null, pathPattern: null, workspaceId: null, runtime: null, digest: null, createdAt: at, createdBy: 'user', expiresAt: null, revokedAt: null, usedAt: null, endedAt: null, reason: null, ...o })
+  it('counts active agent and task allow rules for Write or Edit that have no workspace or no runtime', () => {
     expect(countUnboundWriteRules([rule({}), rule({ tool: 'Edit' }), rule({ scope: 'task', taskId: 't' })], at)).toBe(3)
+    expect(countUnboundWriteRules([rule({ workspaceId: 'sandbox' }), rule({ runtime: 'claude' })], at)).toBe(2)
   })
   it('ignores bound, revoked, expired, used, ended, ask, deny, read and global rules', () => {
     expect(countUnboundWriteRules([
-      rule({ workspaceId: 'sandbox' }), rule({ revokedAt: at }), rule({ expiresAt: '2025-01-01T00:00:00.000Z' }), rule({ endedAt: at }),
+      rule({ workspaceId: 'sandbox', runtime: 'claude' }), rule({ runtime: 'mock', workspaceId: 'sandbox' }), rule({ revokedAt: at }), rule({ expiresAt: '2025-01-01T00:00:00.000Z' }), rule({ endedAt: at }),
       rule({ effect: 'ask' }), rule({ effect: 'deny' }), rule({ tool: 'Read' }), rule({ scope: 'global', agentId: null }), rule({ scope: 'once', digest: 'a'.repeat(64), taskId: 't' }),
     ], at)).toBe(0)
   })
   it('the warning names the count and carries no path', () => {
-    expect(UNBOUND_WRITE_RULES_WARNING(2)).toBe('2 active agent or task permission rules allow file writes in every workspace (they were made before workspace binding). Review and revoke them in the permissions panel.')
+    expect(UNBOUND_WRITE_RULES_WARNING(2)).toBe('2 active agent or task permission rules allow file writes without being limited to one workspace and one runtime (they were made before those limits existed). Review and revoke them in the permissions panel.')
     expect(UNBOUND_WRITE_RULES_WARNING(1)).toContain('1 active agent or task permission rule allows')
   })
 })

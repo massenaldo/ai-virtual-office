@@ -6,10 +6,10 @@ const NOW = '2026-11-01T10:00:00.000Z'
 const DIGEST = 'a'.repeat(64)
 let n = 0
 const rule = (o: Partial<PermissionRule> = {}): PermissionRule => ({
-  id: `r${++n}`, scope: 'global', effect: 'allow', tool: 'Write', agentId: null, taskId: null, pathPattern: null, workspaceId: null, digest: null,
+  id: `r${++n}`, scope: 'global', effect: 'allow', tool: 'Write', agentId: null, taskId: null, pathPattern: null, workspaceId: null, runtime: null, digest: null,
   createdAt: NOW, createdBy: 'user', expiresAt: null, revokedAt: null, usedAt: null, endedAt: null, reason: null, ...o,
 })
-const q = (o: Partial<PermissionQuery> = {}): PermissionQuery => ({ agentId: 'a1', taskId: 't1', tool: 'Write', digest: DIGEST, workspaceId: 'w1', paths: ['src/x.ts'], ...o })
+const q = (o: Partial<PermissionQuery> = {}): PermissionQuery => ({ agentId: 'a1', taskId: 't1', tool: 'Write', digest: DIGEST, workspaceId: 'w1', runtime: null, paths: ['src/x.ts'], ...o })
 
 describe('ruleState', () => {
   it('orders revoked, used, ended, expired, active', () => {
@@ -175,5 +175,34 @@ describe('validateGrant: workspace', () => {
     expect(ok.ok && ok.fields.workspaceId).toBe('w1')
     const none = validateGrant({ scope: 'agent', effect: 'allow', tool: 'Write', agentId: 'a1' }, NOW)
     expect(none.ok && none.fields.workspaceId).toBe(null)
+  })
+})
+
+describe('runtime on a rule', () => {
+  it('a mock rule never applies to a claude query, and the reverse', () => {
+    const mock = rule({ scope: 'agent', agentId: 'a1', runtime: 'mock' })
+    const claude = rule({ scope: 'agent', agentId: 'a1', runtime: 'claude' })
+    expect(evaluate([mock], q({ runtime: 'claude' }), NOW)).toMatchObject({ effect: 'deny', source: 'default' })
+    expect(evaluate([claude], q({ runtime: 'mock' }), NOW)).toMatchObject({ effect: 'deny', source: 'default' })
+    expect(evaluate([mock], q({ runtime: 'mock' }), NOW)).toMatchObject({ effect: 'allow', source: 'agent' })
+    expect(evaluate([claude], q({ runtime: 'claude' }), NOW)).toMatchObject({ effect: 'allow', source: 'agent' })
+  })
+  it('a runtime rule never applies to a query with no runtime', () => {
+    expect(evaluate([rule({ scope: 'agent', agentId: 'a1', runtime: 'mock' })], q({ runtime: null }), NOW)).toMatchObject({ effect: 'deny', source: 'default' })
+  })
+  it('a rule with no runtime applies to both', () => {
+    const r = rule({ scope: 'agent', agentId: 'a1' })
+    for (const runtime of ['mock', 'claude', null] as const) expect(evaluate([r], q({ runtime }), NOW)).toMatchObject({ effect: 'allow', source: 'agent' })
+  })
+  it('a deny for another runtime does not apply, and precedence is unchanged within a runtime', () => {
+    const deny = rule({ effect: 'deny', runtime: 'mock' })
+    expect(evaluate([deny, rule()], q({ runtime: 'claude' }), NOW)).toMatchObject({ effect: 'allow', source: 'global' })
+    expect(evaluate([deny, rule()], q({ runtime: 'mock' }), NOW)).toMatchObject({ effect: 'deny', source: 'deny_rule' })
+  })
+  it('validateGrant keeps the runtime a grant names, and null otherwise', () => {
+    const ok = validateGrant({ scope: 'agent', effect: 'allow', tool: 'Write', agentId: 'a1', runtime: 'claude' }, NOW)
+    expect(ok.ok && ok.fields.runtime).toBe('claude')
+    const none = validateGrant({ scope: 'agent', effect: 'allow', tool: 'Write', agentId: 'a1' }, NOW)
+    expect(none.ok && none.fields.runtime).toBe(null)
   })
 })

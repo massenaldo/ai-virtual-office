@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseApproval, parseCreatePermission } from './inputs'
+import { parseApproval, parseCreatePermission, parseCreateTask } from './inputs'
 
 describe('parseApproval', () => {
   it('accepts an optional 64-hex digest', () => {
@@ -39,5 +39,18 @@ describe('parseCreatePermission', () => {
     expect(() => parseCreatePermission({ scope: 'global', effect: 'allow', tool: 'Read', taskId: 't' })).toThrow('Unknown field "taskId".')
     expect(() => parseCreatePermission({ scope: 'global', effect: 'allow', tool: 'Read', reason: 5 })).toThrow('"reason" must be a string or null.')
     expect(() => parseCreatePermission({ scope: 'global', effect: 5, tool: 'Read' })).toThrow('"effect" must be a string.')
+  })
+})
+
+describe('parseCreateTask runtime', () => {
+  it('leaves the runtime out when none is named', () => {
+    expect(parseCreateTask({ title: 'T' })).toEqual({ title: 'T', description: '', workspaceId: null })
+  })
+  it('accepts mock and claude', () => {
+    expect(parseCreateTask({ title: 'T', runtime: 'claude' })).toMatchObject({ runtime: 'claude' })
+    expect(parseCreateTask({ title: 'T', runtime: 'mock' })).toMatchObject({ runtime: 'mock' })
+  })
+  it.each([['Claude'], [''], ['real'], [1], [null], [true], [{}]])('refuses %j', (runtime) => {
+    expect(() => parseCreateTask({ title: 'T', runtime })).toThrow('"runtime" must be "mock" or "claude".')
   })
 })

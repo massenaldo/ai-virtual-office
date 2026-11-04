@@ -204,7 +204,7 @@ describe('permissions across a backend restart', () => {
       expect(history.find((r) => r.id === taskRule.id)?.state).toBe('ended')
       expect((await running(second)).status).toBe('failed')
       // Fail closed: a Write for the dead task is no longer allowed by that rule.
-      expect(second.app.permissions.evaluate({ agentId: 'agent-demo-backend', taskId: id, tool: 'Write', digest: 'a'.repeat(64), workspaceId: null, paths: ['x.txt'] })).toMatchObject({ effect: 'ask', source: 'global' })
+      expect(second.app.permissions.evaluate({ agentId: 'agent-demo-backend', taskId: id, tool: 'Write', digest: 'a'.repeat(64), workspaceId: null, runtime: null, paths: ['x.txt'] })).toMatchObject({ effect: 'ask', source: 'global' })
       const audit = readFileSync(join(dir, AUDIT_FILE), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as AuditRecord)
       expect(audit.find((r) => r.action === 'permission.ended' && r.ruleId === taskRule.id)).toMatchObject({ actor: 'system', reason: 'restart', taskId: id })
       expect(audit.some((r) => r.action === 'permission.granted' && r.ruleId === taskRule.id)).toBe(true)

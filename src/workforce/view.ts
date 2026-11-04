@@ -6,7 +6,7 @@ import type { PermissionsState } from './permissions'
 import type { ConnectionStatus, RuntimeEnvironment, WorkforceSnapshot } from './controller'
 import { activeTaskFor, agentAtDesk } from './operations'
 import type { Preserved, WorkforceLoadProblem } from './storage'
-import type { Agent, AgentActivity, AgentDepartment, AgentStatus, AgentTask, TaskRuntime, TaskStatus, WorkforceState } from './types'
+import type { Agent, AgentActivity, AgentDepartment, AgentStatus, AgentTask, TaskRuntime, TaskStatus, TaskUsage, WorkforceState } from './types'
 
 // Pure helpers for the workforce panel, so the components only render.
 
@@ -69,6 +69,15 @@ export function removalPrompt(s: WorkforceState, agentId: string): { title: stri
     : { title, message: `This deletes ${agent.name} and its task history.` }
 }
 
+/** `About $0.0123 (estimate) · 3 steps`; the cost has up to 4 decimals with trailing zeros trimmed to at least 2. */
+export function formatUsage(usage: TaskUsage | null): string | null {
+  if (!usage) return null
+  const steps = `${usage.turns} ${usage.turns === 1 ? 'step' : 'steps'}`
+  if (usage.costUsd > 0 && usage.costUsd < 0.0001) return `Less than $0.0001 (estimate) · ${steps}`
+  const [whole, fraction = ''] = usage.costUsd.toFixed(4).split('.')
+  return `About $${whole}.${fraction.replace(/0+$/, '').padEnd(2, '0')} (estimate) · ${steps}`
+}
+
 /** Local 24-hour HH:MM:SS. en-GB pins the digits and separators; the time zone stays the viewer's. */
 export function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
@@ -115,15 +124,26 @@ export type EnvironmentBadge = { label: string; title: string; tone: 'browser' |
 /** The panel's runtime badge. The copy says plainly that no AI is run in the browser or mock modes. */
 export function environmentBadge(env: RuntimeEnvironment): EnvironmentBadge {
   if (env.kind === 'browser') return { label: 'Mock · browser', title: 'Tasks are simulated in the browser. No AI is run.', tone: 'browser' }
+  const claude = env.runtimes?.find((r) => r.kind === 'claude')
+  if (claude && env.runtimes?.some((r) => r.kind === 'mock')) {
+    const claudeText = claude.available ? 'available' : `not available (${claude.reason ?? 'reason unknown'})`
+    return {
+      label: claude.available ? 'Local backend · mock + Claude' : 'Local backend · mock + Claude (not available)',
+      title: `Simulated (mock): available. Claude: ${claudeText}. Each task picks its runtime; the default is ${env.defaultRuntime === 'claude' ? 'Claude' : 'the mock'}.`,
+      tone: claude.available ? 'backend' : 'unavailable',
+    }
+  }
   if (env.runtime === 'claude') {
     if (env.available === true) return { label: 'Local backend · Claude', title: 'Tasks run on the Claude Agent SDK. In this version the agent can read files in the workspace you pick and propose changes that you approve one by one; it cannot run anything.', tone: 'backend' }
-    return { label: 'Local backend · Claude (not available)', title: `${env.reason ?? 'Claude Agent SDK not installed'}. Tasks are refused.`, tone: 'unavailable' }
+    return { label: 'Local backend · Claude (not available)', title: `${env.reason ?? 'reason unknown'}. Tasks are refused.`, tone: 'unavailable' }
   }
   if (env.runtime === 'mock') return { label: 'Local backend · mock runtime', title: "Tasks run on the local backend's mock runtime. No AI is run.", tone: env.available === false ? 'unavailable' : 'backend' }
   return { label: 'Local backend', title: 'Connecting to the local backend.', tone: 'backend' }
 }
 
 export function environmentNote(env: RuntimeEnvironment): string | null {
+  // With Claude registered next to the mock the note would be false: each task picks its runtime.
+  if (env.kind === 'backend' && env.runtimes?.some((r) => r.kind === 'claude')) return null
   return env.kind === 'backend' && env.runtime === 'mock' ? 'Mock runtime only; no AI is run.' : null
 }
 

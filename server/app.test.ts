@@ -10,12 +10,43 @@ let running: { close(): Promise<void> } | null = null
 afterEach(async () => { await running?.close(); running = null })
 
 describe('app', () => {
+  it('the startup record says whether Claude is registered and nothing secret', async () => {
+    const { startupRecord } = await import('./app')
+    const rec = (env: Record<string, string>) => startupRecord(testConfig({ ...env }), 1, 'generated').detail
+    expect(rec({})).toContain('runtime=mock claude=disabled')
+    expect(rec({ ENABLE_CLAUDE_RUNTIME: 'yes' })).toContain('runtime=mock claude=enabled')
+    expect(rec({ RUNTIME: 'claude', ANTHROPIC_API_KEY: 'sk-secret-123' })).not.toContain('sk-secret-123')
+  })
+
+
   it('GET /api/health reports the mock runtime', async () => {
     const s: TestServer = await startTestServer()
     running = s
     const res = await s.api('GET', '/api/health')
     expect(res.status).toBe(200)
     expect(res.body).toMatchObject({ ok: true, runtime: 'mock', available: true, reason: null, credentialsConfigured: false, version: '0.1.0', audit: { ok: true, error: null } })
+  })
+
+  it('health lists the runtimes and the default, and an older client can ignore both', async () => {
+    const s: TestServer = await startTestServer()
+    running = s
+    const res = await s.api('GET', '/api/health')
+    expect(res.body).toMatchObject({ runtime: 'mock', defaultRuntime: 'mock', runtimes: [{ kind: 'mock', available: true, reason: null }] })
+    expect(res.body.runtimes).toHaveLength(1)
+  })
+
+  it('health lists both runtimes when the Claude runtime is enabled next to the mock', async () => {
+    const s = await startTestServer({ ENABLE_CLAUDE_RUNTIME: 'yes' })
+    running = s
+    const res = await s.api('GET', '/api/health')
+    expect(res.body).toMatchObject({ runtime: 'mock', available: true, reason: null, defaultRuntime: 'mock', runtimes: [{ kind: 'mock', available: true, reason: null }, { kind: 'claude', available: false, reason: 'credentials not configured' }] })
+  })
+
+  it('with RUNTIME=claude the default is claude and the mock is listed too', async () => {
+    const s = await startTestServer({ RUNTIME: 'claude' })
+    running = s
+    const res = await s.api('GET', '/api/health')
+    expect(res.body).toMatchObject({ runtime: 'claude', defaultRuntime: 'claude', runtimes: [{ kind: 'mock', available: true }, { kind: 'claude', available: false }] })
   })
 
   it('reports the claude runtime as unavailable without credentials', async () => {

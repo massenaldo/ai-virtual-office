@@ -1,7 +1,7 @@
 import { existsSync, realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { ServerConfig } from './config'
+import { claudeEnabled, type ServerConfig } from './config'
 import type { Logger } from './log'
 import { ruleState } from './permissions/engine'
 import type { PermissionRule } from './permissions/types'
@@ -11,10 +11,11 @@ import { resolveWorkspace, isInside } from './workspaces'
 // What the Claude runtime cannot check for itself: who the server runs as and what else that user can reach. The agent's tools
 // are policy-checked, but the child process and the server share one operating-system user, so a flaw anywhere would run with that
 // user's privileges. These checks make the worst setups impossible to start by accident. They are not a sandbox.
-// Only the claude runtime is checked; the mock runs nothing.
+// Checked whenever the claude runtime is registered (RUNTIME=claude or ENABLE_CLAUDE_RUNTIME=yes); the mock runs nothing.
 
 export type HostFacts = {
-  runtime: ServerConfig['runtime']
+  /** True when the claude provider is registered: RUNTIME=claude or ENABLE_CLAUDE_RUNTIME=yes. */
+  claudeEnabled: boolean
   /** The effective user id; null where the platform has none. */
   uid: number | null
   allowRoot: boolean
@@ -41,12 +42,12 @@ export const HOME_CREDENTIALS = ['.ssh', '.aws', '.config/gcloud', '.azure', '.k
 export function checkHost(f: HostFacts): HostCheck {
   const refuse: string[] = []
   const warn: string[] = []
-  if (f.runtime !== 'claude') return { refuse, warn }
+  if (!f.claudeEnabled) return { refuse, warn }
   // A case-insensitive file system treats /Users/Me and /users/me as one folder, so every comparison is on folded names.
   const inside = (parent: string, child: string): boolean => isInside(foldName(parent), foldName(child))
 
   if (f.uid === 0 && !f.allowRoot) {
-    refuse.push('Refusing to run RUNTIME=claude as root. Run the server as a dedicated unprivileged user (see docs/os-user-hardening.md), or set VO_ALLOW_ROOT=yes if you accept that the agent then runs with root\'s privileges.')
+    refuse.push('Refusing to run the Claude runtime (RUNTIME=claude or ENABLE_CLAUDE_RUNTIME=yes) as root. Run the server as a dedicated unprivileged user (see docs/os-user-hardening.md), or set VO_ALLOW_ROOT=yes if you accept that the agent then runs with root\'s privileges.')
   }
   for (const w of f.workspaces) {
     if (inside(w.path, f.projectDir)) {
@@ -94,7 +95,7 @@ export function readHostFacts(config: ServerConfig, env: Record<string, string |
   let home = homeRaw
   try { home = realpathSync.native(homeRaw) } catch { /* keep the given path */ }
   const homeCredentials = HOME_CREDENTIALS.filter((name) => existsSync(join(home, name)))
-  return { runtime: config.runtime, uid: typeof process.getuid === 'function' ? process.getuid() : null, allowRoot: env.VO_ALLOW_ROOT === 'yes', dataDir: config.dataDir, dataDirMode, projectDir, home, workspaceRoot: config.workspaceRoot, workspaces, homeCredentials: [...homeCredentials] }
+  return { claudeEnabled: claudeEnabled(config), uid: typeof process.getuid === 'function' ? process.getuid() : null, allowRoot: env.VO_ALLOW_ROOT === 'yes', dataDir: config.dataDir, dataDirMode, projectDir, home, workspaceRoot: config.workspaceRoot, workspaces, homeCredentials: [...homeCredentials] }
 }
 
 /** For the entry points: logs every finding and returns false when the server must not start. */
@@ -106,10 +107,10 @@ export function enforceHostSafety(config: ServerConfig, log: Logger, env: Record
 }
 
 
-/** Agent and task rules that allow Write or Edit in every workspace: made before rules were bound to a workspace. */
+/** Agent and task rules that allow Write or Edit in every workspace or for tasks of every runtime: made before rules were bound to either. */
 export function countUnboundWriteRules(rules: readonly PermissionRule[], at: string): number {
-  return rules.filter((r) => (r.scope === 'agent' || r.scope === 'task') && r.effect === 'allow' && (r.tool === 'Write' || r.tool === 'Edit') && r.workspaceId === null && ruleState(r, at) === 'active').length
+  return rules.filter((r) => (r.scope === 'agent' || r.scope === 'task') && r.effect === 'allow' && (r.tool === 'Write' || r.tool === 'Edit') && (r.workspaceId === null || r.runtime === null) && ruleState(r, at) === 'active').length
 }
 
 export const UNBOUND_WRITE_RULES_WARNING = (count: number): string =>
-  `${count} active agent or task permission ${count === 1 ? 'rule allows' : 'rules allow'} file writes in every workspace (they were made before workspace binding). Review and revoke them in the permissions panel.`
+  `${count} active agent or task permission ${count === 1 ? 'rule allows' : 'rules allow'} file writes without being limited to one workspace and one runtime (they were made before those limits existed). Review and revoke them in the permissions panel.`

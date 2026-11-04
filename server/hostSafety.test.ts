@@ -7,18 +7,18 @@ import { checkHost, countUnboundWriteRules, enforceHostSafety, readHostFacts, UN
 import type { PermissionRule } from './permissions/types'
 import { recordingLogger } from './log'
 
-const base: HostFacts = { runtime: 'claude', uid: 1000, allowRoot: false, dataDir: '/srv/vo/data', dataDirMode: 0o700, projectDir: '/srv/vo/app', home: '/home/vo', workspaceRoot: '/srv/vo/workspaces', workspaces: [{ id: 'sandbox', path: '/srv/vo/workspaces/sandbox' }], homeCredentials: [] }
+const base: HostFacts = { claudeEnabled: true, uid: 1000, allowRoot: false, dataDir: '/srv/vo/data', dataDirMode: 0o700, projectDir: '/srv/vo/app', home: '/home/vo', workspaceRoot: '/srv/vo/workspaces', workspaces: [{ id: 'sandbox', path: '/srv/vo/workspaces/sandbox' }], homeCredentials: [] }
 
 describe('checkHost', () => {
   it('has nothing to say about a dedicated user with a private data folder and a separate workspace', () => {
     expect(checkHost(base)).toEqual({ refuse: [], warn: [] })
   })
-  it('says nothing at all for the mock runtime, whatever the setup', () => {
-    expect(checkHost({ ...base, runtime: 'mock', uid: 0, dataDirMode: 0o777, homeCredentials: ['.ssh'], workspaces: [{ id: 'all', path: '/' }] })).toEqual({ refuse: [], warn: [] })
+  it('says nothing at all when the Claude runtime is not registered, whatever the setup', () => {
+    expect(checkHost({ ...base, claudeEnabled: false, uid: 0, dataDirMode: 0o777, homeCredentials: ['.ssh'], workspaces: [{ id: 'all', path: '/' }] })).toEqual({ refuse: [], warn: [] })
   })
 
   it('refuses to run the claude runtime as root, unless the owner said they accept it', () => {
-    expect(checkHost({ ...base, uid: 0 }).refuse).toEqual([expect.stringContaining('as root')])
+    expect(checkHost({ ...base, uid: 0 }).refuse).toEqual([expect.stringContaining('Refusing to run the Claude runtime (RUNTIME=claude or ENABLE_CLAUDE_RUNTIME=yes) as root.')])
     expect(checkHost({ ...base, uid: 0, allowRoot: true }).refuse).toEqual([])
   })
 
@@ -91,9 +91,20 @@ describe('reading the facts and enforcing them', () => {
     const s = setup({})
     mkdirSync(join(s.home, '.ssh')); writeFileSync(join(s.home, '.netrc'), 'x')
     const facts = readHostFacts(s.config, { HOME: s.home }, join(dir, 'app'))
-    expect(facts).toMatchObject({ runtime: 'claude', allowRoot: false, dataDirMode: 0o700, homeCredentials: ['.ssh', '.netrc'] })
+    expect(facts).toMatchObject({ claudeEnabled: true, allowRoot: false, dataDirMode: 0o700, homeCredentials: ['.ssh', '.netrc'] })
     expect(facts.workspaces).toEqual([{ id: 'sandbox', path: expect.stringContaining('sandbox') }])
     expect(facts.uid === null || typeof facts.uid === 'number').toBe(true)
+  })
+  it('checks the host when ENABLE_CLAUDE_RUNTIME=yes next to RUNTIME=mock, and not otherwise', () => {
+    const s = setup({})
+    const facts = (env: Record<string, string>) => {
+      const parsed = parseConfig({ RUNTIME: 'mock', DATA_DIR: s.data, ...env }, dir)
+      if (!parsed.ok) throw new Error(parsed.errors.join('; '))
+      return readHostFacts(parsed.config, { HOME: s.home }, join(dir, 'app'))
+    }
+    expect(facts({}).claudeEnabled).toBe(false)
+    expect(facts({ ENABLE_CLAUDE_RUNTIME: 'yes' }).claudeEnabled).toBe(true)
+    expect(facts({ RUNTIME: 'claude' }).claudeEnabled).toBe(true)
   })
   it('reads the home folder as a real path and the workspace root', () => {
     const s = setup({})
@@ -153,18 +164,19 @@ describe('checkHost compares folded names', () => {
 
 describe('countUnboundWriteRules', () => {
   const at = '2026-01-01T00:00:00.000Z'
-  const rule = (o: Partial<PermissionRule>): PermissionRule => ({ id: 'r', scope: 'agent', effect: 'allow', tool: 'Write', agentId: 'a', taskId: null, pathPattern: null, workspaceId: null, digest: null, createdAt: at, createdBy: 'user', expiresAt: null, revokedAt: null, usedAt: null, endedAt: null, reason: null, ...o })
-  it('counts active agent and task allow rules for Write or Edit that have no workspace', () => {
+  const rule = (o: Partial<PermissionRule>): PermissionRule => ({ id: 'r', scope: 'agent', effect: 'allow', tool: 'Write', agentId: 'a', taskId: null, pathPattern: null, workspaceId: null, runtime: null, digest: null, createdAt: at, createdBy: 'user', expiresAt: null, revokedAt: null, usedAt: null, endedAt: null, reason: null, ...o })
+  it('counts active agent and task allow rules for Write or Edit that have no workspace or no runtime', () => {
     expect(countUnboundWriteRules([rule({}), rule({ tool: 'Edit' }), rule({ scope: 'task', taskId: 't' })], at)).toBe(3)
+    expect(countUnboundWriteRules([rule({ workspaceId: 'sandbox' }), rule({ runtime: 'claude' })], at)).toBe(2)
   })
   it('ignores bound, revoked, expired, used, ended, ask, deny, read and global rules', () => {
     expect(countUnboundWriteRules([
-      rule({ workspaceId: 'sandbox' }), rule({ revokedAt: at }), rule({ expiresAt: '2025-01-01T00:00:00.000Z' }), rule({ endedAt: at }),
+      rule({ workspaceId: 'sandbox', runtime: 'claude' }), rule({ runtime: 'mock', workspaceId: 'sandbox' }), rule({ revokedAt: at }), rule({ expiresAt: '2025-01-01T00:00:00.000Z' }), rule({ endedAt: at }),
       rule({ effect: 'ask' }), rule({ effect: 'deny' }), rule({ tool: 'Read' }), rule({ scope: 'global', agentId: null }), rule({ scope: 'once', digest: 'a'.repeat(64), taskId: 't' }),
     ], at)).toBe(0)
   })
   it('the warning names the count and carries no path', () => {
-    expect(UNBOUND_WRITE_RULES_WARNING(2)).toBe('2 active agent or task permission rules allow file writes in every workspace (they were made before workspace binding). Review and revoke them in the permissions panel.')
+    expect(UNBOUND_WRITE_RULES_WARNING(2)).toBe('2 active agent or task permission rules allow file writes without being limited to one workspace and one runtime (they were made before those limits existed). Review and revoke them in the permissions panel.')
     expect(UNBOUND_WRITE_RULES_WARNING(1)).toContain('1 active agent or task permission rule allows')
   })
 })

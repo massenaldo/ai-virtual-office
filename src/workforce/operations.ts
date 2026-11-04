@@ -1,7 +1,7 @@
 import { DEPARTMENTS } from '../layout/catalog'
 import { createId } from '../layout/operations'
 import type { RuntimeEvent } from './runtime/types'
-import { ACTIVITY_LIMIT, WORKFORCE_SCHEMA_VERSION, type ActivitySource, type Agent, type AgentActivity, type AgentDepartment, type AgentStatus, type AgentTask, type ApprovalDecision, type RuntimeMode, type TaskRuntime, type TaskStatus, type WorkforceState } from './types'
+import { ACTIVITY_LIMIT, WORKFORCE_SCHEMA_VERSION, type ActivitySource, type Agent, type AgentActivity, type AgentDepartment, type AgentStatus, type AgentTask, type ApprovalDecision, type RuntimeMode, type TaskRuntime, type TaskStatus, type WorkforceState, validUsage } from './types'
 
 // Every operation returns a new state, or the same reference when nothing changed.
 
@@ -60,6 +60,8 @@ function replaceAgent(s: WorkforceState, next: Agent): WorkforceState {
 }
 
 const sourceOf = (a: Agent) => a.runtimeMode
+/** A task's activities are labelled by the runtime the task runs on, not by its agent: a Claude task on a demo agent is real work. */
+const sourceOfTask = (t: { runtime: TaskRuntime }): ActivitySource => (t.runtime === 'claude' ? 'real' : 'mock')
 
 export function createAgent(s: WorkforceState, input: AgentInput, now: string, opts: { runtimeMode?: RuntimeMode } = {}): OpResult<{ id: string }> {
   const error = validateAgentInput(input)
@@ -124,9 +126,9 @@ export function assignTask(s: WorkforceState, agentId: string, input: TaskInput,
   if (error) return { ok: false, error }
   if (activeTaskFor(s, agentId)) return { ok: false, error: `${agent.name} already has an active task.` }
   const taskId = createId('task', new Set(s.tasks.map((t) => t.id)))
-  const task: AgentTask = { id: taskId, agentId, title: input.title.trim(), description: input.description.trim(), status: 'queued', createdAt: now, startedAt: null, completedAt: null, resultSummary: null, errorMessage: null, executionId: null, timeoutMs: opts.timeoutMs ?? null, runtime: opts.runtime ?? 'mock', workspaceId: opts.workspaceId ?? null, sessionId: null, endedReason: null, pendingApproval: null }
+  const task: AgentTask = { id: taskId, agentId, title: input.title.trim(), description: input.description.trim(), status: 'queued', createdAt: now, startedAt: null, completedAt: null, resultSummary: null, errorMessage: null, executionId: null, timeoutMs: opts.timeoutMs ?? null, runtime: opts.runtime ?? 'mock', workspaceId: opts.workspaceId ?? null, sessionId: null, endedReason: null, usage: null, pendingApproval: null }
   const next = replaceAgent({ ...s, tasks: [...s.tasks, task] }, { ...agent, currentTaskId: taskId })
-  const state = addActivity(next, { type: 'task-assigned', agentId, taskId, message: `Assigned "${task.title}"`, timestamp: now, source: sourceOf(agent) })
+  const state = addActivity(next, { type: 'task-assigned', agentId, taskId, message: `Assigned "${task.title}"`, timestamp: now, source: sourceOfTask(task) })
   return { ok: true, state, taskId }
 }
 
@@ -160,10 +162,10 @@ function transitionFor(event: RuntimeEvent, task: AgentTask, now: string, source
     case 'approval_requested':
       return { task: { status: 'waiting_for_approval', pendingApproval: { id: event.approvalId, tool: event.tool, summary: event.summary, requestedAt: now, digest: event.digest ?? null, review: event.review ?? null, onceOnly: event.onceOnly === true } }, agentStatus: 'waiting', activity: { ...base, type: 'task-approval-requested', approvalId: event.approvalId, message: `Approval needed: ${event.summary}` } }
     case 'completed':
-      return { task: { status: 'completed', completedAt: now, resultSummary: event.summary || null, endedReason: 'completed', pendingApproval: null }, agentStatus: 'completed', activity: { ...base, type: 'task-completed', message: event.summary } }
+      return { task: { status: 'completed', completedAt: now, resultSummary: event.summary || null, endedReason: 'completed', usage: validUsage(event.usage), pendingApproval: null }, agentStatus: 'completed', activity: { ...base, type: 'task-completed', message: event.summary } }
     case 'failed': {
       const error = event.error || UNKNOWN_ERROR
-      return { task: { status: 'failed', completedAt: now, errorMessage: error, endedReason: 'failed', pendingApproval: null }, agentStatus: 'error', activity: { ...base, type: 'task-failed', message: error } }
+      return { task: { status: 'failed', completedAt: now, errorMessage: error, endedReason: 'failed', usage: validUsage(event.usage), pendingApproval: null }, agentStatus: 'error', activity: { ...base, type: 'task-failed', message: error } }
     }
     case 'cancelled':
       return { task: { status: 'cancelled', completedAt: now, endedReason: 'cancelled', pendingApproval: null }, agentStatus: 'idle', activity: { ...base, type: 'task-cancelled', message: `Cancelled "${task.title}"` } }
@@ -243,14 +245,13 @@ export function timeOutTask(s: WorkforceState, taskId: string, now: string, sour
 /** Forces an active task to cancelled, whether or not a runtime still tracks it (a lost runtime, or a cancel that never got confirmed). */
 export function cancelTask(s: WorkforceState, taskId: string, now: string): WorkforceState {
   const found = taskWithAgent(s, taskId)
-  return found ? applyRuntimeEvent(s, { type: 'cancelled', taskId }, now, sourceOf(found.agent)) : s
+  return found ? applyRuntimeEvent(s, { type: 'cancelled', taskId }, now, sourceOfTask(found.task)) : s
 }
 
 /** After a reload or restart no runtime is running any more: started work is marked failed with the given message, a pending cancel completes, and queued tasks stay. */
 export function recoverInterruptedTasks(s: WorkforceState, now: string, message: string = INTERRUPTED_MESSAGE): WorkforceState {
   return s.tasks.reduce((state, task) => {
-    const agent = state.agents.find((a) => a.id === task.agentId)
-    const source = agent ? sourceOf(agent) : 'mock'
+    const source = sourceOfTask(task)
     if (task.status === 'cancelling') return applyTransition(state, task, transitionFor({ type: 'cancelled', taskId: task.id }, task, now, source))
     if (task.status !== 'starting' && task.status !== 'running' && task.status !== 'waiting_for_approval') return state
     return applyTransition(state, task, transitionFor({ type: 'failed', taskId: task.id, error: message }, task, now, source))

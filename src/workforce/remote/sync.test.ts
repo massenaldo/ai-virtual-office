@@ -13,7 +13,7 @@ const stateAt = (lastEventId: string, state = demo): StateResponse => ({ state, 
 const flush = () => vi.advanceTimersByTimeAsync(0)
 const calls = (b: { calls: { method: string; url: string }[] }, path: string) => b.calls.filter((c) => c.method === 'GET' && c.url === `${BASE}${path}`).length
 
-const task = (id: string, agentId: string): AgentTask => ({ id, agentId, title: 'T', description: '', status: 'queued', createdAt: NOW, startedAt: null, completedAt: null, resultSummary: null, errorMessage: null, executionId: null, timeoutMs: null, runtime: 'mock', workspaceId: null, sessionId: null, endedReason: null, pendingApproval: null })
+const task = (id: string, agentId: string): AgentTask => ({ id, agentId, title: 'T', description: '', status: 'queued', createdAt: NOW, startedAt: null, completedAt: null, resultSummary: null, errorMessage: null, executionId: null, timeoutMs: null, runtime: 'mock', workspaceId: null, sessionId: null, endedReason: null, usage: null, pendingApproval: null })
 const change = (id: string, patch: Partial<ChangeEvent['patch']> = {}): ChangeEvent => ({ id, type: 'state.changed', at: NOW, agentId: null, taskId: null, patch: { agents: [], tasks: [], activities: [], removedAgentIds: [], ...patch } })
 const reset = (id: string) => ({ id, type: 'state.reset' as const, at: NOW, reason: 'gap' as const })
 
@@ -68,6 +68,19 @@ describe('createRemoteSync: snapshot and stream', () => {
 
   it('reads the runtime from /api/health', async () => {
     start()
+    await flush()
+    expect(sync.getSnapshot().environment).toEqual({ kind: 'backend', runtime: 'mock', available: true, reason: null })
+  })
+
+  it('reads runtimes and the default runtime from /api/health when the server sends them', async () => {
+    const runtimes = [{ kind: 'mock', available: true, reason: null }, { kind: 'claude', available: false, reason: 'Claude Agent SDK not installed' }]
+    start({ before: (b) => b.respond('GET', '/api/health', 200, { ok: true, version: 'x', runtime: 'mock', available: true, reason: null, runtimes, defaultRuntime: 'mock', credentialsConfigured: false, startedAt: NOW }) })
+    await flush()
+    expect(sync.getSnapshot().environment).toEqual({ kind: 'backend', runtime: 'mock', available: true, reason: null, runtimes, defaultRuntime: 'mock' })
+  })
+
+  it('ignores malformed runtimes from /api/health', async () => {
+    start({ before: (b) => b.respond('GET', '/api/health', 200, { ok: true, version: 'x', runtime: 'mock', available: true, reason: null, runtimes: [{ kind: 'bash', available: true }, 3], defaultRuntime: 'bash', credentialsConfigured: false, startedAt: NOW }) })
     await flush()
     expect(sync.getSnapshot().environment).toEqual({ kind: 'backend', runtime: 'mock', available: true, reason: null })
   })

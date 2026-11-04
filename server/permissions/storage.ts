@@ -8,7 +8,7 @@ export function serializePermissions(rules: readonly PermissionRule[]): string {
   return `${JSON.stringify({ schemaVersion: PERMISSIONS_SCHEMA_VERSION, rules }, null, 2)}\n`
 }
 
-const KEYS: ReadonlyArray<keyof PermissionRule> = ['id', 'scope', 'effect', 'tool', 'agentId', 'taskId', 'pathPattern', 'workspaceId', 'digest', 'createdAt', 'createdBy', 'expiresAt', 'revokedAt', 'usedAt', 'endedAt', 'reason']
+const KEYS: ReadonlyArray<keyof PermissionRule> = ['id', 'scope', 'effect', 'tool', 'agentId', 'taskId', 'pathPattern', 'workspaceId', 'runtime', 'digest', 'createdAt', 'createdBy', 'expiresAt', 'revokedAt', 'usedAt', 'endedAt', 'reason']
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 const text = (v: unknown, max = 256): v is string => typeof v === 'string' && v !== '' && v.length <= max
 const nullableText = (v: unknown, max = 256): boolean => v === null || text(v, max)
@@ -18,7 +18,8 @@ const nullableDate = (v: unknown): boolean => v === null || date(v)
 function parseRule(raw: unknown): PermissionRule | null {
   if (!isObject(raw)) return null
   // A file written before workspaces existed has no `workspaceId`: such a rule applies everywhere, as it always did.
-  const body = 'workspaceId' in raw ? raw : { ...raw, workspaceId: null }
+  // The same holds for `runtime`, added later: such a rule applies to tasks of every runtime.
+  const body = { ...raw, ...('workspaceId' in raw ? {} : { workspaceId: null }), ...('runtime' in raw ? {} : { runtime: null }) }
   const keys = Object.keys(body)
   if (keys.length !== KEYS.length || !KEYS.every((k) => k in body)) return null
   const r = body as Record<keyof PermissionRule, unknown>
@@ -26,6 +27,7 @@ function parseRule(raw: unknown): PermissionRule | null {
   if (!['global', 'agent', 'task', 'once'].includes(r.scope as string) || !['allow', 'deny', 'ask'].includes(r.effect as string)) return null
   if (!['default', 'user', 'system'].includes(r.createdBy as string)) return null
   if (!nullableText(r.agentId, 64) || !nullableText(r.taskId, 64) || !nullableText(r.reason, REASON_MAX_CHARS) || !nullableText(r.workspaceId, 64)) return null
+  if (r.runtime !== null && r.runtime !== 'mock' && r.runtime !== 'claude') return null
   if (!date(r.createdAt) || !nullableDate(r.expiresAt) || !nullableDate(r.revokedAt) || !nullableDate(r.usedAt) || !nullableDate(r.endedAt)) return null
   if (r.pathPattern !== null && (typeof r.pathPattern !== 'string' || r.pathPattern.length > PATTERN_MAX_CHARS || !isValidPathPattern(r.pathPattern))) return null
   if (r.digest !== null && (typeof r.digest !== 'string' || !/^[0-9a-f]{64}$/.test(r.digest))) return null

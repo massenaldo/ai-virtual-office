@@ -35,6 +35,8 @@ export type PermissionRuleView = {
   pathPattern: string | null
   /** The workspace the rule is bound to; missing or null means every workspace. */
   workspaceId?: string | null
+  /** The runtime of the task whose approval made the rule; missing or null means tasks of every runtime. */
+  runtime?: 'mock' | 'claude' | null
   createdAt: string
   createdBy: 'default' | 'user' | 'system'
   expiresAt: string | null
@@ -59,7 +61,7 @@ export type ErrorResponse = { error: string }
 export type CreateAgentBody = AgentInput
 export type PatchAgentBody = Partial<AgentInput>
 export type DeskBody = { deskId: string | null }
-export type CreateTaskBody = { title: string; description?: string; workspaceId?: string | null }
+export type CreateTaskBody = { title: string; description?: string; workspaceId?: string | null; runtime?: 'mock' | 'claude' }
 export type WorkspacesResponse = { workspaces: { id: string }[] }
 
 /** Send on every POST, PUT, PATCH and DELETE, even without a body: the server refuses state changes without it (Stage C). */
@@ -94,7 +96,9 @@ export function applyWorkforceEvent(s: WorkforceState, e: WorkforceEvent): Workf
 }
 
 /** The part of GET /api/health the browser reads. */
-export type HealthResponse = { ok: true; version: string; runtime: 'mock' | 'claude'; available: boolean; reason: string | null; credentialsConfigured: boolean; startedAt: string }
+export type RuntimeStatus = { kind: 'mock' | 'claude'; available: boolean; reason: string | null }
+/** `runtimes` and `defaultRuntime` are absent from a server that predates per-task runtimes; `runtime`, `available` and `reason` describe the default one. */
+export type HealthResponse = { ok: true; version: string; runtime: 'mock' | 'claude'; available: boolean; reason: string | null; runtimes?: RuntimeStatus[]; defaultRuntime?: 'mock' | 'claude'; credentialsConfigured: boolean; startedAt: string }
 /** POST/PATCH agents and PUT desk answer with the agent. */
 export type AgentResponse = { agent: Agent }
 

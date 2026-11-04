@@ -4,7 +4,7 @@ import type { AgentInput, TaskInput } from './operations'
 import { MockRuntimeProvider } from './runtime/mockRuntime'
 import type { MockDemoControls, RuntimeProvider } from './runtime/types'
 import { loadWorkforce, saveWorkforce, type Preserved } from './storage'
-import type { CreatePermissionBody } from './api'
+import type { CreatePermissionBody, RuntimeStatus } from './api'
 import type { PermissionsState } from './permissions'
 import type { ApprovalChoice, WorkforceState } from './types'
 
@@ -12,7 +12,7 @@ type KV = Pick<Storage, 'getItem' | 'setItem'>
 type Runtime = RuntimeProvider & Partial<MockDemoControls>
 
 export type Awaitable<T> = T | Promise<T>
-export type RuntimeEnvironment = { kind: 'browser' } | { kind: 'backend'; runtime: 'mock' | 'claude' | null; available: boolean | null; reason: string | null }
+export type RuntimeEnvironment = { kind: 'browser' } | { kind: 'backend'; runtime: 'mock' | 'claude' | null; available: boolean | null; reason: string | null; /** From a server that registers several runtimes; absent from an older one. */ runtimes?: RuntimeStatus[]; defaultRuntime?: 'mock' | 'claude' }
 export type ConnectionStatus = 'local' | 'connecting' | 'live' | 'offline' | 'misconfigured'
 export type WorkforceSnapshot = {
   state: WorkforceState
@@ -45,7 +45,7 @@ export type WorkforceController = {
   removeAgent(id: string): void
   assignDesk(agentId: string, deskId: string | null): Awaitable<ActionResult>
   /** workspaceId: backend mode only; the server accepts only a workspace it registered and refuses anything else. */
-  startTask(agentId: string, input: TaskInput, opts?: { workspaceId?: string | null }): Awaitable<ActionResult>
+  startTask(agentId: string, input: TaskInput, opts?: { workspaceId?: string | null; runtime?: 'mock' | 'claude' }): Awaitable<ActionResult>
   cancelTask(taskId: string): Awaitable<ActionResult>
   /** digest: the pending approval's action digest, sent back so the server can check it is the same action. */
   decideApproval(taskId: string, approvalId: string, decision: ApprovalChoice, digest?: string | null): Awaitable<ActionResult>

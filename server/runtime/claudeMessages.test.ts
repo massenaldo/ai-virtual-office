@@ -85,13 +85,13 @@ describe('createMessageMapper', () => {
 
   it('maps a success result to completed with the final text, and reports usage as numbers only', () => {
     const r = map(result())
-    expect(r.events).toEqual([{ type: 'completed', taskId: 't1', summary: 'All done.' }])
+    expect(r.events).toEqual([{ type: 'completed', taskId: 't1', summary: 'All done.', usage: { turns: 1, costUsd: 0.0123 } }])
     expect(r.terminal).toBe(true)
     expect(r.usage).toBe('turns=1 cost_usd=0.0123')
   })
 
   it('gives a success result with no text a fixed summary', () => {
-    expect(map(result({ result: '' })).events).toEqual([{ type: 'completed', taskId: 't1', summary: 'The agent finished without a written answer.' }])
+    expect(map(result({ result: '' })).events).toEqual([{ type: 'completed', taskId: 't1', summary: 'The agent finished without a written answer.', usage: { turns: 1, costUsd: 0.0123 } }])
   })
 
   it.each([
@@ -105,9 +105,32 @@ describe('createMessageMapper', () => {
     ['an unknown subtype', { subtype: 'something_new', is_error: true }, 'The Claude runtime reported an error.'],
   ])('maps %s to failed with a fixed sentence and never the SDK text', (_n, over, expected) => {
     const r = map(result(over))
-    expect(r.events).toEqual([{ type: 'failed', taskId: 't1', error: expected }])
+    expect(r.events).toEqual([{ type: 'failed', taskId: 't1', error: expected, usage: { turns: 1, costUsd: 0.0123 } }])
     expect(r.terminal).toBe(true)
     expect(JSON.stringify(r)).not.toContain('Invalid API key')
+  })
+
+  it.each([
+    ['success', {}],
+    ['failure', { is_error: true }],
+  ])('puts no usage on a %s result that lacks the numbers', (_n, over) => {
+    const r = map(result({ ...over, num_turns: undefined, total_cost_usd: undefined }))
+    expect(r.events[0]).not.toHaveProperty('usage')
+  })
+
+  it.each([
+    ['negative cost', { total_cost_usd: -1 }],
+    ['NaN cost', { total_cost_usd: NaN }],
+    ['infinite cost', { total_cost_usd: Infinity }],
+    ['absurd cost', { total_cost_usd: 5000 }],
+    ['string cost', { total_cost_usd: '0.1' }],
+    ['negative turns', { num_turns: -2 }],
+    ['fractional turns', { num_turns: 1.5 }],
+    ['absurd turns', { num_turns: 100000 }],
+    ['string turns', { num_turns: '3' }],
+  ])('puts no usage on a result with %s', (_n, over) => {
+    expect(map(result(over)).events[0]).not.toHaveProperty('usage')
+    expect(map(result({ ...over, is_error: true })).events[0]).not.toHaveProperty('usage')
   })
 
   it('shows retries and rate limits as thinking, with fixed text', () => {

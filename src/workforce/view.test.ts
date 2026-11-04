@@ -5,7 +5,8 @@ import type { OfficeLayout } from '../layout/types'
 import { createDemoWorkforce } from './demo'
 import type { PermissionRuleView } from './api'
 import { addActivity, assignTask, cancelTask } from './operations'
-import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskClickTarget, deskMarkers, shortDigest, environmentBadge, environmentNote, connectionLabel, agentStatusText, workforceNotice, TASK_RUNTIME_LABEL, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, allowedScopes, permissionStateText, rulesForTab, scopeSentence, choiceFor, agentPermissionChip, revokePrompt, revokeAgentPrompt, waitingApprovals, removalPrompt, TASK_STATUS_LABEL } from './view'
+import type { RuntimeEnvironment } from './controller'
+import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskClickTarget, deskMarkers, shortDigest, environmentBadge, environmentNote, connectionLabel, agentStatusText, workforceNotice, TASK_RUNTIME_LABEL, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, allowedScopes, permissionStateText, rulesForTab, scopeSentence, choiceFor, agentPermissionChip, revokePrompt, revokeAgentPrompt, waitingApprovals, removalPrompt, TASK_STATUS_LABEL, formatUsage } from './view'
 
 const NOW = '2026-10-30T09:00:00.000Z'
 const layout = createDefaultLayout()
@@ -165,14 +166,32 @@ describe('runtime indicator and lifecycle labels', () => {
     expect(environmentBadge(mock)).toMatchObject({ label: 'Local backend · mock runtime', tone: 'backend', title: "Tasks run on the local backend's mock runtime. No AI is run." })
     expect(environmentBadge({ kind: 'backend', runtime: 'claude', available: false, reason: 'Claude Agent SDK not installed' })).toEqual({ label: 'Local backend · Claude (not available)', title: 'Claude Agent SDK not installed. Tasks are refused.', tone: 'unavailable' })
     expect(environmentBadge({ kind: 'backend', runtime: 'claude', available: true, reason: null })).toEqual({ label: 'Local backend · Claude', title: 'Tasks run on the Claude Agent SDK. In this version the agent can read files in the workspace you pick and propose changes that you approve one by one; it cannot run anything.', tone: 'backend' })
-    expect(environmentBadge({ kind: 'backend', runtime: 'claude', available: false, reason: null }).title).toBe('Claude Agent SDK not installed. Tasks are refused.')
+    expect(environmentBadge({ kind: 'backend', runtime: 'claude', available: false, reason: null }).title).toBe('reason unknown. Tasks are refused.')
     expect(environmentBadge({ kind: 'backend', runtime: null, available: null, reason: null }).label).toBe('Local backend')
+  })
+
+  it('environmentBadge names both runtimes when both are registered', () => {
+    const both = (claude: { available: boolean; reason: string | null }, defaultRuntime: 'mock' | 'claude' = 'mock') => ({ kind: 'backend', runtime: defaultRuntime, available: true, reason: null, defaultRuntime, runtimes: [{ kind: 'mock', available: true, reason: null }, { kind: 'claude', ...claude }] }) satisfies RuntimeEnvironment
+    expect(environmentBadge(both({ available: true, reason: null }))).toMatchObject({ label: 'Local backend · mock + Claude', tone: 'backend' })
+    expect(environmentBadge(both({ available: true, reason: null })).title).toContain('Simulated (mock): available')
+    expect(environmentBadge(both({ available: true, reason: null })).title).toContain('Claude: available')
+    const off = environmentBadge(both({ available: false, reason: 'Claude Agent SDK not installed' }))
+    expect(off).toMatchObject({ label: 'Local backend · mock + Claude (not available)', tone: 'unavailable' })
+    expect(off.title).toContain('Claude: not available (Claude Agent SDK not installed)')
+    expect(environmentBadge({ ...mock, runtimes: [{ kind: 'mock', available: true, reason: null }], defaultRuntime: 'mock' }).label).toBe('Local backend · mock runtime')
   })
 
   it('environmentNote says mock runtime only for the backend mock', () => {
     expect(environmentNote(mock)).toBe('Mock runtime only; no AI is run.')
     expect(environmentNote({ kind: 'browser' })).toBeNull()
     expect(environmentNote({ kind: 'backend', runtime: 'claude', available: false, reason: null })).toBeNull()
+  })
+
+  it('environmentNote says nothing when Claude is registered next to the mock, and keeps its text for a mock-only backend', () => {
+    const runtimes = [{ kind: 'mock' as const, available: true, reason: null }, { kind: 'claude' as const, available: true, reason: null }]
+    expect(environmentNote({ ...mock, runtimes, defaultRuntime: 'mock' })).toBeNull()
+    expect(environmentNote({ ...mock, runtimes: [runtimes[0]], defaultRuntime: 'mock' })).toBe('Mock runtime only; no AI is run.')
+    expect(environmentNote(mock)).toBe('Mock runtime only; no AI is run.')
   })
 
   it('connectionLabel covers every connection status', () => {
@@ -323,4 +342,24 @@ describe('agentPermissionChip', () => {
     expect(agentPermissionChip(perms([]), waitingState(one.id), two.id)).toBe('No permission rules')
   })
   it('says nothing before the first load', () => expect(agentPermissionChip({ active: [], history: [], loaded: false, error: null }, demo, 'a')).toBeNull())
+})
+
+describe('formatUsage', () => {
+  it('is null without usage', () => {
+    expect(formatUsage(null)).toBeNull()
+  })
+
+  it.each([
+    [{ turns: 3, costUsd: 0.0123 }, 'About $0.0123 (estimate) · 3 steps'],
+    [{ turns: 1, costUsd: 0.5 }, 'About $0.50 (estimate) · 1 step'],
+    [{ turns: 0, costUsd: 0 }, 'About $0.00 (estimate) · 0 steps'],
+    [{ turns: 2, costUsd: 0.00004 }, 'Less than $0.0001 (estimate) · 2 steps'],
+    [{ turns: 2, costUsd: 0.0001 }, 'About $0.0001 (estimate) · 2 steps'],
+    [{ turns: 2, costUsd: 0.12345 }, 'About $0.1235 (estimate) · 2 steps'],
+    [{ turns: 2, costUsd: 0.1 }, 'About $0.10 (estimate) · 2 steps'],
+    [{ turns: 2, costUsd: 12 }, 'About $12.00 (estimate) · 2 steps'],
+    [{ turns: 2, costUsd: 0.125 }, 'About $0.125 (estimate) · 2 steps'],
+  ])('formats %j', (usage, text) => {
+    expect(formatUsage(usage)).toBe(text)
+  })
 })

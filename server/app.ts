@@ -5,7 +5,7 @@ import { resolveApiToken, type ApiToken } from './auth'
 import { acquireDataDirLock } from './dataDirLock'
 import { createSessionStore, type SessionStore } from './session'
 import { openAuditLog, type AuditInput, type AuditLog } from './audit'
-import type { ServerConfig } from './config'
+import { claudeEnabled, type ServerConfig } from './config'
 import { deriveEvents } from './deriveEvents'
 import { EventLog } from './eventLog'
 import { createSecurityGuards, securityHeaders } from './http/guards'
@@ -28,7 +28,11 @@ export type AppDeps = {
   now?: () => string
   log?: Logger
   bootId?: string
+  /** The default provider: replaces the registered provider of its kind, and its kind is the default runtime. */
   provider?: ServerRuntimeProvider
+  /** Replace the provider of that kind (the claude one only where the Claude runtime is enabled). */
+  mockProvider?: ServerRuntimeProvider
+  claudeProvider?: ServerRuntimeProvider
   mockTimings?: typeof MOCK_TIMINGS
   heartbeatMs?: number
   maxStreams?: number
@@ -50,7 +54,7 @@ export function startupRecord(config: ServerConfig, port: number, tokenSource: A
   return {
     action: 'config.startup',
     actor: 'system',
-    detail: `runtime=${config.runtime} host=${config.host} port=${port} credentialsConfigured=${config.credentialsConfigured} workspaces=${list(config.workspaces.map((w) => w.id))} allowedTools=${list(config.allowedTools)} allowedOrigins=${list(config.allowedOrigins)} auth=${tokenSource}`,
+    detail: `runtime=${config.runtime} claude=${claudeEnabled(config) ? 'enabled' : 'disabled'} host=${config.host} port=${port} credentialsConfigured=${config.credentialsConfigured} workspaces=${list(config.workspaces.map((w) => w.id))} allowedTools=${list(config.allowedTools)} allowedOrigins=${list(config.allowedOrigins)} auth=${tokenSource}`,
   }
 }
 
@@ -88,22 +92,29 @@ export function createApp(config: ServerConfig, deps: AppDeps = {}): App {
     // The store opens first: it creates DATA_DIR, where the audit log lives.
     const audit = deps.audit ?? openAuditLog({ dataDir: config.dataDir, maxBytes: config.auditLogMaxBytes, now, log, hide: config.workspaceRoot ? [config.workspaceRoot] : [] })
     const apiToken = resolveApiToken({ configured: config.apiToken?.reveal() ?? null, dataDir: config.dataDir })
-    const provider = deps.provider ?? (config.runtime === 'mock' ? new ServerMockProvider({ timings: deps.mockTimings }) : new ClaudeAgentRuntimeProvider({ apiKey: config.anthropicApiKey, settings: config.claude, dataDir: config.dataDir, log, protectedRoots: toolPolicyFrom(config).protectedRoots, toolTimeoutMs: config.approvalTimeoutMs + 60000 }))
+    // The mock is always registered; the claude provider only when the owner asked for it. A task picks one; RUNTIME is the default.
+    const registered = new Map<ServerRuntimeProvider['kind'], ServerRuntimeProvider>()
+    registered.set('mock', deps.mockProvider ?? new ServerMockProvider({ timings: deps.mockTimings }))
+    if (claudeEnabled(config)) registered.set('claude', deps.claudeProvider ?? new ClaudeAgentRuntimeProvider({ apiKey: config.anthropicApiKey, settings: config.claude, dataDir: config.dataDir, log, protectedRoots: toolPolicyFrom(config).protectedRoots, toolTimeoutMs: config.approvalTimeoutMs + 60000 }))
+    // Test seam: a deps.provider of kind claude registers Claude without ENABLE_CLAUDE_RUNTIME; production wiring never sets it.
+    if (deps.provider) registered.set(deps.provider.kind, deps.provider)
+    const provider = deps.provider ?? registered.get(config.runtime)!
+    const extraProviders = [...registered.values()].filter((p) => p !== provider)
     const permissions = deps.permissions ?? openPermissionStore({ dataDir: config.dataDir, now, log, onChange: (change) => { const record = permissionAudit(change); if (record) audit.write(record); events.appendPermission(change.kind, toRuleView(change.rule, now())) } })
     // Nothing is running yet at boot, so no task rule may survive from before: a task that was interrupted never ended its rules.
     // Rules of agents that no longer exist go too. Agent and global rules of existing agents are kept, as documented.
     for (const rule of permissions.reconcile({ liveTaskIds: new Set(), agentIds: new Set(store.state.agents.map((a) => a.id)) })) {
       if (rule.endedAt !== null && rule.revokedAt === null) audit.write({ action: 'permission.ended', actor: 'system', ruleId: rule.id, tool: rule.tool, reason: 'restart', detail: rule.scope, ...(rule.agentId !== null ? { agentId: rule.agentId } : {}), ...(rule.taskId !== null ? { taskId: rule.taskId } : {}) })
     }
-    if (config.runtime === 'claude') {
+    if (registered.has('claude')) {
       const unbound = countUnboundWriteRules(permissions.rules, now())
       if (unbound > 0) log.warn(UNBOUND_WRITE_RULES_WARNING(unbound))
     }
-    const manager = new TaskManager({ store, provider, permissions, config, policy: toolPolicyFrom(config), now, log, onLifecycle: (e) => audit.write(toAuditInput(e)) })
+    const manager = new TaskManager({ store, provider, extraProviders, permissions, config, policy: toolPolicyFrom(config), now, log, onLifecycle: (e) => audit.write(toAuditInput(e)) })
     const streams = new Set<ServerResponse>()
     const startedAt = now()
     const sessions = createSessionStore({ now: () => Date.parse(now()) })
-    const routes = createRoutes({ config, store, events, provider, manager, permissions, now, startedAt, heartbeatMs: deps.heartbeatMs ?? HEARTBEAT_MS, streams, log, maxStreams: deps.maxStreams, audit, sessions, apiToken: apiToken.value })
+    const routes = createRoutes({ config, store, events, manager, permissions, now, startedAt, heartbeatMs: deps.heartbeatMs ?? HEARTBEAT_MS, streams, log, maxStreams: deps.maxStreams, audit, sessions, apiToken: apiToken.value })
     const onReject = (r: { requestId: string; code: string; method: string; path: string }) => audit.write({ action: 'request.rejected', actor: 'api', requestId: r.requestId, reason: r.code, detail: `${r.method} ${r.path}` })
     const guards = [...createSecurityGuards({ allowedOrigins: config.allowedOrigins, apiToken: apiToken.value, sessions, onReject }), ...(deps.guards ?? [])]
     const responseHeaders = (req: IncomingMessage) => ({ ...securityHeaders(req, config.allowedOrigins), ...(deps.responseHeaders?.(req) ?? {}) })

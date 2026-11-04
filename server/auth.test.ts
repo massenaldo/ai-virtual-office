@@ -64,7 +64,7 @@ describe('the API token guard', () => {
     expect((await anon('/api/state', { method: 'OPTIONS' })).status).toBe(204)
     expect((await anon('/api/state', { method: 'OPTIONS', headers: { origin: 'http://localhost:5173', 'access-control-request-method': 'GET' } })).status).toBe(204)
     const health = JSON.parse((await anon('/api/health')).body)
-    expect(Object.keys(health).sort()).toEqual(['audit', 'available', 'credentialsConfigured', 'ok', 'persistence', 'reason', 'runtime', 'startedAt', 'version'])
+    expect(Object.keys(health).sort()).toEqual(['audit', 'available', 'credentialsConfigured', 'defaultRuntime', 'ok', 'persistence', 'reason', 'runtime', 'runtimes', 'startedAt', 'version'])
   })
 
   it('keeps Host and Origin checks ahead of the token check', async () => {

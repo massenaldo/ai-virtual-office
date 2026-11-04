@@ -1,6 +1,6 @@
 import { createServer } from 'vite'
 import { startServer } from '../server/app'
-import { formatConfigErrors, loadConfig } from '../server/config'
+import { claudeEnabled, formatConfigErrors, loadConfig } from '../server/config'
 import { enforceHostSafety } from '../server/hostSafety'
 import { consoleLogger } from '../server/log'
 import { redactingLogger } from '../server/redact'
@@ -24,7 +24,7 @@ try {
   log.error(code === 'EADDRINUSE' ? `Port ${parsed.config.port} is already in use (is the backend already running?).` : error instanceof Error ? error.message : String(error))
   process.exit(1)
 }
-log.info(`AI Virtual Office backend listening on ${backend.url} (runtime: ${parsed.config.runtime})`)
+log.info(`AI Virtual Office backend listening on ${backend.url} (runtime: ${parsed.config.runtime}, claude: ${claudeEnabled(parsed.config) ? 'enabled' : 'disabled'})`)
 // Points the UI at this backend through the dev proxy (same origin; the proxy adds the API token) unless already set.
 process.env.VITE_WORKFORCE_API_URL ??= '/'
 process.env.PORT ??= String(backend.port)

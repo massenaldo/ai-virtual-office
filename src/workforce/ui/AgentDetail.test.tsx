@@ -1,8 +1,8 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { createDefaultLayout } from '../../layout/defaultLayout'
-import type { PermissionRuleView } from '../api'
-import type { WorkforceController } from '../controller'
+import type { PermissionRuleView, RuntimeStatus } from '../api'
+import type { RuntimeEnvironment, WorkforceController } from '../controller'
 import { createDemoWorkforce } from '../demo'
 import { emptyPermissions, withLists, type PermissionsState } from '../permissions'
 import type { ToolReview } from '../types'
@@ -21,8 +21,8 @@ const waiting = (tool: string, withReview: ToolReview | null): typeof demo => ({
   agents: demo.agents.map((a) => (a.id === agent.id ? { ...a, currentTaskId: 'tk', status: 'waiting' as const } : a)),
 })
 
-const view = (state: typeof demo, permissions: PermissionsState | null) =>
-  renderToStaticMarkup(<AgentDetail workforce={{ state, permissions, actions: {} as WorkforceController } as unknown as Workforce} layout={layout} agent={state.agents.find((a) => a.id === agent.id)!} onBack={() => {}} onEdit={() => {}} onRemove={() => {}} onFocusDesk={() => {}}/>)
+const view = (state: typeof demo, permissions: PermissionsState | null, environment?: RuntimeEnvironment) =>
+  renderToStaticMarkup(<AgentDetail workforce={{ state, permissions, environment, actions: {} as WorkforceController } as unknown as Workforce} layout={layout} agent={state.agents.find((a) => a.id === agent.id)!} onBack={() => {}} onEdit={() => {}} onRemove={() => {}} onFocusDesk={() => {}}/>)
 
 const loaded = (rules: PermissionRuleView[] = []) => withLists(emptyPermissions(), rules, [])
 
@@ -96,7 +96,47 @@ describe('TaskForm workspace choice', () => {
   })
 })
 
+describe('TaskForm runtime choice', () => {
+  const both: RuntimeStatus[] = [{ kind: 'mock', available: true, reason: null }, { kind: 'claude', available: true, reason: null }]
+  const form = (runtimes?: RuntimeStatus[], defaultRuntime: 'mock' | 'claude' = 'mock', workspaces: string[] | null = ['sandbox']) => renderToStaticMarkup(<TaskForm workspaces={workspaces} runtimes={runtimes} defaultRuntime={defaultRuntime} onStart={() => null}/>)
+  it('shows no Runtime select with one runtime or an older server', () => {
+    expect(form(undefined)).not.toContain('Runtime')
+    expect(form([both[0]])).not.toContain('Runtime')
+    expect(form([both[0]])).toContain('Start simulated task')
+  })
+  it('lists each runtime with the default selected and keeps the mock wording', () => {
+    const h = form(both)
+    expect(h).toContain('<span>Runtime</span>')
+    expect(h).toContain('<option value="mock" selected="">Simulated (mock)</option>')
+    expect(h).toContain('<option value="claude">Claude</option>')
+    expect(h).toContain('Start simulated task')
+    expect(h).not.toContain('The Claude agent works in the workspace')
+  })
+  it('selects Claude by default when it is the default: hint, Start task, workspace kept', () => {
+    const h = form(both, 'claude')
+    expect(h).toContain('<option value="claude" selected="">Claude</option>')
+    expect(h).toContain('The Claude agent works in the workspace you choose and needs one.')
+    expect(h).toContain('<span>Workspace</span>')
+    expect(h).toContain('Start task')
+    expect(h).not.toContain('Start simulated task')
+  })
+  it('disables an unavailable runtime and gives its reason', () => {
+    const h = form([both[0], { kind: 'claude', available: false, reason: 'Claude Agent SDK not installed' }])
+    expect(h).toContain('<option value="claude" disabled="">Claude (not available: Claude Agent SDK not installed)</option>')
+  })
+})
+
 describe('demo controls', () => {
+  const backend = (runtime: 'mock' | 'claude', defaultRuntime?: 'mock' | 'claude'): RuntimeEnvironment => ({ kind: 'backend', runtime, available: true, reason: null, ...(defaultRuntime ? { defaultRuntime } : {}) })
+  it('are offered only when the server serves the demo routes: the default runtime is mock', () => {
+    const s = (() => { const t = { ...demo, tasks: [{ ...waiting('Write', review).tasks[0], status: 'running' as const, pendingApproval: null, runtime: 'mock' as const }], agents: demo.agents.map((a) => (a.id === agent.id ? { ...a, currentTaskId: 'tk', status: 'working' as const } : a)) }; return t })()
+    expect(view(s, loaded(), backend('claude', 'claude'))).not.toContain('Demo controls')
+    expect(view(s, loaded(), backend('mock', 'mock'))).toContain('Demo controls')
+    expect(view(s, loaded(), backend('mock'))).toContain('Demo controls')
+    expect(view(s, loaded(), { kind: 'backend', runtime: null, available: null, reason: null })).not.toContain('Demo controls')
+    expect(view(s, null, { kind: 'browser' })).toContain('Demo controls')
+  })
+
   const running = (runtime: 'mock' | 'claude') => ({ ...demo, tasks: [{ ...waiting('Write', review).tasks[0], status: 'running' as const, pendingApproval: null, runtime }], agents: demo.agents.map((a) => (a.id === agent.id ? { ...a, currentTaskId: 'tk', status: 'working' as const } : a)) })
   it('are offered for a mock task and never for a Claude task', () => {
     expect(view(running('mock'), loaded())).toContain('Demo controls')

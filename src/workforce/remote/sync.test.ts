@@ -72,6 +72,19 @@ describe('createRemoteSync: snapshot and stream', () => {
     expect(sync.getSnapshot().environment).toEqual({ kind: 'backend', runtime: 'mock', available: true, reason: null })
   })
 
+  it('reads runtimes and the default runtime from /api/health when the server sends them', async () => {
+    const runtimes = [{ kind: 'mock', available: true, reason: null }, { kind: 'claude', available: false, reason: 'Claude Agent SDK not installed' }]
+    start({ before: (b) => b.respond('GET', '/api/health', 200, { ok: true, version: 'x', runtime: 'mock', available: true, reason: null, runtimes, defaultRuntime: 'mock', credentialsConfigured: false, startedAt: NOW }) })
+    await flush()
+    expect(sync.getSnapshot().environment).toEqual({ kind: 'backend', runtime: 'mock', available: true, reason: null, runtimes, defaultRuntime: 'mock' })
+  })
+
+  it('ignores malformed runtimes from /api/health', async () => {
+    start({ before: (b) => b.respond('GET', '/api/health', 200, { ok: true, version: 'x', runtime: 'mock', available: true, reason: null, runtimes: [{ kind: 'bash', available: true }, 3], defaultRuntime: 'bash', credentialsConfigured: false, startedAt: NOW }) })
+    await flush()
+    expect(sync.getSnapshot().environment).toEqual({ kind: 'backend', runtime: 'mock', available: true, reason: null })
+  })
+
   it('a failing /api/health does not block the connection', async () => {
     start({ before: (b) => b.respond('GET', '/api/health', 500, { error: 'boom' }) })
     await flush()

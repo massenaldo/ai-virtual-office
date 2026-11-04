@@ -8,22 +8,30 @@ import ApprovalChoiceForm, { type Scope } from './ApprovalChoiceForm'
 import ApprovalReview from './ApprovalReview'
 import { useBusy } from './useBusy'
 import { DESCRIPTION_MAX, TITLE_MAX, isActiveTask, type TaskInput } from '../operations'
+import type { RuntimeStatus } from '../api'
 import type { Agent } from '../types'
 import { TASK_RUNTIME_LABEL, TASK_STATUS_LABEL, agentStatusText, agentTimeline, agentPermissionChip, approveEnabled, choiceFor, shortDigest, deskOptions, deskStatus, formatTime, formatUsage } from '../view'
 import { StatusDot } from './AgentList'
 
 export type AgentDetailProps = { workforce: Workforce; layout: OfficeLayout; agent: Agent; onBack(): void; onEdit(): void; onRemove(): void; onFocusDesk(): void }
 
+const RUNTIME_OPTION_LABEL = { mock: 'Simulated (mock)', claude: 'Claude' } as const
+
 /** The server registers the workspaces and checks every id again; this list only saves the person from typing one. */
-export function TaskForm({ workspaces, real = false, onStart }: { workspaces: string[] | null; /** The backend runs tasks on the real Claude runtime: the button must not call them simulated. */ real?: boolean; onStart(input: TaskInput, opts?: { workspaceId?: string | null }): Awaitable<string | null> }) {
+export function TaskForm({ workspaces, real = false, runtimes, defaultRuntime = 'mock', onStart }: { workspaces: string[] | null; /** The backend runs tasks on the real Claude runtime: the button must not call them simulated. */ real?: boolean; /** Every runtime the backend registered. With more than one the person picks per task; the server still validates the choice. */ runtimes?: RuntimeStatus[]; defaultRuntime?: 'mock' | 'claude'; onStart(input: TaskInput, opts?: { workspaceId?: string | null; runtime?: 'mock' | 'claude' }): Awaitable<string | null> }) {
   const [input, setInput] = useState<TaskInput>({ title: '', description: '' })
   const [workspaceId, setWorkspaceId] = useState('')
+  const choosable = runtimes !== undefined && runtimes.length > 1
+  const [picked, setPicked] = useState<'mock' | 'claude' | null>(null)
+  const runtime = picked ?? defaultRuntime
+  const isClaude = choosable ? runtime === 'claude' : real
   const [error, setError] = useState<string | null>(null)
   const { busy, run } = useBusy()
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     if (busy) return
-    const result = await run(() => onStart(input, workspaceId === '' ? undefined : { workspaceId }))
+    const opts = { ...(workspaceId === '' ? {} : { workspaceId }), ...(choosable ? { runtime } : {}) }
+    const result = await run(() => onStart(input, Object.keys(opts).length > 0 ? opts : undefined))
     if (result === undefined) return
     setError(result)
     if (result === null) setInput({ title: '', description: '' })
@@ -31,6 +39,14 @@ export function TaskForm({ workspaces, real = false, onStart }: { workspaces: st
   return <form onSubmit={submit} noValidate>
     <label className="field"><span>Title</span><input className="field-input" value={input.title} maxLength={TITLE_MAX} placeholder="e.g. Draft the sprint plan" onChange={(e) => setInput({ ...input, title: e.target.value })}/></label>
     <label className="field"><span>Description</span><textarea className="field-input" rows={3} value={input.description} maxLength={DESCRIPTION_MAX} onChange={(e) => setInput({ ...input, description: e.target.value })}/></label>
+    {choosable && <>
+      <label className="field"><span>Runtime</span>
+        <select className="field-input" value={runtime} onChange={(e) => setPicked(e.target.value === 'claude' ? 'claude' : 'mock')}>
+          {runtimes.map((r) => <option key={r.kind} value={r.kind} disabled={!r.available}>{RUNTIME_OPTION_LABEL[r.kind]}{!r.available && ` (not available: ${r.reason ?? 'Claude Agent SDK not installed'})`}</option>)}
+        </select>
+      </label>
+      {isClaude && <p className="panel-hint">The Claude agent works in the workspace you choose and needs one.</p>}
+    </>}
     {workspaces && workspaces.length > 0 && <>
       <label className="field"><span>Workspace</span>
         <select className="field-input" value={workspaceId} onChange={(e) => setWorkspaceId(e.target.value)}>
@@ -41,7 +57,7 @@ export function TaskForm({ workspaces, real = false, onStart }: { workspaces: st
       <p className="panel-hint">A workspace is a folder the backend was set up with. The task's file requests are checked against it, and an approval is tied to it.</p>
     </>}
     {error && <p className="form-error" role="alert">{error}</p>}
-    <div className="panel-actions"><button type="submit" className="panel-button primary" disabled={busy}><Play size={13}/> {real ? 'Start task' : 'Start simulated task'}</button></div>
+    <div className="panel-actions"><button type="submit" className="panel-button primary" disabled={busy}><Play size={13}/> {isClaude ? 'Start task' : 'Start simulated task'}</button></div>
   </form>
 }
 
@@ -65,6 +81,9 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
   const cancel = useBusy()
   // With a backend the person also chooses how far an allow reaches; the browser demo keeps Approve and Deny.
   const remote = workforce.permissions !== null
+  // The demo routes exist only while the default runtime is the mock; under RUNTIME=claude a mock task can run without them.
+  const env = workforce.environment
+  const demoServed = !env || env.kind === 'browser' || (env.defaultRuntime ?? env.runtime) === 'mock'
   const chip = agentPermissionChip(workforce.permissions, state, agent.id)
   const [scopeChoice, setScopeChoice] = useState<{ approvalId: string; scope: Scope } | null>(null)
   const scope: Scope = scopeChoice && scopeChoice.approvalId === task?.pendingApproval?.id ? scopeChoice.scope : 'once'
@@ -79,7 +98,7 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
     const r = await cancel.run(() => actions.cancelTask(task.id))
     if (r !== undefined) setActionError(r.ok ? null : r.error)
   }
-  const start = async (input: TaskInput, opts?: { workspaceId?: string | null }) => {
+  const start = async (input: TaskInput, opts?: { workspaceId?: string | null; runtime?: 'mock' | 'claude' }) => {
     const r = await actions.startTask(agent.id, input, opts)
     return r.ok ? null : r.error
   }
@@ -138,14 +157,14 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
     {active ? <>
       {task.status !== 'cancelling' && <div className="panel-actions"><button className="panel-button" disabled={cancel.busy} onClick={cancelTask}><Square size={13}/> Cancel task</button></div>}
       {actionError && task.status !== 'waiting_for_approval' && <p className="form-error" role="alert">{actionError}</p>}
-      {task.status === 'running' && task.runtime === 'mock' && <>
+      {task.status === 'running' && task.runtime === 'mock' && demoServed && <>
         <div className="field-group-label">Demo controls</div>
         <div className="panel-actions">
           <button className="panel-button" onClick={() => actions.requestApproval(task.id)}><ShieldQuestion size={13}/> Simulate approval request</button>
           <button className="panel-button danger" onClick={() => actions.forceError(task.id)}><OctagonX size={13}/> Simulate error</button>
         </div>
       </>}
-    </> : <TaskForm workspaces={workforce.workspaces} real={workforce.environment?.kind === 'backend' && workforce.environment.runtime === 'claude'} onStart={start}/>}
+    </> : <TaskForm workspaces={workforce.workspaces} real={env?.kind === 'backend' && env.runtime === 'claude'} runtimes={env?.kind === 'backend' ? env.runtimes : undefined} defaultRuntime={env?.kind === 'backend' ? env.defaultRuntime ?? env.runtime ?? 'mock' : 'mock'} onStart={start}/>}
 
     <div className="field-group-label section">Activity</div>
     {timeline.length === 0 ? <p className="panel-hint">No activity yet.</p> : <ol className="activity-list">{timeline.map((a) => <li key={a.id}>

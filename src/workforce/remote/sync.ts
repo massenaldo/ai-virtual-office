@@ -1,9 +1,21 @@
-import { applyWorkforceEvent, parseEventId, WORKFORCE_EVENT_TYPES, type HealthResponse, type PermissionChangedEvent, type PermissionsResponse, type StateResponse, type WorkforceEvent, type WorkspacesResponse } from '../api'
+import { applyWorkforceEvent, parseEventId, WORKFORCE_EVENT_TYPES, type HealthResponse, type PermissionChangedEvent, type PermissionsResponse, type RuntimeStatus, type StateResponse, type WorkforceEvent, type WorkspacesResponse } from '../api'
 import type { WorkforceSnapshot } from '../controller'
 import { emptyWorkforce } from '../operations'
 import { applyPermissionEvent, emptyPermissions, parsePermissionLists, withLists, type PermissionsState } from '../permissions'
 import type { Agent } from '../types'
 import type { ApiClient } from './client'
+
+/** Only a well-formed list counts; anything else is treated as an older server with one runtime. */
+function parseRuntimes(value: unknown): RuntimeStatus[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null
+  const out: RuntimeStatus[] = []
+  for (const v of value) {
+    const r = v as Partial<RuntimeStatus> | null
+    if (!r || (r.kind !== 'mock' && r.kind !== 'claude') || typeof r.available !== 'boolean') return null
+    out.push({ kind: r.kind, available: r.available, reason: typeof r.reason === 'string' ? r.reason : null })
+  }
+  return out
+}
 
 export type EventSourceLike = {
   addEventListener(type: string, listener: (event: { data?: string }) => void): void
@@ -143,7 +155,9 @@ export function createRemoteSync(opts: { client: ApiClient; createEventSource: (
     void client.get<HealthResponse>('/api/health', controller.signal).then((r) => {
       if (g !== generation || !r.ok) return
       const { runtime, available, reason } = r.body
-      publish({ environment: { kind: 'backend', runtime, available, reason } })
+      const runtimes = parseRuntimes(r.body.runtimes)
+      const defaultRuntime = r.body.defaultRuntime === 'mock' || r.body.defaultRuntime === 'claude' ? r.body.defaultRuntime : undefined
+      publish({ environment: { kind: 'backend', runtime, available, reason, ...(runtimes ? { runtimes } : {}), ...(defaultRuntime ? { defaultRuntime } : {}) } })
     })
 
     const r = await pending

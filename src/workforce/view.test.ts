@@ -5,6 +5,7 @@ import type { OfficeLayout } from '../layout/types'
 import { createDemoWorkforce } from './demo'
 import type { PermissionRuleView } from './api'
 import { addActivity, assignTask, cancelTask } from './operations'
+import type { RuntimeEnvironment } from './controller'
 import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskClickTarget, deskMarkers, shortDigest, environmentBadge, environmentNote, connectionLabel, agentStatusText, workforceNotice, TASK_RUNTIME_LABEL, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, allowedScopes, permissionStateText, rulesForTab, scopeSentence, choiceFor, agentPermissionChip, revokePrompt, revokeAgentPrompt, waitingApprovals, removalPrompt, TASK_STATUS_LABEL, formatUsage } from './view'
 
 const NOW = '2026-10-30T09:00:00.000Z'
@@ -167,6 +168,17 @@ describe('runtime indicator and lifecycle labels', () => {
     expect(environmentBadge({ kind: 'backend', runtime: 'claude', available: true, reason: null })).toEqual({ label: 'Local backend · Claude', title: 'Tasks run on the Claude Agent SDK. In this version the agent can read files in the workspace you pick and propose changes that you approve one by one; it cannot run anything.', tone: 'backend' })
     expect(environmentBadge({ kind: 'backend', runtime: 'claude', available: false, reason: null }).title).toBe('Claude Agent SDK not installed. Tasks are refused.')
     expect(environmentBadge({ kind: 'backend', runtime: null, available: null, reason: null }).label).toBe('Local backend')
+  })
+
+  it('environmentBadge names both runtimes when both are registered', () => {
+    const both = (claude: { available: boolean; reason: string | null }, defaultRuntime: 'mock' | 'claude' = 'mock') => ({ kind: 'backend', runtime: defaultRuntime, available: true, reason: null, defaultRuntime, runtimes: [{ kind: 'mock', available: true, reason: null }, { kind: 'claude', ...claude }] }) satisfies RuntimeEnvironment
+    expect(environmentBadge(both({ available: true, reason: null }))).toMatchObject({ label: 'Local backend · mock + Claude', tone: 'backend' })
+    expect(environmentBadge(both({ available: true, reason: null })).title).toContain('Simulated (mock): available')
+    expect(environmentBadge(both({ available: true, reason: null })).title).toContain('Claude: available')
+    const off = environmentBadge(both({ available: false, reason: 'Claude Agent SDK not installed' }))
+    expect(off).toMatchObject({ label: 'Local backend · mock + Claude (not available)', tone: 'unavailable' })
+    expect(off.title).toContain('Claude: not available (Claude Agent SDK not installed)')
+    expect(environmentBadge({ ...mock, runtimes: [{ kind: 'mock', available: true, reason: null }], defaultRuntime: 'mock' }).label).toBe('Local backend · mock runtime')
   })
 
   it('environmentNote says mock runtime only for the backend mock', () => {

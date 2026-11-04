@@ -59,7 +59,7 @@ export type ErrorResponse = { error: string }
 export type CreateAgentBody = AgentInput
 export type PatchAgentBody = Partial<AgentInput>
 export type DeskBody = { deskId: string | null }
-export type CreateTaskBody = { title: string; description?: string; workspaceId?: string | null }
+export type CreateTaskBody = { title: string; description?: string; workspaceId?: string | null; runtime?: 'mock' | 'claude' }
 export type WorkspacesResponse = { workspaces: { id: string }[] }
 
 /** Send on every POST, PUT, PATCH and DELETE, even without a body: the server refuses state changes without it (Stage C). */

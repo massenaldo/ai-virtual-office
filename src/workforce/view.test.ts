@@ -166,7 +166,7 @@ describe('runtime indicator and lifecycle labels', () => {
     expect(environmentBadge(mock)).toMatchObject({ label: 'Local backend · mock runtime', tone: 'backend', title: "Tasks run on the local backend's mock runtime. No AI is run." })
     expect(environmentBadge({ kind: 'backend', runtime: 'claude', available: false, reason: 'Claude Agent SDK not installed' })).toEqual({ label: 'Local backend · Claude (not available)', title: 'Claude Agent SDK not installed. Tasks are refused.', tone: 'unavailable' })
     expect(environmentBadge({ kind: 'backend', runtime: 'claude', available: true, reason: null })).toEqual({ label: 'Local backend · Claude', title: 'Tasks run on the Claude Agent SDK. In this version the agent can read files in the workspace you pick and propose changes that you approve one by one; it cannot run anything.', tone: 'backend' })
-    expect(environmentBadge({ kind: 'backend', runtime: 'claude', available: false, reason: null }).title).toBe('Claude Agent SDK not installed. Tasks are refused.')
+    expect(environmentBadge({ kind: 'backend', runtime: 'claude', available: false, reason: null }).title).toBe('reason unknown. Tasks are refused.')
     expect(environmentBadge({ kind: 'backend', runtime: null, available: null, reason: null }).label).toBe('Local backend')
   })
 
@@ -185,6 +185,13 @@ describe('runtime indicator and lifecycle labels', () => {
     expect(environmentNote(mock)).toBe('Mock runtime only; no AI is run.')
     expect(environmentNote({ kind: 'browser' })).toBeNull()
     expect(environmentNote({ kind: 'backend', runtime: 'claude', available: false, reason: null })).toBeNull()
+  })
+
+  it('environmentNote says nothing when Claude is registered next to the mock, and keeps its text for a mock-only backend', () => {
+    const runtimes = [{ kind: 'mock' as const, available: true, reason: null }, { kind: 'claude' as const, available: true, reason: null }]
+    expect(environmentNote({ ...mock, runtimes, defaultRuntime: 'mock' })).toBeNull()
+    expect(environmentNote({ ...mock, runtimes: [runtimes[0]], defaultRuntime: 'mock' })).toBe('Mock runtime only; no AI is run.')
+    expect(environmentNote(mock)).toBe('Mock runtime only; no AI is run.')
   })
 
   it('connectionLabel covers every connection status', () => {

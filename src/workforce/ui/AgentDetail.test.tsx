@@ -120,6 +120,23 @@ describe('TaskForm runtime choice', () => {
     expect(h).toContain('Start task')
     expect(h).not.toContain('Start simulated task')
   })
+  it('does not offer the blank workspace for Claude: the first workspace is chosen, and the mock keeps the blank option', () => {
+    const c = form(both, 'claude', ['sandbox', 'docs'])
+    expect(c).not.toContain('No workspace')
+    expect(c).toContain('<option value="sandbox" selected="">sandbox</option>')
+    expect(form(both, 'mock', ['sandbox', 'docs'])).toContain('<option value="" selected="">No workspace')
+  })
+  it('disables Claude, with the reason, when no workspace is set up, and falls back to the mock', () => {
+    for (const ws of [[], null]) {
+      const h = form(both, 'claude', ws)
+      expect(h).toContain('<option value="claude" disabled="">Claude (not available: no workspace is set up on the server)</option>')
+      expect(h).toContain('<option value="mock" selected="">')
+      expect(h).toContain('Start simulated task')
+    }
+  })
+  it('says the reason is unknown when the server gave none', () => {
+    expect(form([both[0], { kind: 'claude', available: false, reason: null }])).toContain('Claude (not available: reason unknown)')
+  })
   it('disables an unavailable runtime and gives its reason', () => {
     const h = form([both[0], { kind: 'claude', available: false, reason: 'Claude Agent SDK not installed' }])
     expect(h).toContain('<option value="claude" disabled="">Claude (not available: Claude Agent SDK not installed)</option>')

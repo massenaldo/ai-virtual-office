@@ -23,14 +23,18 @@ export function TaskForm({ workspaces, real = false, runtimes, defaultRuntime = 
   const [workspaceId, setWorkspaceId] = useState('')
   const choosable = runtimes !== undefined && runtimes.length > 1
   const [picked, setPicked] = useState<'mock' | 'claude' | null>(null)
-  const runtime = picked ?? defaultRuntime
+  const hasWorkspaces = Array.isArray(workspaces) && workspaces.length > 0
+  // Claude needs a workspace: with none set up it cannot be chosen, so the form falls back to the mock.
+  const runtime = (picked ?? defaultRuntime) === 'claude' && !hasWorkspaces ? 'mock' : (picked ?? defaultRuntime)
   const isClaude = choosable ? runtime === 'claude' : real
+  // A Claude task is always refused without a workspace, so the blank choice is not offered for it: the first workspace is chosen.
+  const chosenWorkspace = isClaude && workspaceId === '' ? (workspaces?.[0] ?? '') : workspaceId
   const [error, setError] = useState<string | null>(null)
   const { busy, run } = useBusy()
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     if (busy) return
-    const opts = { ...(workspaceId === '' ? {} : { workspaceId }), ...(choosable ? { runtime } : {}) }
+    const opts = { ...(chosenWorkspace === '' ? {} : { workspaceId: chosenWorkspace }), ...(choosable ? { runtime } : {}) }
     const result = await run(() => onStart(input, Object.keys(opts).length > 0 ? opts : undefined))
     if (result === undefined) return
     setError(result)
@@ -42,15 +46,15 @@ export function TaskForm({ workspaces, real = false, runtimes, defaultRuntime = 
     {choosable && <>
       <label className="field"><span>Runtime</span>
         <select className="field-input" value={runtime} onChange={(e) => setPicked(e.target.value === 'claude' ? 'claude' : 'mock')}>
-          {runtimes.map((r) => <option key={r.kind} value={r.kind} disabled={!r.available}>{RUNTIME_OPTION_LABEL[r.kind]}{!r.available && ` (not available: ${r.reason ?? 'Claude Agent SDK not installed'})`}</option>)}
+          {runtimes.map((r) => <option key={r.kind} value={r.kind} disabled={!r.available || (r.kind === 'claude' && !hasWorkspaces)}>{RUNTIME_OPTION_LABEL[r.kind]}{!r.available ? ` (not available: ${r.reason ?? 'reason unknown'})` : r.kind === 'claude' && !hasWorkspaces ? ' (not available: no workspace is set up on the server)' : ''}</option>)}
         </select>
       </label>
       {isClaude && <p className="panel-hint">The Claude agent works in the workspace you choose and needs one.</p>}
     </>}
     {workspaces && workspaces.length > 0 && <>
       <label className="field"><span>Workspace</span>
-        <select className="field-input" value={workspaceId} onChange={(e) => setWorkspaceId(e.target.value)}>
-          <option value="">No workspace (simulated approvals can only be allowed once)</option>
+        <select className="field-input" value={chosenWorkspace} onChange={(e) => setWorkspaceId(e.target.value)}>
+          {!isClaude && <option value="">No workspace (simulated approvals can only be allowed once)</option>}
           {workspaces.map((id) => <option key={id} value={id}>{id}</option>)}
         </select>
       </label>

@@ -18,7 +18,7 @@ describe('checkHost', () => {
   })
 
   it('refuses to run the claude runtime as root, unless the owner said they accept it', () => {
-    expect(checkHost({ ...base, uid: 0 }).refuse).toEqual([expect.stringContaining('as root')])
+    expect(checkHost({ ...base, uid: 0 }).refuse).toEqual([expect.stringContaining('Refusing to run the Claude runtime (RUNTIME=claude or ENABLE_CLAUDE_RUNTIME=yes) as root.')])
     expect(checkHost({ ...base, uid: 0, allowRoot: true }).refuse).toEqual([])
   })
 

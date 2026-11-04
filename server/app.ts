@@ -5,7 +5,7 @@ import { resolveApiToken, type ApiToken } from './auth'
 import { acquireDataDirLock } from './dataDirLock'
 import { createSessionStore, type SessionStore } from './session'
 import { openAuditLog, type AuditInput, type AuditLog } from './audit'
-import type { ServerConfig } from './config'
+import { claudeEnabled, type ServerConfig } from './config'
 import { deriveEvents } from './deriveEvents'
 import { EventLog } from './eventLog'
 import { createSecurityGuards, securityHeaders } from './http/guards'
@@ -54,7 +54,7 @@ export function startupRecord(config: ServerConfig, port: number, tokenSource: A
   return {
     action: 'config.startup',
     actor: 'system',
-    detail: `runtime=${config.runtime} claude=${config.runtime === 'claude' || config.enableClaudeRuntime ? 'enabled' : 'disabled'} host=${config.host} port=${port} credentialsConfigured=${config.credentialsConfigured} workspaces=${list(config.workspaces.map((w) => w.id))} allowedTools=${list(config.allowedTools)} allowedOrigins=${list(config.allowedOrigins)} auth=${tokenSource}`,
+    detail: `runtime=${config.runtime} claude=${claudeEnabled(config) ? 'enabled' : 'disabled'} host=${config.host} port=${port} credentialsConfigured=${config.credentialsConfigured} workspaces=${list(config.workspaces.map((w) => w.id))} allowedTools=${list(config.allowedTools)} allowedOrigins=${list(config.allowedOrigins)} auth=${tokenSource}`,
   }
 }
 
@@ -93,10 +93,9 @@ export function createApp(config: ServerConfig, deps: AppDeps = {}): App {
     const audit = deps.audit ?? openAuditLog({ dataDir: config.dataDir, maxBytes: config.auditLogMaxBytes, now, log, hide: config.workspaceRoot ? [config.workspaceRoot] : [] })
     const apiToken = resolveApiToken({ configured: config.apiToken?.reveal() ?? null, dataDir: config.dataDir })
     // The mock is always registered; the claude provider only when the owner asked for it. A task picks one; RUNTIME is the default.
-    const claudeEnabled = config.runtime === 'claude' || config.enableClaudeRuntime
     const registered = new Map<ServerRuntimeProvider['kind'], ServerRuntimeProvider>()
     registered.set('mock', deps.mockProvider ?? new ServerMockProvider({ timings: deps.mockTimings }))
-    if (claudeEnabled) registered.set('claude', deps.claudeProvider ?? new ClaudeAgentRuntimeProvider({ apiKey: config.anthropicApiKey, settings: config.claude, dataDir: config.dataDir, log, protectedRoots: toolPolicyFrom(config).protectedRoots, toolTimeoutMs: config.approvalTimeoutMs + 60000 }))
+    if (claudeEnabled(config)) registered.set('claude', deps.claudeProvider ?? new ClaudeAgentRuntimeProvider({ apiKey: config.anthropicApiKey, settings: config.claude, dataDir: config.dataDir, log, protectedRoots: toolPolicyFrom(config).protectedRoots, toolTimeoutMs: config.approvalTimeoutMs + 60000 }))
     // Test seam: a deps.provider of kind claude registers Claude without ENABLE_CLAUDE_RUNTIME; production wiring never sets it.
     if (deps.provider) registered.set(deps.provider.kind, deps.provider)
     const provider = deps.provider ?? registered.get(config.runtime)!

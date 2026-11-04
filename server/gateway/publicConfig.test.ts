@@ -45,7 +45,7 @@ describe('readPublicConfig', () => {
     expect(errors({ VO_PASSWORD: PW, PUBLIC_HOST: 'a b' })).toEqual(['PUBLIC_HOST must be a host name or address with no spaces.'])
   })
   it('refuses RUNTIME=claude unless allowed', () => {
-    const msg = 'RUNTIME=claude is not allowed on a public address. Set VO_ALLOW_PUBLIC_CLAUDE=yes only after the security prerequisites in docs/milestone-3b5-3-report.md are met.'
+    const msg = 'RUNTIME=claude is not allowed on a public address. Set VO_ALLOW_PUBLIC_CLAUDE=yes only after the security prerequisites in docs/milestone-3b5-prerequisites.md are met.'
     expect(errors({ VO_PASSWORD: PW, RUNTIME: 'claude' })).toEqual([msg])
     expect(errors({ VO_PASSWORD: PW, RUNTIME: 'claude', VO_ALLOW_PUBLIC_CLAUDE: 'no' })).toEqual([msg])
     expect(ok({ VO_PASSWORD: PW, RUNTIME: 'claude', VO_ALLOW_PUBLIC_CLAUDE: 'yes' }).allowClaude).toBe(true)

@@ -11,6 +11,9 @@ export type RuntimeKind = 'mock' | 'claude'
 
 export type ClaudeSettings = { model: string | null; maxTurns: number; maxBudgetUsd: number }
 
+/** True when the Claude provider is registered: RUNTIME=claude, or ENABLE_CLAUDE_RUNTIME=yes next to the mock. The one place this is decided. */
+export const claudeEnabled = (config: Pick<ServerConfig, 'runtime' | 'enableClaudeRuntime'>): boolean => config.runtime === 'claude' || config.enableClaudeRuntime
+
 export type ServerConfig = { host: string; port: number; dataDir: string; runtime: RuntimeKind; taskTimeoutMs: number; cancelGraceMs: number; approvalTimeoutMs: number; maxMessageBytes: number; maxTaskOutputBytes: number; eventBufferSize: number; auditLogMaxBytes: number; workspaceRoot: string | null; workspaces: WorkspaceEntry[]; allowedTools: string[]; allowedOrigins: string[]; credentialsConfigured: boolean; /** The Anthropic API key, wrapped so it cannot print; null when none is set. Server only, read by the Claude provider and nowhere else. */ anthropicApiKey: Secret | null; /** Limits and model for the claude runtime. */ claude: ClaudeSettings; /** Most tasks running at once on the claude runtime (each is a child process and a paid model session). The mock runtime is not limited. */ maxConcurrentTasks: number; /** Claude runtime: when false (the default) a Write or Edit can only be approved once. Only the exact value `yes` turns it on. */ allowBroadWriteScopes: boolean; /** True when ENABLE_CLAUDE_RUNTIME=yes: the Claude runtime is registered next to the mock, and a task can choose it, even though RUNTIME is not claude. */ enableClaudeRuntime: boolean; /** Server-only secret, wrapped so it cannot print; null means one is generated at start. */ apiToken: Secret | null }
 
 export type Env = Record<string, string | undefined>

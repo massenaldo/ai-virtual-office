@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { startServer } from '../server/app'
-import { formatConfigErrors, loadConfig, mergeEnv } from '../server/config'
+import { claudeEnabled, formatConfigErrors, loadConfig, mergeEnv } from '../server/config'
 import { enforceHostSafety } from '../server/hostSafety'
 import { startGateway } from '../server/gateway/gateway'
 import { readPublicConfig } from '../server/gateway/publicConfig'
@@ -66,7 +66,7 @@ try {
   log.error(code === 'EADDRINUSE' ? `Port ${pub.port} is already in use.` : error instanceof Error ? error.message : String(error))
   process.exit(1)
 }
-log.info(`AI Virtual Office (runtime: ${parsed.config.runtime}) listening on ${pub.host}:${gateway.port}; open the HTTPS address InstaBox gives you for this port (any username, the password).`)
+log.info(`AI Virtual Office (runtime: ${parsed.config.runtime}, claude: ${claudeEnabled(parsed.config) ? 'enabled' : 'disabled'}) listening on ${pub.host}:${gateway.port}; open the HTTPS address InstaBox gives you for this port (any username, the password).`)
 log.info(`The backend stays on ${backend.url} and is not reachable from outside.`)
 
 const stop = () => { void Promise.all([gateway.close(), backend.close()]).then(() => process.exit(0)) }

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Secret } from './secret'
-import { CONFIG_VARIABLES, formatConfigErrors, mergeEnv, parseConfig } from './config'
+import { CONFIG_VARIABLES, claudeEnabled, formatConfigErrors, mergeEnv, parseConfig } from './config'
 import { makeWorkspaceRoot } from './test/workspaces'
 
 const DEFAULTS = { host: '127.0.0.1', port: 8787, dataDir: '/repo/data', runtime: 'mock', taskTimeoutMs: 600000, cancelGraceMs: 5000, approvalTimeoutMs: 300000, maxMessageBytes: 32768, maxTaskOutputBytes: 262144, eventBufferSize: 500, auditLogMaxBytes: 5242880, workspaceRoot: null, workspaces: [], allowedTools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'], allowedOrigins: ['http://localhost:5173', 'http://127.0.0.1:5173'], credentialsConfigured: false, anthropicApiKey: null, claude: { model: null, maxTurns: 12, maxBudgetUsd: 0.5 }, maxConcurrentTasks: 2, allowBroadWriteScopes: false, enableClaudeRuntime: false, apiToken: null }
@@ -244,5 +244,13 @@ describe('claude settings', () => {
   ])('refuses %s=%s', (name, value, message) => {
     const r = parseConfig({ [name]: value }, '/repo')
     expect(!r.ok && r.errors[0]).toContain(message)
+  })
+})
+
+describe('claudeEnabled', () => {
+  it('is true for RUNTIME=claude or ENABLE_CLAUDE_RUNTIME=yes, false otherwise', () => {
+    expect(claudeEnabled({ runtime: 'mock', enableClaudeRuntime: false })).toBe(false)
+    expect(claudeEnabled({ runtime: 'claude', enableClaudeRuntime: false })).toBe(true)
+    expect(claudeEnabled({ runtime: 'mock', enableClaudeRuntime: true })).toBe(true)
   })
 })

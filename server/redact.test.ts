@@ -76,7 +76,7 @@ describe('redactSecrets: more secret shapes', () => {
     expectLinear('basic', (n) => `Basic ${'A'.repeat(n)}`, 200000)
     expectLinear('password flags', (n) => '--password '.repeat(n), 5000)
     expectLinear('ghp', (n) => `ghp_${'a'.repeat(n)}`, 200000)
-  })
+  }, SCALING_TIMEOUT_MS)
 })
 
 describe('redactSecrets: JWT, Slack, Google, PEM, -p and URL passwords', () => {
@@ -111,7 +111,7 @@ describe('redactSecrets: JWT, Slack, Google, PEM, -p and URL passwords', () => {
     [`${pem('RSA PRIVATE KEY')}\n${pem('EC PRIVATE KEY')}`, '[REDACTED]\n[REDACTED]'],
   ])('redacts: %s', (input, expected) => {
     expect(redactSecrets(input)).toBe(expected)
-  }, SCALING_TIMEOUT_MS)
+  })
 
   it('redacts every credential URL in a text with no spaces, not only the first', () => {
     expect(redactSecrets('{"a":"https://x.com/","b":"postgres://admin:hunter2@db:5432/app"}')).toBe('{"a":"https://x.com/","b":"postgres://[REDACTED]@db:5432/app"}')

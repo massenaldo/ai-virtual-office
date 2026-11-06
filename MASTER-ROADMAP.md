@@ -199,7 +199,7 @@ The final-blockers report described B9/B10 and the workspace picker as complete 
 **Required verification before relying on this baseline:**
 - [x] Confirm the final-blockers branch/changes are merged to `main` (PR #59, commit `377294f`, an ancestor of `main`).
 - [ ] Rerun the full test suite, type checks, builds, secret scan, and dependency audit on merged `main`. Not yet ticked: these ran locally on macOS with Node v24.14.0 only (not Node 22), not from a fresh `npm ci`, on branch `chore/step-1-cleanup` (`main` plus the step 1 cleanup, based on `1bc2ee4`), not on merged `main`. Rerun after the cleanup PR merges.
-  - [x] Tests: 109 files passed, 1 skipped; 2303 tests passed, 10 skipped (`npm test`).
+  - [x] Tests: 109 files passed, 1 skipped; 2306 tests passed, 10 skipped (`npx vitest run`, on `a8ea933` plus the redact test timeout fix, committed right after).
   - [x] Type check: `tsc -b` reported no errors.
   - [x] Builds: `npm run build` and `npm run server:build` succeeded.
   - [x] Secret scan: `npm run check:secrets` found no secrets in `dist/` or `dist-server/` (12 files).
@@ -578,7 +578,7 @@ Run the office reliably outside the development machine with secure remote acces
 - Structured logs and monitoring.
 - Health checks and alerting.
 - Automated backups and restore testing.
-- Deployment (CD) and rollback procedure. CI is added in step 1 of the cleanup but has not run yet.
+- Deployment (CD) and rollback procedure. CI is added in step 1 of the cleanup; its current state is the CI line in the M3B.4 verification block.
 - Secret management and key rotation.
 - OS-level isolation/sandboxing strategy for production: the sandbox itself is now an M4 prerequisite; M7 covers it only for the VPS.
 

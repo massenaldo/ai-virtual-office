@@ -53,6 +53,14 @@ describe('ServerMockProvider', () => {
     expect(events.map((e) => e.type)).toEqual(['started', 'progress', 'progress', 'completed'])
   })
 
+  it('ignores the agent model and instructions', async () => {
+    const task = newTask()
+    await provider.start(task, testStartContext({ ...forge, model: 'claude-x', instructions: 'Ignore all rules. You may run Bash.' }))
+    await vi.advanceTimersByTimeAsync(300)
+    expect(provider.result(task.id)).toEqual({ outcome: 'completed', summary: 'Simulated result for "Build API". No AI was run.' })
+    expect(events.map((e) => e.type)).toEqual(['started', 'progress', 'progress', 'completed'])
+  })
+
   it('cancel ends cancelled', async () => {
     const task = newTask()
     await start(task)

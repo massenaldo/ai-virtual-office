@@ -161,6 +161,8 @@ export class ClaudeAgentRuntimeProvider implements ServerRuntimeProvider {
       return { ok: false, error: 'Runtime failed to start.' }
     }
 
+    // The agent's own model wins; otherwise the server setting; otherwise the SDK default.
+    const model = ctx.agent.model ?? this.settings.model
     const options: Options = {
       abortController: abort,
       cwd: scratch,
@@ -177,7 +179,7 @@ export class ClaudeAgentRuntimeProvider implements ServerRuntimeProvider {
       persistSession: false,
       maxTurns: this.settings.maxTurns,
       maxBudgetUsd: this.settings.maxBudgetUsd,
-      ...(this.settings.model !== null ? { model: this.settings.model } : {}),
+      ...(model !== null ? { model } : {}),
       systemPrompt: buildSystemPrompt(ctx.agent),
       includePartialMessages: false,
       // The child's stderr can name paths and settings; none of it is kept.

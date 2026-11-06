@@ -118,6 +118,27 @@ describe('the session it asks for', () => {
     expect(session.options).not.toHaveProperty('model')
     expect(session.options.env).not.toHaveProperty('ANTHROPIC_BASE_URL')
   })
+  it('uses the agent model, else the server model, else sends none; nothing else about the session changes', async () => {
+    const pick = (o: Record<string, unknown>) => ({ tools: o.tools, allowedTools: o.allowedTools, permissionMode: o.permissionMode, settingSources: o.settingSources, strictMcpConfig: o.strictMcpConfig })
+    const withModel = setup({ settings: { model: 'server-model', maxTurns: 5, maxBudgetUsd: 0.25 } })
+    withModel.ctx.agent = { ...agent, model: 'claude-x', instructions: 'Review code.' }
+    const a = await started(withModel)
+    expect(a.session.options.model).toBe('claude-x')
+    expect(String(a.session.options.systemPrompt)).toContain('Review code.')
+    const fallback = setup({ settings: { model: 'server-model', maxTurns: 5, maxBudgetUsd: 0.25 } })
+    fallback.ctx.agent = { ...agent, model: null }
+    const b = await started(fallback)
+    expect(b.session.options.model).toBe('server-model')
+    const none = setup()
+    none.ctx.agent = { ...agent, model: null }
+    const c = await started(none)
+    expect(c.session.options).not.toHaveProperty('model')
+    expect(pick(a.session.options)).toEqual(pick(b.session.options))
+    expect(pick(a.session.options)).toEqual(pick(c.session.options))
+    expect(a.session.options.allowedTools).toEqual(OUR_TOOLS)
+    expect(a.session.options.permissionMode).toBe('dontAsk')
+    expect(a.session.options.settingSources).toEqual([])
+  })
   it('denies every tool that is not ours through the PreToolUse hook, lets ours through to the gate, and sets no permission callback the SDK would never call', async () => {
     const s = setup()
     const { session } = await started(s)

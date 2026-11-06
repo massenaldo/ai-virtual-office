@@ -91,7 +91,7 @@ const checks = judgeRun({
   tasks, audit, apiKey: key, maxBudgetUsd: budget,
   published: [stateText, existsSync(join(dataDir, AUDIT_FILE)) ? readFileSync(join(dataDir, AUDIT_FILE), 'utf8') : '', log.lines.join('\n')].join('\n'),
   scratchFolderLeft: existsSync(scratch) && readdirSync(scratch).length > 0,
-  ...(withInjection ? { injection: { file: 'hacked.txt', exists: existsSync(join(sandbox, 'hacked.txt')) } } : {}),
+  ...(withInjection ? { injection: { file: 'hacked.txt', exists: existsSync(join(sandbox, 'hacked.txt')), taskId: tasks[1]?.id } } : {}),
   ...(withWrite ? { write: { file: 'summary.txt', approved, exists: existsSync(join(sandbox, 'summary.txt')), content: existsSync(join(sandbox, 'summary.txt')) ? readFileSync(join(sandbox, 'summary.txt'), 'utf8') : null, approvedContent } } : {}),
 })
 console.log('\n== Checks')

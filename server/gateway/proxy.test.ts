@@ -8,6 +8,7 @@ import { recordingLogger } from '../log'
 import { openEventStream } from '../test/sseClient'
 import { startTestServer, TEST_TOKEN, type TestServer } from '../test/helpers'
 import { startGateway } from './gateway'
+import { createApiProxy } from './proxy'
 
 const PASSWORD = 'a-long-test-password'
 const BASIC = `Basic ${Buffer.from(`u:${PASSWORD}`).toString('base64')}`
@@ -207,6 +208,29 @@ describe('proxy against a stub upstream', () => {
     expect(seen).toEqual([])
   }, 20_000)
 
+  it('answers 401 to a request without a password sent after a 413 on the same connection, and forwards nothing', async () => {
+    const body = Buffer.alloc(2 * 1024 * 1024, 'a')
+    const head = `POST /api/agents HTTP/1.1\r\nHost: x\r\nauthorization: ${BASIC}\r\nsec-fetch-site: same-origin\r\ncontent-type: application/json\r\ncontent-length: ${body.length}\r\n\r\n`
+    const second = 'POST /api/agents HTTP/1.1\r\nHost: x\r\nsec-fetch-site: same-origin\r\ncontent-length: 0\r\n\r\n'
+    const text = await new Promise<string>((resolve, reject) => {
+      const chunks: Buffer[] = []
+      const sock = connect({ host: '127.0.0.1', port: Number(new URL(gw.url).port) })
+      sock.on('data', (c: Buffer) => {
+        chunks.push(c)
+        const t = Buffer.concat(chunks).toString('utf8')
+        if (/HTTP\/1\.1 413 /.test(t) && !t.includes('HTTP/1.1 401 ') && !sock.writableEnded) sock.write(second)
+        if (t.includes('HTTP/1.1 401 ')) { sock.destroy(); resolve(t) }
+      })
+      sock.on('error', reject)
+      sock.on('close', () => resolve(Buffer.concat(chunks).toString('utf8')))
+      sock.write(head)
+      sock.write(body)
+    })
+    expect(text).toMatch(/^HTTP\/1\.1 413 /)
+    expect(text).toContain('HTTP/1.1 401 ')
+    expect(seen).toEqual([])
+  }, 20_000)
+
   it('answers 502 with a fixed sentence when the backend is not reachable', async () => {
     stub.closeAllConnections()
     await new Promise((r) => stub.close(r))
@@ -400,4 +424,74 @@ describe('proxy against the real backend', () => {
     }
     await waitFor(() => server.app.streams.size === base)
   })
+})
+
+// The bounds on the drain after a 413, against a bare proxy so that the gateway's password check is out of the way.
+describe('proxy resource bounds', () => {
+  let stub: Server
+  let proxyServer: Server
+  let forwarded: number
+  let received: number
+  let port: number
+
+  async function start(drainTimeoutMs?: number) {
+    forwarded = 0
+    received = 0
+    stub = createServer((req, res) => { forwarded++; req.resume(); res.end('{}') })
+    await new Promise<void>((r) => stub.listen(0, '127.0.0.1', r))
+    const handler = createApiProxy({ backend: { host: '127.0.0.1', port: (stub.address() as AddressInfo).port }, readToken: () => STUB_TOKEN, log: recordingLogger(), drainTimeoutMs })
+    proxyServer = createServer((req, res) => { req.on('data', (c: Buffer) => { received += c.length }); handler(req, res) })
+    await new Promise<void>((r) => proxyServer.listen(0, '127.0.0.1', r))
+    port = (proxyServer.address() as AddressInfo).port
+  }
+  afterEach(async () => {
+    proxyServer.closeAllConnections()
+    stub.closeAllConnections()
+    await Promise.all([new Promise((r) => proxyServer.close(r)), new Promise((r) => stub.close(r))])
+  })
+
+  const head = (len: number) => `POST /api/agents HTTP/1.1\r\nHost: x\r\nsec-fetch-site: same-origin\r\ncontent-type: application/json\r\ncontent-length: ${len}\r\n\r\n`
+
+  it('closes the connection after about 8 MiB of an oversized body and forwards nothing', async () => {
+    await start()
+    const total = 64 * 1024 * 1024
+    const chunk = Buffer.alloc(256 * 1024, 'a')
+    const sent = await new Promise<number>((resolve) => {
+      let written = 0
+      const sock = connect({ host: '127.0.0.1', port })
+      sock.on('error', () => {})
+      sock.on('close', () => resolve(written))
+      sock.write(head(total))
+      const pump = () => {
+        while (written < total && !sock.destroyed) {
+          written += chunk.length
+          if (!sock.write(chunk)) return void sock.once('drain', pump)
+        }
+        // A proxy that never gave up has now taken everything: stop waiting and let the assertions fail.
+        if (!sock.destroyed) setTimeout(() => sock.destroy(), 1000)
+      }
+      pump()
+    })
+    expect(sent).toBeLessThan(total)
+    expect(received).toBeGreaterThanOrEqual(8 * 1024 * 1024)
+    expect(received).toBeLessThan(10 * 1024 * 1024)
+    expect(forwarded).toBe(0)
+  }, 30_000)
+
+  it('closes the connection soon after the drain timeout for a client that trickles the body', async () => {
+    await start(300)
+    const ms = await new Promise<number>((resolve) => {
+      const t0 = Date.now()
+      const sock = connect({ host: '127.0.0.1', port })
+      sock.on('error', () => {})
+      const timer = setInterval(() => sock.write('a'), 50)
+      // A proxy that never gives up is stopped by the client after 4 s, which fails the assertion below.
+      const giveUp = setTimeout(() => sock.destroy(), 4000)
+      sock.on('close', () => { clearInterval(timer); clearTimeout(giveUp); resolve(Date.now() - t0) })
+      sock.write(head(2 * 1024 * 1024))
+    })
+    expect(ms).toBeGreaterThanOrEqual(250)
+    expect(ms).toBeLessThan(1500)
+    expect(forwarded).toBe(0)
+  }, 15_000)
 })

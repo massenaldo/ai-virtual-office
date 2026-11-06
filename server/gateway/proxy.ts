@@ -6,7 +6,7 @@ import { consoleLogger, type Logger } from '../log'
 // passed on, and the backend's bearer token is injected from readToken() on every request. The token is never written
 // to a response or a log line. Responses (the event stream included) are piped through as they arrive.
 
-export type ApiProxyOptions = { backend: { host: string; port: number }; readToken(): string | null; log?: Logger }
+export type ApiProxyOptions = { backend: { host: string; port: number }; readToken(): string | null; log?: Logger; drainTimeoutMs?: number }
 
 const MAX_BODY_BYTES = 1024 * 1024
 // Everything else (Authorization, Cookie, Origin, Referer, X-Forwarded-*, Forwarded, Sec-Fetch-*, Accept-Encoding) is dropped.
@@ -20,7 +20,7 @@ const TOKEN_UNAVAILABLE = 'The backend token is not available. Is the backend ru
 const DRAIN_LIMIT_BYTES = 8 * MAX_BODY_BYTES
 const DRAIN_TIMEOUT_MS = 10_000
 
-function refuseBody(req: IncomingMessage, res: ServerResponse, alreadyRead: number): void {
+function refuseBody(req: IncomingMessage, res: ServerResponse, alreadyRead: number, drainTimeoutMs: number): void {
   // Node ends the connection right after the answer when the client sent Connection: close, which would reset it while
   // the body is still arriving. Say keep-alive explicitly, and once the drain is over end the connection ourselves (req.socket:
   // res.socket is already detached by then). Delivery of the 413 is best effort above the drain limit: the connection is
@@ -30,7 +30,7 @@ function refuseBody(req: IncomingMessage, res: ServerResponse, alreadyRead: numb
   sendJson(res, 413, 'The request body is too large.')
   let drained = alreadyRead
   const stop = () => { clearTimeout(timer); if (!req.destroyed) req.destroy() }
-  const timer = setTimeout(stop, DRAIN_TIMEOUT_MS)
+  const timer = setTimeout(stop, drainTimeoutMs)
   timer.unref()
   req.on('data', (chunk: Buffer) => { drained += chunk.length; if (drained > DRAIN_LIMIT_BYTES) stop() })
   req.once('end', () => { clearTimeout(timer); if (clientWantsClose) req.socket.end() })
@@ -49,6 +49,7 @@ function sendJson(res: ServerResponse, status: number, error: string): void {
 
 export function createApiProxy(opts: ApiProxyOptions): (req: IncomingMessage, res: ServerResponse) => void {
   const log = opts.log ?? consoleLogger
+  const drainTimeoutMs = opts.drainTimeoutMs ?? DRAIN_TIMEOUT_MS
 
   function forward(req: IncomingMessage, res: ServerResponse, token: string, body: Buffer): void {
     if (res.destroyed) return
@@ -103,7 +104,7 @@ export function createApiProxy(opts: ApiProxyOptions): (req: IncomingMessage, re
 
     const declared = Number(req.headers['content-length'] ?? 0)
     if (declared > MAX_BODY_BYTES) {
-      return refuseBody(req, res, 0)
+      return refuseBody(req, res, 0, drainTimeoutMs)
     }
     const chunks: Buffer[] = []
     let size = 0
@@ -113,7 +114,7 @@ export function createApiProxy(opts: ApiProxyOptions): (req: IncomingMessage, re
       size += chunk.length
       if (size > MAX_BODY_BYTES) {
         tooLarge = true
-        refuseBody(req, res, size)
+        refuseBody(req, res, size, drainTimeoutMs)
         return
       }
       chunks.push(chunk)

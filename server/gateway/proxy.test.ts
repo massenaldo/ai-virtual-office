@@ -24,10 +24,13 @@ function call(url: string, opts: { method?: string; path: string; headers?: Reco
     const req = request({ hostname: u.hostname, port: u.port, path: opts.path, method: opts.method ?? 'GET', headers: { ...(opts.body === undefined ? {} : { 'content-length': String(Buffer.byteLength(opts.body)) }), ...opts.headers } }, (res) => {
       const chunks: Buffer[] = []
       res.on('data', (c: Buffer) => chunks.push(c))
-      res.on('end', () => resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString('utf8') }))
+      res.on('end', () => { reply = { status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString('utf8') } })
       res.on('error', reject)
     })
-    req.on('error', reject)
+    // Settle only once the request is fully done, so a body the server stops reading cannot error after the test is over.
+    let reply: Reply | undefined
+    req.on('close', () => { if (reply) resolve(reply); else reject(new Error('The connection closed without a response.')) })
+    req.on('error', (e) => { if (!reply) reject(e) })
     req.end(opts.body)
   })
 }
@@ -157,6 +160,14 @@ describe('proxy against a stub upstream', () => {
     expect(chunked).toBe(413)
     expect(seen).toEqual([])
     expect((await viaGateway('/api/agents', { 'content-type': 'application/json' }, 'POST', Buffer.alloc(1024 * 1024, 'a'))).status).toBe(200)
+  })
+
+  it('delivers the 413 to every client that sends an oversized body at once', async () => {
+    // A reset sent while the client is still writing used to cost some clients the answer (write EPIPE, no response).
+    const big = Buffer.alloc(1024 * 1024 + 1, 'a')
+    const results = await Promise.all(Array.from({ length: 30 }, () => viaGateway('/api/agents', { 'content-type': 'application/json' }, 'POST', big).then((r) => r.status, (e: Error) => e.message)))
+    expect(results).toEqual(Array.from({ length: 30 }, () => 413))
+    expect(seen).toEqual([])
   })
 
   it('answers 502 with a fixed sentence when the backend is not reachable', async () => {

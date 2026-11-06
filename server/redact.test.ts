@@ -9,6 +9,11 @@ const expectLinear = (name: string, make: (n: number) => string, small: number) 
   expect(r.ratio, `${name}: ${r.smallMs.toFixed(1)} ms then ${r.largeMs.toFixed(1)} ms for 8x the input (n=${r.n})`).toBeLessThan(r.limit)
 }
 
+// Each scaling test times several inputs, each run 5 times at two sizes: together 1.5 to 6 s of CPU on a quiet machine,
+// which is over vitest's 5 s default when the machine is loaded. This is a bound on total test time, not on any one case:
+// expectLinear still fails on the ratio alone.
+const SCALING_TIMEOUT_MS = 60_000
+
 describe('redactSecrets', () => {
   it.each([
     ['key sk-ant-api03-abcdefghijklmnop end', 'key [REDACTED] end'],
@@ -121,7 +126,7 @@ describe('redactSecrets: JWT, Slack, Google, PEM, -p and URL passwords', () => {
     expectLinear('eyJ', (n) => 'eyJ'.repeat(n), 25000)
     expectLinear('eyJ then a run', (n) => `eyJ${'a'.repeat(n)}`, 200000)
     expectLinear('header-like repeats', (n) => 'eyJaaaaaaaaaaaa.'.repeat(n), 8000)
-  })
+  }, SCALING_TIMEOUT_MS)
 
   it('redacts a private key block that scrub cuts short', () => {
     const cut = scrub(`log ${pem('RSA PRIVATE KEY')}`, 100)
@@ -193,7 +198,7 @@ describe('redactSecrets: JWT, Slack, Google, PEM, -p and URL passwords', () => {
     expectLinear('xoxe prefixes', (n) => 'xoxe.xoxp-'.repeat(n), 10000)
     expectLinear('aws assignments', (n) => 'aws_secret_access_key = '.repeat(n), 5000)
     expectLinear('aws long space', (n) => `aws_secret_access_key${' '.repeat(n)}`, 100000)
-  })
+  }, SCALING_TIMEOUT_MS)
 })
 
 describe('PGP and PuTTY private keys', () => {

@@ -15,11 +15,21 @@ const HOP_BY_HOP = new Set(['set-cookie', 'www-authenticate', 'connection', 'kee
 
 const TOKEN_UNAVAILABLE = 'The backend token is not available. Is the backend running?'
 
-function refuseBody(req: IncomingMessage, res: ServerResponse): void {
-  res.setHeader('connection', 'close')
+// After the 413 the rest of the body is read and thrown away, never forwarded. Closing at once would reset the connection
+// while the client is still writing, and the client would see a write error instead of the 413. The drain is bounded.
+const DRAIN_LIMIT_BYTES = 8 * MAX_BODY_BYTES
+const DRAIN_TIMEOUT_MS = 10_000
+
+function refuseBody(req: IncomingMessage, res: ServerResponse, alreadyRead: number): void {
   sendJson(res, 413, 'The request body is too large.')
-  // Only after the answer is out, or the client would see a reset instead of the 413.
-  res.once('finish', () => req.destroy())
+  let drained = alreadyRead
+  const stop = () => { clearTimeout(timer); if (!req.destroyed) req.destroy() }
+  const timer = setTimeout(stop, DRAIN_TIMEOUT_MS)
+  timer.unref()
+  req.on('data', (chunk: Buffer) => { drained += chunk.length; if (drained > DRAIN_LIMIT_BYTES) stop() })
+  req.once('end', () => clearTimeout(timer))
+  req.once('close', () => clearTimeout(timer))
+  req.resume()
 }
 
 function sendJson(res: ServerResponse, status: number, error: string): void {
@@ -87,7 +97,7 @@ export function createApiProxy(opts: ApiProxyOptions): (req: IncomingMessage, re
 
     const declared = Number(req.headers['content-length'] ?? 0)
     if (declared > MAX_BODY_BYTES) {
-      return refuseBody(req, res)
+      return refuseBody(req, res, 0)
     }
     const chunks: Buffer[] = []
     let size = 0
@@ -97,7 +107,7 @@ export function createApiProxy(opts: ApiProxyOptions): (req: IncomingMessage, re
       size += chunk.length
       if (size > MAX_BODY_BYTES) {
         tooLarge = true
-        refuseBody(req, res)
+        refuseBody(req, res, size)
         return
       }
       chunks.push(chunk)

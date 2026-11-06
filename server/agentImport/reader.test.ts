@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import { linkSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -91,12 +92,41 @@ describe('readAgentFiles', () => {
   })
   it('digests the exact bytes', () => {
     mkdirSync(agents(), { recursive: true })
-    const text = '﻿' + doc('A').replace(/\n/g, '\r\n')
+    const text = '\uFEFF' + doc('A').replace(/\n/g, '\r\n')
     writeFileSync(join(agents(), 'a.md'), text)
     const first = readAgentFiles(ws, signal).files[0]!
     expect(first.digest).toBe(createHash('sha256').update(Buffer.from(text)).digest('hex'))
     writeFileSync(join(agents(), 'a.md'), doc('B'))
     expect(readAgentFiles(ws, signal).files[0]!.digest).not.toBe(first.digest)
+  })
+})
+
+describe('readAgentFiles hardening', () => {
+  it('never echoes a refused file name', () => {
+    mkdirSync(agents(), { recursive: true })
+    const names = ['b\u202Eetadpu.md', 'line\nbreak.md', '\u001b[31mred.md', 'ghp_' + 'a'.repeat(36) + '!.md', 'x'.repeat(200) + '.md']
+    for (const n of names) writeFileSync(join(agents(), n), doc('X'))
+    const r = readAgentFiles(ws, signal)
+    expect(r.files).toHaveLength(names.length)
+    for (const f of r.files) {
+      expect(f.ok).toBe(false)
+      expect(f.file).toMatch(/^[ -~]*$/)
+      expect(f.file).not.toMatch(/ghp_|\n/)
+      if (!f.ok) expect(f.error).toMatch(/not allowed/)
+    }
+  })
+  it('gives failed reads an empty digest', () => {
+    mkdirSync(agents(), { recursive: true })
+    writeFileSync(join(agents(), 'bad.md'), 'no front matter')
+    writeFileSync(join(agents(), 'big.md'), 'x'.repeat(65537))
+    for (const f of readAgentFiles(ws, signal).files) { expect(f.ok).toBe(false); if (f.file === 'big.md') expect(f.digest).toBe('') }
+  })
+  it('refuses a FIFO without blocking', () => {
+    mkdirSync(agents(), { recursive: true })
+    execFileSync('mkfifo', [join(agents(), 'pipe.md')])
+    const r = readAgentFiles(ws, signal)
+    expect(r.files[0]).toMatchObject({ file: 'pipe.md', ok: false, digest: '' })
+    expect(readAgentFile(ws, 'pipe.md', signal)?.ok).toBe(false)
   })
 })
 

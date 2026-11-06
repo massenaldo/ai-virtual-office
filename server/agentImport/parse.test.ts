@@ -30,7 +30,7 @@ describe('parseAgentFile', () => {
   })
   it('handles a byte order mark and CRLF', () => {
     const lf = ok(file('name: Forge\ndescription: >\n  a\n  b', 'x\ny'))
-    const crlf = ok('﻿' + file('name: Forge\ndescription: >\n  a\n  b', 'x\ny').replace(/\n/g, '\r\n'))
+    const crlf = ok('\uFEFF' + file('name: Forge\ndescription: >\n  a\n  b', 'x\ny').replace(/\n/g, '\r\n'))
     expect(crlf).toEqual(lf)
     expect(JSON.stringify(crlf)).not.toContain('\\r')
   })
@@ -64,9 +64,9 @@ describe('parseAgentFile', () => {
   })
   it('refuses unsafe characters in values and body', () => {
     expect(bad(file('name: F\u0007x'))).toMatch(/character/i)
-    expect(bad(file('name: F\ndescription: a‮b'))).toMatch(/character/i)
+    expect(bad(file('name: F\ndescription: a\u202Eb'))).toMatch(/character/i)
     expect(bad(file('name: F', 'a\u0000b'))).toMatch(/character/i)
-    expect(bad(file('name: F', 'a​b'))).toMatch(/character/i)
+    expect(bad(file('name: F', 'a\u200Bb'))).toMatch(/character/i)
   })
   it('masks secrets', () => {
     const secret = 'sk-ant-api03-' + 'a'.repeat(40)
@@ -76,6 +76,45 @@ describe('parseAgentFile', () => {
     expect(a.description + a.instructions).not.toContain(secret)
     expect(a.secretsMasked).toBe(true)
     expect(ok(file('name: F')).secretsMasked).toBe(false)
+  })
+})
+
+describe('parseAgentFile hardening', () => {
+  it('refuses oversized instructions even when masking would shrink them', () => {
+    const big = '-----BEGIN RSA PRIVATE KEY-----\n' + 'x'.repeat(AGENT_INSTRUCTIONS_MAX + 5000)
+    expect(bad(file('name: F', big))).toMatch(/instructions/i)
+    expect(bad(file('name: F', 'keep\n' + big))).toMatch(/instructions/i)
+  })
+  it('refuses a front matter line it cannot read as a key', () => {
+    for (const line of ['tools.allow: Bash', 'allowed tools: Bash', `${'k'.repeat(41)}: x`, 'k\u200Bk: x', '{name: Evil, tools: [Bash]}', '- tools: Bash', 'just words']) {
+      expect(bad(file(`name: F\n${line}`))).toMatch(/key/i)
+    }
+  })
+  it('lists quoted ignored keys and counts quoted accepted keys', () => {
+    expect(ok(file('name: F\n"permissionMode": bypassPermissions\n\'tools\': [Bash]')).ignoredFields).toEqual(['permissionMode', 'tools'])
+    expect(bad(file('name: A\n"name": B'))).toMatch(/more than once/)
+    expect(ok(file('"name": Q')).name).toBe('Q')
+  })
+  it('refuses more than 50 other fields', () => {
+    const many = Array.from({ length: 51 }, (_, i) => `k${i}: x`).join('\n')
+    expect(bad(file(`name: F\n${many}\npermissionMode: bypassPermissions`))).toMatch(/more than 50/)
+    const fifty = Array.from({ length: 50 }, (_, i) => `k${i}: x`).join('\n')
+    expect(ok(file(`name: F\n${fifty}`)).ignoredFields).toHaveLength(50)
+  })
+  it('does not list a secret-shaped key verbatim', () => {
+    const key = 'ghp_' + 'a'.repeat(36)
+    const a = ok(file(`name: F\n${key}: x`))
+    expect(JSON.stringify(a)).not.toContain(key)
+    expect(a.ignoredFields).toHaveLength(1)
+  })
+  it('refuses a secret-shaped model', () => {
+    expect(bad(file('name: F\nmodel: ghp_' + 'a'.repeat(36)))).toMatch(/model/i)
+    expect(bad(file('name: F\nmodel: sk-ant-api03-' + 'a'.repeat(40)))).toMatch(/model/i)
+  })
+  it('does not treat unicode whitespace after a marker as a marker', () => {
+    expect(bad('---\u00A0\nname: F\n---\nbody')).toMatch(/\.$/)
+    expect(bad('---\nname: F\n---\u2028\nbody')).toMatch(/never closed/)
+    expect(ok('---  \nname: F\n---\t\nbody').name).toBe('F')
   })
 })
 

@@ -20,11 +20,13 @@ export type ParsedAgentFile = {
 type Parsed = { ok: true; agent: ParsedAgentFile } | { ok: false; error: string }
 
 const ACCEPTED = new Set(['name', 'description', 'model'])
-const KEY_LINE = /^([A-Za-z0-9_-]{1,40})[ \t]*:(.*)$/
+const KEY_NAME = /^[A-Za-z0-9_-]{1,40}$/
 const BLOCK_HEADER = /^[>|][+-]?$/
 const ANY_CONTROL = /[\u0000-\u001f\u007f-\u009f]/
 const MAX_IGNORED_LISTED = 50
 
+/** Only spaces and tabs count as blanks around a marker; other Unicode whitespace does not. */
+const stripBlanks = (line: string): string => line.replace(/[ \t]+$/, '')
 const fail = (error: string): Parsed => ({ ok: false, error })
 const indentOf = (line: string): number => line.length - line.trimStart().length
 
@@ -60,9 +62,9 @@ function cut(text: string, max: number): string {
 }
 
 export function parseAgentFile(text: string): Parsed {
-  const all = text.replace(/^﻿/, '').replace(/\r\n?/g, '\n').split('\n')
-  if (all[0]?.trimEnd() !== '---') return fail('The file must start with a "---" line that opens the front matter.')
-  const close = all.findIndex((l, i) => i > 0 && l.trimEnd() === '---')
+  const all = text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').split('\n')
+  if (stripBlanks(all[0] ?? '') !== '---') return fail('The file must start with a "---" line that opens the front matter.')
+  const close = all.findIndex((l, i) => i > 0 && stripBlanks(l) === '---')
   if (close === -1) return fail('The front matter is never closed: add a "---" line after it.')
 
   const values = new Map<string, string>()
@@ -75,16 +77,23 @@ export function parseAgentFile(text: string): Parsed {
   for (const line of all.slice(1, close)) {
     const indented = line.startsWith(' ') || line.startsWith('\t')
     if (indented || line.trim() === '') { current?.rest.push(line); continue }
-    const m = KEY_LINE.exec(line)
-    if (!m) { finish(); continue }
     finish()
-    const key = m[1]!
+    if (line.trimStart().startsWith('#')) continue
+    const colon = line.indexOf(':')
+    const key = colon === -1 ? '' : unquote(line.slice(0, colon))
+    if (!KEY_NAME.test(key)) return fail('The front matter has a line that is not a "key: value" pair with a plain key (letters, digits, dashes and underscores), so it was not imported.')
+    const first = line.slice(colon + 1)
     if (ACCEPTED.has(key)) {
       if (values.has(key)) return fail(`The "${key}" field appears more than once.`)
       // Reserve the slot so a second one is caught even before this value is finished.
       values.set(key, '')
-    } else if (!ignored.includes(key) && ignored.length < MAX_IGNORED_LISTED) ignored.push(key)
-    current = { key, first: m[2]!, rest: [] }
+    } else {
+      // A key that looks like a secret is listed masked, never verbatim.
+      const shown = redactSecrets(key)
+      if (!ignored.includes(shown)) ignored.push(shown)
+      if (ignored.length > MAX_IGNORED_LISTED) return fail(`The front matter has more than ${MAX_IGNORED_LISTED} other fields, so it was not imported.`)
+    }
+    current = { key, first, rest: [] }
   }
   finish()
 
@@ -99,7 +108,9 @@ export function parseAgentFile(text: string): Parsed {
   }
   if (ANY_CONTROL.test(rawName)) return fail('The name must be a single line without tabs or control characters.')
   if (rawName.length > NAME_MAX) return fail(`The name must be ${NAME_MAX} characters or fewer.`)
+  if (redactSecrets(rawModel) !== rawModel) return fail('The model looks like a secret, so the file was not imported.')
   if (rawModel && rawModel !== 'inherit' && !MODEL_NAME_PATTERN.test(rawModel)) return fail('The model is not a valid model name.')
+  if (body.length > AGENT_INSTRUCTIONS_MAX) return fail(`The instructions are longer than ${AGENT_INSTRUCTIONS_MAX} characters.`)
 
   let masked = false
   const mask = (v: string): string => {

@@ -83,6 +83,7 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
   // The approval whose full change has been opened: Approve stays disabled until then (Deny never is).
   const [reviewOpenFor, setReviewOpenFor] = useState<string | null>(null)
   const cancel = useBusy()
+  const clearing = useBusy()
   // With a backend the person also chooses how far an allow reaches; the browser demo keeps Approve and Deny.
   const remote = workforce.permissions !== null
   // The demo routes exist only while the default runtime is the mock; under RUNTIME=claude a mock task can run without them.
@@ -102,6 +103,10 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
     const r = await cancel.run(() => actions.cancelTask(task.id))
     if (r !== undefined) setActionError(r.ok ? null : r.error)
   }
+  const clearError = async () => {
+    const r = await clearing.run(() => actions.clearAgentError(agent.id))
+    if (r !== undefined) setActionError(r.ok ? null : r.error)
+  }
   const start = async (input: TaskInput, opts?: { workspaceId?: string | null; runtime?: 'mock' | 'claude' }) => {
     const r = await actions.startTask(agent.id, input, opts)
     return r.ok ? null : r.error
@@ -116,14 +121,15 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
       {chip && <span className="agent-chip">{chip}</span>}
     </div>
     <div className="field-static"><span>Status</span><strong>{agentStatusText(state, agent)}</strong></div>
-    {agent.description && <p className="panel-hint">{agent.description}</p>}
-    <div className="field-static"><span>Instructions</span><strong>{agent.instructions ? 'Custom instructions set' : 'No custom instructions'}</strong></div>
+    {agent.description.trim() && <p className="panel-hint">{agent.description}</p>}
+    <div className="field-static"><span>Instructions</span><strong>{agent.instructions.trim() ? 'Custom instructions set' : 'No custom instructions'}</strong></div>
     <div className="field-static"><span>Model</span><strong>{agent.model ?? 'Server default'}</strong></div>
     <div className="panel-actions">
-      {agent.status === 'error' && !task && <button className="panel-button" onClick={() => void actions.clearAgentError(agent.id)}>Clear error</button>}
+      {agent.status === 'error' && !active && <button className="panel-button" disabled={clearing.busy} onClick={clearError}>Clear error</button>}
       <button className="panel-button" onClick={onEdit}><Pencil size={13}/> Edit</button>
       <button className="panel-button danger" onClick={onRemove}><Trash2 size={13}/> Remove</button>
     </div>
+    {actionError && !task?.pendingApproval && !active && <p className="form-error" role="alert">{actionError}</p>}
 
     <div className="field-group-label section">Workstation</div>
     {desk.kind === 'unavailable' && <p className="desk-warning" role="status"><AlertTriangle size={12}/> Workstation unavailable — {desk.deskId} is no longer in the layout. Pick another desk.</p>}

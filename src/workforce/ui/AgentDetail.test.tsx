@@ -7,6 +7,7 @@ import { createDemoWorkforce } from '../demo'
 import { emptyPermissions, withLists, type PermissionsState } from '../permissions'
 import type { ToolReview } from '../types'
 import type { Workforce } from '../useWorkforce'
+import { applyRuntimeEvent, assignTask, markStarting, recoverInterruptedTasks } from '../operations'
 import AgentDetail, { TaskForm } from './AgentDetail'
 
 const NOW = '2026-11-03T09:00:00.000Z'
@@ -201,11 +202,37 @@ describe('AgentDetail profile', () => {
     expect(h).toContain('Server default')
   })
 
-  it('offers Clear error for an errored agent with no active task, and only then', () => {
-    const noTask = (s: Partial<typeof agent>) => profile({ currentTaskId: null, ...s }, { tasks: demo.tasks.filter((t) => t.agentId !== agent.id) })
-    expect(noTask({ status: 'error' })).toContain('Clear error</button>')
-    expect(noTask({ status: 'idle' })).not.toContain('Clear error')
-    const active = { tasks: [{ ...(demo.tasks[0] ?? ({} as never)), id: 'tk', agentId: agent.id, status: 'running' as const }] }
-    expect(profile({ status: 'error', currentTaskId: 'tk' }, active)).not.toContain('Clear error')
+  const render = (state: typeof demo) => renderToStaticMarkup(<AgentDetail workforce={{ state, permissions: null, actions: {} as WorkforceController } as unknown as Workforce} layout={layout} agent={state.agents.find((a) => a.id === agent.id)!} onBack={() => {}} onEdit={() => {}} onRemove={() => {}} onFocusDesk={() => {}}/>)
+  const assigned = () => {
+    const r = assignTask(demo, agent.id, { title: 'T', description: '' }, NOW)
+    if (!r.ok) throw new Error(r.error)
+    return { state: markStarting(r.state, r.taskId, NOW), taskId: r.taskId }
+  }
+
+  it('offers Clear error after a task that failed through the real operations', () => {
+    const { state, taskId } = assigned()
+    const running = applyRuntimeEvent(state, { type: 'started', taskId, executionId: 'e1' }, NOW, 'mock')
+    expect(render(running)).not.toContain('Clear error')
+    const failed = applyRuntimeEvent(running, { type: 'failed', taskId, error: 'boom' }, NOW, 'mock')
+    expect(failed.agents.find((a) => a.id === agent.id)!.status).toBe('error')
+    expect(render(failed)).toContain('Clear error</button>')
+  })
+
+  it('offers Clear error after a run interrupted by a reload', () => {
+    const { state, taskId } = assigned()
+    const running = applyRuntimeEvent(state, { type: 'started', taskId, executionId: 'e1' }, NOW, 'mock')
+    const recovered = recoverInterruptedTasks(running, NOW)
+    expect(recovered.agents.find((a) => a.id === agent.id)!.status).toBe('error')
+    expect(render(recovered)).toContain('Clear error</button>')
+  })
+
+  it('does not offer Clear error for an idle agent', () => {
+    expect(render(demo)).not.toContain('Clear error')
+  })
+
+  it('treats blank instructions and description as empty', () => {
+    const h = profile({ description: '   ', instructions: '  \n ' })
+    expect(h).toContain('No custom instructions')
+    expect(h).not.toContain('Custom instructions set')
   })
 })

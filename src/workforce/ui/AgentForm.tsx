@@ -42,6 +42,7 @@ export default function AgentForm({ agent, onSubmit, onCancel }: AgentFormProps)
     <label className="field"><span>Model</span><input className="field-input" value={input.model} placeholder="Server default" spellCheck={false} onChange={(e) => setInput({ ...input, model: e.target.value })}/></label>
     <p className="panel-hint">Only used on the Claude runtime. Leave empty for the server default.</p>
     <label className="field-check"><input type="checkbox" checked={input.takesPrayerBreaks} onChange={(e) => setInput({ ...input, takesPrayerBreaks: e.target.checked })}/><span>Takes prayer breaks</span></label>
+    <p className="panel-hint">Takes effect when the daily routine arrives in a later update.</p>
     {error && <p className="form-error" role="alert">{error}</p>}
     <div className="panel-actions">
       <button type="submit" className="panel-button primary" disabled={busy}>{agent ? 'Save changes' : 'Create agent'}</button>

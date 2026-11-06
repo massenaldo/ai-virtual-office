@@ -62,7 +62,8 @@ describe('POST /api/permissions', () => {
       for (let i = 0; i < 600 && last.ok; i++) last = small.app.permissions.grant({ scope: 'agent', effect: 'deny', tool: 'Grep', agentId: FORGE, reason: `r${i}` })
       expect(await small.api('POST', '/api/permissions', { scope: 'global', effect: 'deny', tool: 'Glob' })).toMatchObject({ status: 409, body: { error: 'Too many active permissions.' } })
     } finally { await small.close() }
-  })
+    // Filling to the limit takes ~500 grants, each saving the whole file atomically (about 2.7 s alone), so it needs more than the 5 s default under load.
+  }, 30_000)
 
   it('needs the token and a JSON content type', async () => {
     expect((await rawRequest(s.url, { method: 'POST', path: '/api/permissions', noAuth: true, headers: { 'content-type': 'application/json' }, body: '{}' })).status).toBe(401)

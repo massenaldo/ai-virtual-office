@@ -4,7 +4,7 @@ Date: 2026-11-03. Branch `chore/3b5-prerequisites`, based on `main` at `1fb866f`
 
 | # | Prerequisite | Status |
 |---|---|---|
-| 1 | A first run with a real key and a small budget | **Prepared, not done.** I have no API key, so a person must run it: `scripts/claudeRealRun.ts` and `docs/first-real-run.md` |
+| 1 | A first run with a real key and a small budget | **Partly done.** The read-only run with the injection probe was run by you and passed (all eight checks, $0.0257 estimated spend); the `--write` run is still to do. Result: `docs/first-real-run-safety-checklist.md`; how: `scripts/claudeRealRun.ts` and `docs/first-real-run.md` |
 | 2 | An independent security review | **Done, and acted on.** Two independent adversarial reviews by a fresh Opus reviewer with no hand in the code; every finding was fixed or recorded; a second review of the fixes; see below |
 | 3 | The dedicated-OS-user decision | **Decided and enforced where it can be.** `docs/os-user-hardening.md`; the server now refuses the worst setups and warns about the rest |
 
@@ -12,7 +12,7 @@ Date: 2026-11-03. Branch `chore/3b5-prerequisites`, based on `main` at `1fb866f`
 
 ## 1. First real run (you run it)
 
-Nothing has yet been seen with a real model: not its answers, not its behaviour with the tools, not the cost. Run `ANTHROPIC_API_KEY=... npx tsx scripts/claudeRealRun.ts --injection --budget 0.10` (add `--write` to be shown and approve a write yourself). It works in a temporary folder, spends at most the cap per task, and prints PASS/FAIL for: an answer was produced, no foreign tool was requested, the startup check passed, a file was read through the gate, the spend stayed within the cap, the key is in no log or state, the scratch folder was removed, an injected instruction did not write anything (and whether the model **tried**), and a write happened only as approved. A dry run with a dummy key confirmed the script's own mechanics (it starts a real session, reports the sign-in failure, cleans up, never prints the key). Read `docs/first-real-run.md` first and set a spending limit on the key in the Anthropic console.
+**Update 2026-11-05:** the read-only run with `--injection` was done and passed; see "Result of the first run" in `docs/first-real-run-safety-checklist.md`. The text below is what was prepared; the `--write` run is still open. Before it, nothing had been seen with a real model: not its answers, not its behaviour with the tools, not the cost. Run `ANTHROPIC_API_KEY=... npx tsx scripts/claudeRealRun.ts --injection --budget 0.10` (add `--write` to be shown and approve a write yourself). It works in a temporary folder, spends at most the cap per task, and prints PASS/FAIL for: an answer was produced, no foreign tool was requested, the startup check passed, a file was read through the gate, the spend stayed within the cap, the key is in no log or state, the scratch folder was removed, an injected instruction did not write anything (and whether the model **tried**), and a write happened only as approved. A dry run with a dummy key confirmed the script's own mechanics (it starts a real session, reports the sign-in failure, cleans up, never prints the key). Read `docs/first-real-run.md` first and set a spending limit on the key in the Anthropic console.
 
 ## 2. The security review
 

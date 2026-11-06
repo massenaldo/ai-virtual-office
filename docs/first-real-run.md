@@ -17,15 +17,17 @@ It works only in a temporary folder under your system's temp directory. It does 
 ## Before you run it
 
 - Use a key with a **spending limit set in the Anthropic console** (the cap in this script is the SDK's own estimate and can be passed by a little).
-- Put the key in the environment of the one command; do not write it to a file for this.
-- Prefer the dedicated user from `docs/os-user-hardening.md`. The server prints a warning if your user keeps credentials in its home; for a first run with a capped key that is acceptable.
+- Do not put the key on a command line (it would land in your shell history) and do not write it to a file: type it with `read -rs` as shown below, and `unset` it afterwards.
+- Prefer the dedicated user from `docs/os-user-hardening.md`, and check the run user yourself (`id`, `groups`, `ls -la ~`): **this script does not run the host-safety checks and prints no startup warnings** (only the server entry points do). A user in the `sudo` or `docker` group, or with `~/.ssh` in its home, is the case that document is about.
 - A run costs a few cents at the default cap.
 
 ## Run it
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-... npx tsx scripts/claudeRealRun.ts --injection --budget 0.10          # read-only and the injection probe
-ANTHROPIC_API_KEY=sk-ant-... npx tsx scripts/claudeRealRun.ts --injection --write --budget 0.10  # also a write you approve or refuse
+read -rs ANTHROPIC_API_KEY && export ANTHROPIC_API_KEY         # type the key; nothing is echoed
+npx tsx scripts/claudeRealRun.ts --injection --budget 0.10          # read-only and the injection probe
+npx tsx scripts/claudeRealRun.ts --injection --write --budget 0.10  # also a write you approve or refuse
+unset ANTHROPIC_API_KEY                                             # when you have finished
 ```
 
 Exit code 0 means every check passed. Keep the output.
@@ -40,3 +42,7 @@ Exit code 0 means every check passed. Keep the output.
 ## If a check fails
 
 Do not enable writes on a real workspace. Send me the output (it contains no key) and what the console shows.
+
+## Status
+
+The read-only run with `--injection` has been done and passed (see `docs/first-real-run-safety-checklist.md`, "Result of the first run"). The `--write` run has not been done yet.

@@ -105,6 +105,8 @@ kbd{background:#18212d;border:1px solid #303948;border-radius:4px;padding:1px 5p
 .panel-button.primary{background:#a89af5;color:#19182a;border-color:#a89af5;font-weight:700}
 .panel-button.primary:hover{background:#b9adff}
 .field-group-label.section{margin-top:16px;padding-top:12px;border-top:1px solid #1e2733;text-transform:uppercase;font-weight:700;letter-spacing:.08em}
+.field-check{display:flex;align-items:center;gap:8px;margin-bottom:10px;color:#e9edf4;font-size:11px}
+.field-check input{accent-color:#a89af5}
 textarea.field-input{resize:vertical;min-height:54px;font-family:inherit}
 .form-error{color:#ff8a8a;font-size:10px;margin:-4px 0 10px}
 .desk-warning{display:flex;gap:6px;align-items:flex-start;color:#ffb4b4;background:#2a1517;border:1px solid #5c2629;border-radius:6px;padding:7px 8px;font-size:10px;line-height:1.4;margin:0 0 10px}

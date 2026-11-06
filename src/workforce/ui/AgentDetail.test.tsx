@@ -180,3 +180,32 @@ describe('AgentDetail task usage', () => {
     expect(h).not.toContain('(estimate)')
   })
 })
+
+
+describe('AgentDetail profile', () => {
+  const profile = (patch: Partial<typeof agent>, extra: Partial<typeof demo> = {}, actions: Partial<WorkforceController> = {}) => {
+    const state = { ...demo, ...extra, agents: demo.agents.map((a) => (a.id === agent.id ? { ...a, ...patch } : a)) }
+    return renderToStaticMarkup(<AgentDetail workforce={{ state, permissions: null, actions } as unknown as Workforce} layout={layout} agent={state.agents.find((a) => a.id === agent.id)!} onBack={() => {}} onEdit={() => {}} onRemove={() => {}} onFocusDesk={() => {}}/>)
+  }
+
+  it('shows the description, instruction state and model', () => {
+    const h = profile({ description: 'Plans the sprint', instructions: 'Be brief', model: 'claude-x' })
+    expect(h).toContain('Plans the sprint')
+    expect(h).toContain('Custom instructions set')
+    expect(h).toContain('claude-x')
+  })
+
+  it('says so when there are no instructions and no model', () => {
+    const h = profile({ description: '', instructions: '', model: null })
+    expect(h).toContain('No custom instructions')
+    expect(h).toContain('Server default')
+  })
+
+  it('offers Clear error for an errored agent with no active task, and only then', () => {
+    const noTask = (s: Partial<typeof agent>) => profile({ currentTaskId: null, ...s }, { tasks: demo.tasks.filter((t) => t.agentId !== agent.id) })
+    expect(noTask({ status: 'error' })).toContain('Clear error</button>')
+    expect(noTask({ status: 'idle' })).not.toContain('Clear error')
+    const active = { tasks: [{ ...(demo.tasks[0] ?? ({} as never)), id: 'tk', agentId: agent.id, status: 'running' as const }] }
+    expect(profile({ status: 'error', currentTaskId: 'tk' }, active)).not.toContain('Clear error')
+  })
+})

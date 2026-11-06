@@ -43,6 +43,8 @@ export type WorkforceController = {
   createAgent(input: AgentInput): Awaitable<{ ok: true; id: string } | { ok: false; error: string }>
   updateAgent(id: string, patch: Partial<AgentInput>): Awaitable<ActionResult>
   removeAgent(id: string): void
+  /** Returns an agent that ended in error, with no active task, to idle. */
+  clearAgentError(id: string): Awaitable<ActionResult>
   assignDesk(agentId: string, deskId: string | null): Awaitable<ActionResult>
   /** workspaceId: backend mode only; the server accepts only a workspace it registered and refuses anything else. */
   startTask(agentId: string, input: TaskInput, opts?: { workspaceId?: string | null; runtime?: 'mock' | 'claude' }): Awaitable<ActionResult>
@@ -113,6 +115,12 @@ export function createWorkforceController(opts: { storage: KV | null; now?: () =
       const r = ops.removeAgent(current, id)
       commit(r.state)
       if (r.cancelledTaskId) runtime.cancel(r.cancelledTaskId)
+    },
+    clearAgentError(id) {
+      const r = ops.clearAgentError(current, id, now())
+      if (!r.ok) return r
+      commit(r.state)
+      return { ok: true }
     },
     assignDesk(agentId, deskId) {
       const r = ops.assignDesk(current, agentId, deskId, now())

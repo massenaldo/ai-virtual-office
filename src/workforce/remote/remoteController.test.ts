@@ -49,6 +49,11 @@ describe('createRemoteWorkforceController: permissions', () => {
 })
 
 describe('createRemoteWorkforceController', () => {
+  it('exposes clearAgentError', () => {
+    make()
+    expect(typeof c.clearAgentError).toBe('function')
+  })
+
   it('createAgent shows the agent before its event arrives', async () => {
     make()
     await flush()

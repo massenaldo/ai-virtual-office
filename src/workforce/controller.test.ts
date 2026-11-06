@@ -35,6 +35,18 @@ const task = (agentId: string) => state().tasks.filter((t) => t.agentId === agen
 const agent = (id: string) => state().agents.find((a) => a.id === id)
 const saved = () => JSON.parse(storage.data.get(WORKFORCE_STORAGE_KEY)!)
 
+describe('createWorkforceController clearAgentError', () => {
+  it('returns an errored agent with no active task to idle, and refuses an unknown agent', () => {
+    const id = state().agents.find((a) => a.status === 'idle')!.id
+    c.startTask(id, { title: 'T', description: '' })
+    c.forceError(task(id)!.id)
+    expect(agent(id)!.status).toBe('error')
+    expect(c.clearAgentError(id)).toEqual({ ok: true })
+    expect(agent(id)!.status).toBe('idle')
+    expect(c.clearAgentError('nope')).toEqual({ ok: false, error: 'Agent not found.' })
+  })
+})
+
 describe('createWorkforceController', () => {
   it('seeds the demo without saving until the first change', async () => {
     expect(state().agents).toHaveLength(6)

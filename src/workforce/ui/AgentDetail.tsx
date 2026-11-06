@@ -116,7 +116,11 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
       {chip && <span className="agent-chip">{chip}</span>}
     </div>
     <div className="field-static"><span>Status</span><strong>{agentStatusText(state, agent)}</strong></div>
+    {agent.description && <p className="panel-hint">{agent.description}</p>}
+    <div className="field-static"><span>Instructions</span><strong>{agent.instructions ? 'Custom instructions set' : 'No custom instructions'}</strong></div>
+    <div className="field-static"><span>Model</span><strong>{agent.model ?? 'Server default'}</strong></div>
     <div className="panel-actions">
+      {agent.status === 'error' && !task && <button className="panel-button" onClick={() => void actions.clearAgentError(agent.id)}>Clear error</button>}
       <button className="panel-button" onClick={onEdit}><Pencil size={13}/> Edit</button>
       <button className="panel-button danger" onClick={onRemove}><Trash2 size={13}/> Remove</button>
     </div>

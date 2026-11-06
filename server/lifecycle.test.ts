@@ -40,7 +40,7 @@ describe('mock lifecycle over HTTP and SSE', () => {
     await begin()
     const id = await startTask()
     await x.until(isType('task.completed'))
-    await x.until((e) => e.type === 'agent.status_changed' && (e as ChangeEvent).to === 'completed')
+    await x.until((e) => e.type === 'agent.status_changed' && (e as ChangeEvent).to === 'idle')
     expect(inOrder(typesFor(id), ['task.queued', 'task.started', 'task.progress', 'task.progress', 'task.completed', 'agent.status_changed'])).toBe(true)
     const task = (await state()).state.tasks[0]
     expect(task).toMatchObject({ status: 'completed', endedReason: 'completed', resultSummary: 'Simulated result for "Build API". No AI was run.' })

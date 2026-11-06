@@ -1,11 +1,13 @@
 import { DEPARTMENTS } from '../layout/catalog'
 import { createDemoWorkforce } from './demo'
-import { emptyWorkforce, isActiveTask, recoverInterruptedTasks } from './operations'
-import { ACTIVITY_LIMIT, REVIEW_MAX_BYTES, WORKFORCE_SCHEMA_VERSION, type ActivityType, type Agent, type AgentActivity, type AgentStatus, type AgentTask, type PendingApproval, type ToolReview, type TaskEndReason, type TaskRuntime, type TaskStatus, type WorkforceState, validUsage } from './types'
+import { emptyWorkforce, isActiveTask, MODEL_NAME_PATTERN, recoverInterruptedTasks } from './operations'
+import { ACTIVITY_LIMIT, AGENT_DESCRIPTION_MAX, AGENT_INSTRUCTIONS_MAX, REVIEW_MAX_BYTES, WORKFORCE_SCHEMA_VERSION, type ActivityType, type Agent, type AgentActivity, type AgentStatus, type AgentTask, type PendingApproval, type ToolReview, type TaskEndReason, type TaskRuntime, type TaskStatus, type WorkforceState, validUsage } from './types'
 
 // Kept apart from the layout key so agent changes can never overwrite the saved office.
-export const WORKFORCE_STORAGE_KEY = 'ai-virtual-office:workforce:v2'
-export const WORKFORCE_BACKUP_KEY = 'ai-virtual-office:workforce:v2:backup'
+export const WORKFORCE_STORAGE_KEY = 'ai-virtual-office:workforce:v3'
+export const WORKFORCE_BACKUP_KEY = 'ai-virtual-office:workforce:v3:backup'
+/** Schema v2 data: read once for migration, never written or removed, so it doubles as a backup. */
+export const WORKFORCE_V2_KEY = 'ai-virtual-office:workforce:v2'
 /** Schema v1 data from milestone 3A: read once for migration, never written or removed, so it doubles as a backup. */
 export const WORKFORCE_V1_KEY = 'ai-virtual-office:workforce:v1'
 
@@ -16,7 +18,7 @@ export type WorkforceLoadProblem = 'corrupt' | 'unsupported-version' | 'unavaila
 export type Preserved = 'backup-created' | 'backup-exists' | 'left-in-place'
 export type WorkforceLoadResult = { state: WorkforceState; seeded: boolean; migrated: boolean; problem: WorkforceLoadProblem | null; preserved: Preserved | null }
 
-const AGENT_STATUSES: AgentStatus[] = ['idle', 'working', 'thinking', 'waiting', 'error', 'completed']
+const AGENT_STATUSES: AgentStatus[] = ['idle', 'working', 'thinking', 'waiting', 'error']
 const TASK_STATUSES: TaskStatus[] = ['queued', 'starting', 'running', 'waiting_for_approval', 'completed', 'failed', 'cancelling', 'cancelled']
 const TASK_RUNTIMES: TaskRuntime[] = ['mock', 'claude']
 const END_REASONS: TaskEndReason[] = ['completed', 'failed', 'cancelled', 'timeout']
@@ -30,7 +32,7 @@ const TASK_ACTIVITIES: ActivityType[] = ['task-assigned', 'task-started', 'task-
 export function serializeWorkforce(s: WorkforceState): string {
   return JSON.stringify({
     schemaVersion: s.schemaVersion,
-    agents: s.agents.map((a) => ({ id: a.id, name: a.name, role: a.role, department: a.department, deskId: a.deskId, status: a.status, currentTaskId: a.currentTaskId, runtimeMode: a.runtimeMode, demo: a.demo, createdAt: a.createdAt, lastActivityAt: a.lastActivityAt })),
+    agents: s.agents.map((a) => ({ id: a.id, name: a.name, role: a.role, department: a.department, deskId: a.deskId, status: a.status, currentTaskId: a.currentTaskId, runtimeMode: a.runtimeMode, demo: a.demo, createdAt: a.createdAt, lastActivityAt: a.lastActivityAt, description: a.description, instructions: a.instructions, model: a.model, takesPrayerBreaks: a.takesPrayerBreaks, sourceFile: a.sourceFile })),
     tasks: s.tasks.map((t) => ({ id: t.id, agentId: t.agentId, title: t.title, description: t.description, status: t.status, createdAt: t.createdAt, startedAt: t.startedAt, completedAt: t.completedAt, resultSummary: t.resultSummary, errorMessage: t.errorMessage, executionId: t.executionId, timeoutMs: t.timeoutMs, runtime: t.runtime, workspaceId: t.workspaceId, sessionId: t.sessionId, endedReason: t.endedReason, usage: t.usage && { turns: t.usage.turns, costUsd: t.usage.costUsd }, pendingApproval: t.pendingApproval && { id: t.pendingApproval.id, tool: t.pendingApproval.tool, summary: t.pendingApproval.summary, requestedAt: t.pendingApproval.requestedAt, digest: t.pendingApproval.digest, review: t.pendingApproval.review, onceOnly: t.pendingApproval.onceOnly } })),
     activities: s.activities.slice(-ACTIVITY_LIMIT).map((a) => ({
       id: a.id, agentId: a.agentId, taskId: a.taskId, type: a.type, message: a.message, timestamp: a.timestamp, source: a.source,
@@ -52,7 +54,9 @@ const isOneOf = <T extends string>(v: unknown, values: readonly T[]): v is T => 
 function parseAgent(v: unknown): Agent | null {
   if (!isObject(v) || !isText(v.id) || !isText(v.name) || !isText(v.role) || typeof v.department !== 'string' || v.department === 'meeting' || !(v.department in DEPARTMENTS)) return null
   if (!isTextOrNull(v.deskId) || !isOneOf(v.status, AGENT_STATUSES) || !isTextOrNull(v.currentTaskId) || !isOneOf(v.runtimeMode, MODES) || typeof v.demo !== 'boolean' || !isTime(v.createdAt) || !isTimeOrNull(v.lastActivityAt)) return null
-  return { id: v.id, name: v.name, role: v.role, department: v.department as Agent['department'], deskId: v.deskId, status: v.status, currentTaskId: v.currentTaskId, runtimeMode: v.runtimeMode as Agent['runtimeMode'], demo: v.demo, createdAt: v.createdAt, lastActivityAt: v.lastActivityAt }
+  if (typeof v.description !== 'string' || v.description.length > AGENT_DESCRIPTION_MAX || typeof v.instructions !== 'string' || v.instructions.length > AGENT_INSTRUCTIONS_MAX) return null
+  if (!(v.model === null || (typeof v.model === 'string' && MODEL_NAME_PATTERN.test(v.model))) || typeof v.takesPrayerBreaks !== 'boolean' || !(v.sourceFile === null || typeof v.sourceFile === 'string')) return null
+  return { id: v.id, name: v.name, role: v.role, department: v.department as Agent['department'], deskId: v.deskId, status: v.status, currentTaskId: v.currentTaskId, runtimeMode: v.runtimeMode as Agent['runtimeMode'], demo: v.demo, createdAt: v.createdAt, lastActivityAt: v.lastActivityAt, description: v.description, instructions: v.instructions, model: v.model, takesPrayerBreaks: v.takesPrayerBreaks, sourceFile: v.sourceFile }
 }
 
 /** A pending review must be well formed, within the size limit, and bound to the same digest as its approval. */
@@ -157,6 +161,23 @@ export function migrateWorkforceV1(raw: unknown): unknown {
   return { ...raw, schemaVersion: 2, tasks, activities }
 }
 
+const PROFILE_DEFAULTS = { description: '', instructions: '', model: null, takesPrayerBreaks: true, sourceFile: null }
+
+/**
+ * Schema v2 → v3, before validation. Every agent gets the empty profile, and the agent status "completed" (now only a
+ * task status) becomes idle. Tasks and activities are untouched. Anything that is not a v2 object passes through.
+ */
+export function migrateWorkforceV2(raw: unknown): unknown {
+  if (!isObject(raw) || raw.schemaVersion !== 2 || !Array.isArray(raw.agents) || !Array.isArray(raw.tasks) || !Array.isArray(raw.activities)) return raw
+  const agents = raw.agents.map((a) => (isObject(a) ? { ...PROFILE_DEFAULTS, ...a, status: a.status === 'completed' ? 'idle' : a.status } : a))
+  return { ...raw, schemaVersion: 3, agents }
+}
+
+/** Runs every migration in order, so data of any older schema arrives at the current one. */
+export function migrateWorkforce(raw: unknown): unknown {
+  return migrateWorkforceV2(migrateWorkforceV1(raw))
+}
+
 function readStored(json: string): WorkforceState | null {
   try {
     return parseWorkforce(JSON.parse(json))
@@ -180,27 +201,27 @@ function problemOf(json: string): WorkforceLoadProblem {
 }
 
 /**
- * Seeds the demo only when nothing was ever saved (neither v2 nor v1). v1 data is migrated in memory and written as v2
- * on the first change; the v1 key is never touched. Unreadable v2 data is copied to the backup key once and the app
- * starts empty; unreadable v1 data is simply left where it is.
+ * Seeds the demo only when nothing was ever saved (no v3, v2 or v1). Older data is migrated in memory and written as v3
+ * on the first change; the v2 and v1 keys are never touched. Unreadable v3 data is copied to the backup key once and the app
+ * starts empty; unreadable older data is simply left where it is.
  */
 export function loadWorkforce(storage: KV | null, now: string): WorkforceLoadResult {
   const empty = (problem: WorkforceLoadProblem, preserved: Preserved | null = null): WorkforceLoadResult => ({ state: emptyWorkforce(), seeded: false, migrated: false, problem, preserved })
   if (!storage) return empty('unavailable')
   let json: string | null
-  let v1: string | null = null
+  let older: string | null = null
   try {
     json = read(storage, WORKFORCE_STORAGE_KEY)
-    if (json === null) v1 = read(storage, WORKFORCE_V1_KEY)
+    if (json === null) older = read(storage, WORKFORCE_V2_KEY) ?? read(storage, WORKFORCE_V1_KEY)
   } catch {
     return empty('unavailable')
   }
 
-  if (json === null && v1 === null) return { state: createDemoWorkforce(now), seeded: true, migrated: false, problem: null, preserved: null }
+  if (json === null && older === null) return { state: createDemoWorkforce(now), seeded: true, migrated: false, problem: null, preserved: null }
   if (json === null) {
     let migrated: WorkforceState | null = null
     try {
-      migrated = parseWorkforce(migrateWorkforceV1(JSON.parse(v1!)))
+      migrated = parseWorkforce(migrateWorkforce(JSON.parse(older!)))
     } catch {
       migrated = null
     }

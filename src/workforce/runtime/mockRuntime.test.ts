@@ -4,7 +4,7 @@ import { MOCK_ERROR_MESSAGE, MOCK_TIMINGS, MockRuntimeProvider } from './mockRun
 import type { RuntimeEvent } from './types'
 
 const NOW = '2026-10-30T09:00:00.000Z'
-const agent: Agent = { id: 'agent-1', name: 'Forge', role: 'API engineer', department: 'backend', deskId: 'desk-07', status: 'idle', currentTaskId: 'task-1', runtimeMode: 'mock', demo: true, createdAt: NOW, lastActivityAt: null }
+const agent: Agent = { id: 'agent-1', name: 'Forge', role: 'API engineer', department: 'backend', deskId: 'desk-07', status: 'idle', currentTaskId: 'task-1', runtimeMode: 'mock', demo: true, createdAt: NOW, lastActivityAt: null, description: '', instructions: '', model: null, takesPrayerBreaks: true, sourceFile: null }
 const task = (id = 'task-1'): AgentTask => ({ id, agentId: agent.id, title: 'Build API', description: '', status: 'queued', createdAt: NOW, startedAt: null, completedAt: null, resultSummary: null, errorMessage: null, executionId: null, timeoutMs: null, runtime: 'mock', workspaceId: null, sessionId: null, endedReason: null, usage: null, pendingApproval: null })
 
 let provider: MockRuntimeProvider

@@ -72,7 +72,7 @@ describe('GET /api/events', () => {
     const a = await stream()
     await s.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'Build API' })
     const started = await a.next((e) => e.type === 'task.started')
-    await a.until((e) => e.type === 'agent.status_changed' && (e as ChangeEvent).to === 'completed')
+    await a.until((e) => e.type === 'agent.status_changed' && (e as ChangeEvent).to === 'idle')
     const missed = a.events.slice(a.events.indexOf(started) + 1).map((e) => e.id)
     expect(missed.length).toBeGreaterThan(2)
     const last = missed.at(-1)!

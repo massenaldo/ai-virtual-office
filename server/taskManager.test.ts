@@ -65,7 +65,7 @@ describe('start and the full mock lifecycle', () => {
     expect(task(id).executionId).toMatch(/^exec-/)
     await vi.advanceTimersByTimeAsync(300)
     expect(task(id)).toMatchObject({ status: 'completed', endedReason: 'completed' })
-    expect(agent().status).toBe('completed')
+    expect(agent().status).toBe('idle')
     expect(vi.getTimerCount()).toBe(0)
   })
 

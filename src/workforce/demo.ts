@@ -4,7 +4,7 @@ import type { Agent, WorkforceState } from './types'
 type DemoAgent = Omit<Agent, 'createdAt' | 'lastActivityAt'>
 
 const demo = (id: string, name: string, role: string, department: Agent['department'], deskId: string): DemoAgent =>
-  ({ id, name, role, department, deskId, status: 'idle', currentTaskId: null, runtimeMode: 'mock', demo: true })
+  ({ id, name, role, department, deskId, status: 'idle', currentTaskId: null, runtimeMode: 'mock', demo: true, description: '', instructions: '', model: null, takesPrayerBreaks: true, sourceFile: null })
 
 // Each sits at a desk in the default office: its own room where there is one, otherwise the open floor.
 export const DEMO_AGENTS: readonly DemoAgent[] = [

@@ -40,7 +40,7 @@ describe('workforce end to end', () => {
     const task = state.tasks.find((t) => t.id === taskId)!
     expect(task).toMatchObject({ status: 'completed', resultSummary: 'Simulated result for "Build API". No AI was run.' })
     expect(task.executionId).toMatch(/^exec-/)
-    expect(state.agents.find((a) => a.id === 'agent-demo-backend')).toMatchObject({ status: 'completed', currentTaskId: taskId })
+    expect(state.agents.find((a) => a.id === 'agent-demo-backend')).toMatchObject({ status: 'idle', currentTaskId: taskId })
     const trail = state.activities.filter((a) => a.taskId === taskId)
     expect(trail.map((a) => (a.type === 'task-progress' ? `progress:${a.step}` : a.type))).toEqual(['task-assigned', 'task-started', 'progress:thinking', 'progress:working', 'task-completed'])
     expect(trail.every((a) => a.source === 'mock')).toBe(true)

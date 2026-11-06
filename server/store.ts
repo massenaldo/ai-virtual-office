@@ -3,12 +3,13 @@ import { closeSync, copyFileSync, fsyncSync, mkdirSync, openSync, readFileSync, 
 import { join } from 'node:path'
 import { createDemoWorkforce } from '../src/workforce/demo'
 import { emptyWorkforce, recoverInterruptedTasks } from '../src/workforce/operations'
-import { parseWorkforce, serializeWorkforce } from '../src/workforce/storage'
+import { migrateWorkforce, parseWorkforce, serializeWorkforce } from '../src/workforce/storage'
 import { WORKFORCE_SCHEMA_VERSION, type WorkforceState } from '../src/workforce/types'
 import type { Logger } from './log'
 
 export const WORKFORCE_FILE = 'workforce.json'
 export const WORKFORCE_BACKUP_FILE = 'workforce.backup.json'
+export const WORKFORCE_V2_BACKUP_FILE = 'workforce.v2-backup.json'
 export const SERVER_RESTART_MESSAGE = 'Interrupted by a server restart'
 
 export type StoreLoad = { seeded: boolean; recovered: boolean; problem: 'corrupt' | 'unsupported-version' | null; preserved: 'backup-created' | 'backup-exists' | null }
@@ -52,6 +53,7 @@ export function openWorkforceStore({ dataDir, now, log, onCommit, writeFile = wr
   mkdirSync(dataDir, { recursive: true })
   const filePath = join(dataDir, WORKFORCE_FILE)
   const backupPath = join(dataDir, WORKFORCE_BACKUP_FILE)
+  const v2BackupPath = join(dataDir, WORKFORCE_V2_BACKUP_FILE)
   let saveError: ErrorCode | null = null
   const logged = new Set<string>()
 
@@ -91,11 +93,19 @@ export function openWorkforceStore({ dataDir, now, log, onCommit, writeFile = wr
     let raw: unknown
     try {
       raw = JSON.parse(text)
-      parsed = parseWorkforce(raw)
+      parsed = parseWorkforce(migrateWorkforce(raw))
     } catch {
       parsed = null
     }
     if (parsed) {
+      if (isObject(raw) && typeof raw.schemaVersion === 'number' && raw.schemaVersion < WORKFORCE_SCHEMA_VERSION) {
+        // Older data was understood: keep the exact original text once, then save it as the current schema.
+        let existing = true
+        try { readFileSync(v2BackupPath, 'utf8') } catch { existing = false }
+        if (!existing) writeFile(v2BackupPath, text)
+        save(parsed)
+        log.info(`Workforce data in ${filePath} was migrated to schema ${WORKFORCE_SCHEMA_VERSION}. The original is kept at ${v2BackupPath}.`)
+      }
       state = recoverInterruptedTasks(parsed, now(), SERVER_RESTART_MESSAGE)
       if (state !== parsed) {
         load.recovered = true

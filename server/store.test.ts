@@ -167,7 +167,7 @@ describe('openWorkforceStore: existing data', () => {
   })
 
   it('reports a newer schema as unsupported-version', () => {
-    writeFileSync(file(), JSON.stringify({ schemaVersion: 3, agents: [], tasks: [], activities: [] }))
+    writeFileSync(file(), JSON.stringify({ schemaVersion: 4, agents: [], tasks: [], activities: [] }))
     expect(open().load).toMatchObject({ problem: 'unsupported-version', preserved: 'backup-created' })
   })
 
@@ -176,5 +176,44 @@ describe('openWorkforceStore: existing data', () => {
     broken.agents[1].deskId = broken.agents[0].deskId
     writeFileSync(file(), JSON.stringify(broken))
     expect(open().load.problem).toBe('corrupt')
+  })
+})
+
+describe('v2 to v3 migration on disk', () => {
+  const v2Path = () => join(dir, 'workforce.v2-backup.json')
+  const agent = (id: string, status: string) => ({ id, name: id, role: 'R', department: 'backend', deskId: null, status, currentTaskId: null, runtimeMode: 'mock', demo: false, createdAt: NOW, lastActivityAt: null })
+  const v2Text = () => JSON.stringify({ schemaVersion: 2, agents: [agent('a1', 'completed'), agent('a2', 'error')], tasks: [], activities: [] }, null, 1)
+
+  it('keeps everything, rewrites as schema 3 and keeps the original text', () => {
+    const text = v2Text()
+    writeFileSync(file(), text)
+    const logs: string[] = []
+    const store = open({ log: { ...silentLogger, info: (m: string) => logs.push(m), warn: (m: string) => logs.push(m) } })
+    expect(store.load).toMatchObject({ problem: null, seeded: false })
+    expect(store.state.agents.map((a) => [a.id, a.status])).toEqual([['a1', 'idle'], ['a2', 'error']])
+    expect(JSON.parse(readFileSync(file(), 'utf8')).schemaVersion).toBe(3)
+    expect(onDisk()?.agents[0]).toMatchObject({ description: '', instructions: '', model: null, takesPrayerBreaks: true, sourceFile: null })
+    expect(readFileSync(v2Path(), 'utf8')).toBe(text)
+    expect(logs.filter((l) => l.includes('workforce.v2-backup.json'))).toHaveLength(1)
+  })
+
+  it('does not overwrite the backup on a second load', () => {
+    const text = v2Text()
+    writeFileSync(file(), text)
+    open()
+    open()
+    expect(readFileSync(v2Path(), 'utf8')).toBe(text)
+  })
+
+  it('does not replace an existing backup with a different v2 file', () => {
+    writeFileSync(v2Path(), 'older')
+    writeFileSync(file(), v2Text())
+    open()
+    expect(readFileSync(v2Path(), 'utf8')).toBe('older')
+  })
+
+  it('still treats schema 4 as unsupported-version', () => {
+    writeFileSync(file(), JSON.stringify({ schemaVersion: 4, agents: [], tasks: [], activities: [] }))
+    expect(open().load).toMatchObject({ problem: 'unsupported-version', preserved: 'backup-created' })
   })
 })

@@ -62,7 +62,7 @@ describe('the claude runtime in the whole server', () => {
     expect((await tasks())[0]).toMatchObject({ id, status: 'completed', resultSummary: 'Plan: ship it.', endedReason: 'completed', usage: { turns: 4, costUsd: 0.0456 } })
     expect((seen.at(-1) as { patch: { tasks: unknown[] } }).patch.tasks[0]).toMatchObject({ id, usage: { turns: 4, costUsd: 0.0456 } })
     const state = (await s!.api('GET', '/api/state')).body.state
-    expect(state.agents.find((a: { id: string }) => a.id === FORGE).status).toBe('completed')
+    expect(state.agents.find((a: { id: string }) => a.id === FORGE).status).toBe('idle')
     expect(JSON.stringify(state.activities)).toContain('Plan: ship it.')
   })
 

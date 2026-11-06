@@ -19,18 +19,37 @@ function text(b: Body, key: string): string {
   return v
 }
 
+/** The editable agent fields. `sourceFile` is deliberately absent: only an import sets it. */
+const AGENT_FIELDS = ['name', 'role', 'department', 'description', 'instructions', 'model', 'takesPrayerBreaks']
+
+function profile(b: Body): Partial<AgentInput> {
+  const out: Partial<AgentInput> = {}
+  if ('description' in b) out.description = text(b, 'description')
+  if ('instructions' in b) out.instructions = text(b, 'instructions')
+  if ('model' in b) {
+    if (b.model !== null && typeof b.model !== 'string') throw bad('"model" must be a string or null.')
+    out.model = b.model
+  }
+  if ('takesPrayerBreaks' in b) {
+    if (typeof b.takesPrayerBreaks !== 'boolean') throw bad('"takesPrayerBreaks" must be a boolean.')
+    out.takesPrayerBreaks = b.takesPrayerBreaks
+  }
+  return out
+}
+
 export function parseCreateAgent(b: Body): AgentInput {
-  allow(b, ['name', 'role', 'department'])
-  return { name: text(b, 'name'), role: text(b, 'role'), department: text(b, 'department') as AgentInput['department'] }
+  allow(b, AGENT_FIELDS)
+  return { name: text(b, 'name'), role: text(b, 'role'), department: text(b, 'department') as AgentInput['department'], ...profile(b) }
 }
 
 export function parsePatchAgent(b: Body): Partial<AgentInput> {
-  allow(b, ['name', 'role', 'department'])
+  allow(b, AGENT_FIELDS)
   const patch: Partial<AgentInput> = {}
   if ('name' in b) patch.name = text(b, 'name')
   if ('role' in b) patch.role = text(b, 'role')
   if ('department' in b) patch.department = text(b, 'department') as AgentInput['department']
-  if (Object.keys(patch).length === 0) throw bad('Send at least one of "name", "role" or "department".')
+  Object.assign(patch, profile(b))
+  if (Object.keys(patch).length === 0) throw bad('Send at least one of "name", "role", "department", "description", "instructions", "model" or "takesPrayerBreaks".')
   return patch
 }
 

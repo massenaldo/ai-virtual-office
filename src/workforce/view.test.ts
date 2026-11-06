@@ -22,7 +22,7 @@ function withTask(agentId = 'agent-demo-pm') {
 
 describe('labels', () => {
   it('covers every status and department except meeting', () => {
-    expect(AGENT_STATUS_LABEL).toEqual({ idle: 'Idle', working: 'Working', thinking: 'Thinking', waiting: 'Waiting', error: 'Error', completed: 'Completed' })
+    expect(AGENT_STATUS_LABEL).toEqual({ idle: 'Idle', working: 'Working', thinking: 'Thinking', waiting: 'Waiting', error: 'Error' })
     expect(TASK_STATUS_LABEL).toEqual({ queued: 'Queued', starting: 'Starting', running: 'Running', waiting_for_approval: 'Waiting for approval', completed: 'Completed', failed: 'Failed', cancelling: 'Cancelling', cancelled: 'Cancelled' })
     expect(AGENT_DEPARTMENTS).not.toContain('meeting')
     expect(AGENT_DEPARTMENTS).toHaveLength(9)

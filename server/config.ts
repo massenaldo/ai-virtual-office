@@ -1,5 +1,6 @@
 import { MIN_TOKEN_CHARS } from './auth'
 import { Secret } from './secret'
+import { MODEL_NAME_PATTERN } from '../src/workforce/operations'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { parseEnv } from 'node:util'
@@ -135,7 +136,7 @@ export function parseConfig(env: Env, cwd: string = process.cwd()): Parsed {
   let claudeModel: string | null = null
   const rawModel = read(env, 'CLAUDE_MODEL')
   if (rawModel !== undefined) {
-    if (/^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/.test(rawModel)) claudeModel = rawModel
+    if (MODEL_NAME_PATTERN.test(rawModel)) claudeModel = rawModel
     else errors.push('CLAUDE_MODEL must be a model name of letters, digits, dots, colons, dashes and underscores (at most 100 characters).')
   }
   let claudeMaxTurns = 12

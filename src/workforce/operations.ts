@@ -1,11 +1,11 @@
 import { DEPARTMENTS } from '../layout/catalog'
 import { createId } from '../layout/operations'
 import type { RuntimeEvent } from './runtime/types'
-import { ACTIVITY_LIMIT, WORKFORCE_SCHEMA_VERSION, type ActivitySource, type Agent, type AgentActivity, type AgentDepartment, type AgentStatus, type AgentTask, type ApprovalDecision, type RuntimeMode, type TaskRuntime, type TaskStatus, type WorkforceState, validUsage } from './types'
+import { ACTIVITY_LIMIT, WORKFORCE_SCHEMA_VERSION, type ActivitySource, type Agent, type AgentActivity, type AgentDepartment, type AgentStatus, type AgentTask, type ApprovalDecision, type RuntimeMode, type TaskRuntime, type TaskStatus, type WorkforceState, AGENT_DESCRIPTION_MAX, AGENT_INSTRUCTIONS_MAX, validUsage } from './types'
 
 // Every operation returns a new state, or the same reference when nothing changed.
 
-export type AgentInput = { name: string; role: string; department: AgentDepartment }
+export type AgentInput = { name: string; role: string; department: AgentDepartment; description?: string; instructions?: string; model?: string | null; takesPrayerBreaks?: boolean }
 export type TaskInput = { title: string; description: string }
 export type OpResult<T = {}> = ({ ok: true; state: WorkforceState } & T) | { ok: false; error: string }
 
@@ -13,6 +13,10 @@ export const NAME_MAX = 40
 export const ROLE_MAX = 60
 export const TITLE_MAX = 80
 export const DESCRIPTION_MAX = 1000
+/** A model name as the Claude runtime accepts it; also used for CLAUDE_MODEL. */
+export const MODEL_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/
+// Everything below space except newline and tab, DEL, and the C1 range.
+const CONTROL_CHARS = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/
 export const INTERRUPTED_MESSAGE = 'Interrupted by page reload (simulated run)'
 export const UNKNOWN_ERROR = 'The runtime reported an error without a message.'
 export const TIMEOUT_MESSAGE = (timeoutMs: number) => `Timed out after ${Math.round(timeoutMs / 1000)} s`
@@ -34,6 +38,15 @@ export function validateAgentInput(input: AgentInput): string | null {
   if (!role) return 'Role is required.'
   if (role.length > ROLE_MAX) return `Role must be ${ROLE_MAX} characters or fewer.`
   if (!isAgentDepartment(input.department)) return 'Choose a department.'
+  if (input.description !== undefined) {
+    if (input.description.length > AGENT_DESCRIPTION_MAX) return `Description must be ${AGENT_DESCRIPTION_MAX} characters or fewer.`
+    if (CONTROL_CHARS.test(input.description)) return 'Description cannot contain control characters.'
+  }
+  if (input.instructions !== undefined) {
+    if (input.instructions.length > AGENT_INSTRUCTIONS_MAX) return `Instructions must be ${AGENT_INSTRUCTIONS_MAX} characters or fewer.`
+    if (CONTROL_CHARS.test(input.instructions)) return 'Instructions cannot contain control characters.'
+  }
+  if (input.model != null && !MODEL_NAME_PATTERN.test(input.model)) return 'Model must be a model name of letters, digits, dots, colons, dashes and underscores (at most 100 characters).'
   return null
 }
 
@@ -67,7 +80,7 @@ export function createAgent(s: WorkforceState, input: AgentInput, now: string, o
   const error = validateAgentInput(input)
   if (error) return { ok: false, error }
   const id = createId('agent', new Set(s.agents.map((a) => a.id)))
-  const agent: Agent = { id, name: input.name.trim(), role: input.role.trim(), department: input.department, deskId: null, status: 'idle', currentTaskId: null, runtimeMode: opts.runtimeMode ?? 'mock', demo: false, createdAt: now, lastActivityAt: null }
+  const agent: Agent = { id, name: input.name.trim(), role: input.role.trim(), department: input.department, deskId: null, status: 'idle', currentTaskId: null, runtimeMode: opts.runtimeMode ?? 'mock', demo: false, createdAt: now, lastActivityAt: null, description: input.description ?? '', instructions: input.instructions ?? '', model: input.model ?? null, takesPrayerBreaks: input.takesPrayerBreaks ?? true, sourceFile: null }
   const state = addActivity({ ...s, agents: [...s.agents, agent] }, { type: 'agent-created', agentId: id, taskId: null, message: `Agent "${agent.name}" created`, timestamp: now, source: sourceOf(agent) })
   return { ok: true, state, id }
 }
@@ -75,12 +88,22 @@ export function createAgent(s: WorkforceState, input: AgentInput, now: string, o
 export function updateAgent(s: WorkforceState, id: string, patch: Partial<AgentInput>, now: string): OpResult {
   const prev = s.agents.find((a) => a.id === id)
   if (!prev) return { ok: false, error: 'Agent not found.' }
-  const input = { name: patch.name ?? prev.name, role: patch.role ?? prev.role, department: patch.department ?? prev.department }
+  const input = { name: patch.name ?? prev.name, role: patch.role ?? prev.role, department: patch.department ?? prev.department, description: patch.description ?? prev.description, instructions: patch.instructions ?? prev.instructions, model: patch.model === undefined ? prev.model : patch.model, takesPrayerBreaks: patch.takesPrayerBreaks ?? prev.takesPrayerBreaks }
   const error = validateAgentInput(input)
   if (error) return { ok: false, error }
-  const next = { ...prev, name: input.name.trim(), role: input.role.trim(), department: input.department }
-  if (next.name === prev.name && next.role === prev.role && next.department === prev.department) return { ok: true, state: s }
+  const next = { ...prev, name: input.name.trim(), role: input.role.trim(), department: input.department, description: input.description, instructions: input.instructions, model: input.model, takesPrayerBreaks: input.takesPrayerBreaks }
+  const unchanged = (['name', 'role', 'department', 'description', 'instructions', 'model', 'takesPrayerBreaks'] as const).every((k) => next[k] === prev[k])
+  if (unchanged) return { ok: true, state: s }
   const state = addActivity(replaceAgent(s, next), { type: 'agent-updated', agentId: id, taskId: null, message: `Agent "${next.name}" updated`, timestamp: now, source: sourceOf(next) })
+  return { ok: true, state }
+}
+
+/** error → idle by a person's decision. Any other status, or an agent with an active task, is left exactly as it is. */
+export function clearAgentError(s: WorkforceState, id: string, now: string): OpResult {
+  const prev = s.agents.find((a) => a.id === id)
+  if (!prev) return { ok: false, error: 'Agent not found.' }
+  if (prev.status !== 'error' || activeTaskFor(s, id)) return { ok: true, state: s }
+  const state = addActivity(replaceAgent(s, { ...prev, status: 'idle' }), { type: 'agent-updated', agentId: id, taskId: null, message: `Cleared the error on "${prev.name}"`, timestamp: now, source: sourceOf(prev) })
   return { ok: true, state }
 }
 
@@ -162,7 +185,7 @@ function transitionFor(event: RuntimeEvent, task: AgentTask, now: string, source
     case 'approval_requested':
       return { task: { status: 'waiting_for_approval', pendingApproval: { id: event.approvalId, tool: event.tool, summary: event.summary, requestedAt: now, digest: event.digest ?? null, review: event.review ?? null, onceOnly: event.onceOnly === true } }, agentStatus: 'waiting', activity: { ...base, type: 'task-approval-requested', approvalId: event.approvalId, message: `Approval needed: ${event.summary}` } }
     case 'completed':
-      return { task: { status: 'completed', completedAt: now, resultSummary: event.summary || null, endedReason: 'completed', usage: validUsage(event.usage), pendingApproval: null }, agentStatus: 'completed', activity: { ...base, type: 'task-completed', message: event.summary } }
+      return { task: { status: 'completed', completedAt: now, resultSummary: event.summary || null, endedReason: 'completed', usage: validUsage(event.usage), pendingApproval: null }, agentStatus: 'idle', activity: { ...base, type: 'task-completed', message: event.summary } }
     case 'failed': {
       const error = event.error || UNKNOWN_ERROR
       return { task: { status: 'failed', completedAt: now, errorMessage: error, endedReason: 'failed', usage: validUsage(event.usage), pendingApproval: null }, agentStatus: 'error', activity: { ...base, type: 'task-failed', message: error } }

@@ -8,7 +8,7 @@ const sources = import.meta.glob<string>(['../**/*.ts', '!../**/*.test.ts'], { q
 const FORBIDDEN = [/\bfetch\(/, /child_process/, /XMLHttpRequest/, /new WebSocket/, /apiKey/i, /ANTHROPIC_/]
 
 const NOW = '2026-10-30T09:00:00.000Z'
-const agent: Agent = { id: 'agent-1', name: 'Forge', role: 'API engineer', department: 'backend', deskId: null, status: 'idle', currentTaskId: 'task-1', runtimeMode: 'real', demo: false, createdAt: NOW, lastActivityAt: null }
+const agent: Agent = { id: 'agent-1', name: 'Forge', role: 'API engineer', department: 'backend', deskId: null, status: 'idle', currentTaskId: 'task-1', runtimeMode: 'real', demo: false, createdAt: NOW, lastActivityAt: null, description: '', instructions: '', model: null, takesPrayerBreaks: true, sourceFile: null }
 const task: AgentTask = { id: 'task-1', agentId: 'agent-1', title: 'Build API', description: '', status: 'queued', createdAt: NOW, startedAt: null, completedAt: null, resultSummary: null, errorMessage: null, executionId: null, timeoutMs: null, runtime: 'claude', workspaceId: null, sessionId: null, endedReason: null, usage: null, pendingApproval: null }
 
 describe('ClaudeRuntimeProvider', () => {

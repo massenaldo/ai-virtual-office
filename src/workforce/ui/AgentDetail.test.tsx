@@ -165,7 +165,7 @@ describe('AgentDetail task usage', () => {
   const done = (usage: { turns: number; costUsd: number } | null) => ({
     ...demo,
     tasks: [{ ...demo.tasks[0], id: 'tk', agentId: agent.id, title: 'T', description: '', status: 'completed' as const, resultSummary: 'All done.', usage }],
-    agents: demo.agents.map((a) => (a.id === agent.id ? { ...a, currentTaskId: 'tk', status: 'completed' as const } : a)),
+    agents: demo.agents.map((a) => (a.id === agent.id ? { ...a, currentTaskId: 'tk', status: 'idle' as const } : a)),
   })
 
   it('shows the steps and estimated cost under the result', () => {

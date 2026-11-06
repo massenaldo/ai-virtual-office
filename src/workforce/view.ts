@@ -15,7 +15,7 @@ export type DeskOption = { id: string; label: string }
 export type DeskGroup = { roomId: string | null; roomName: string; desks: DeskOption[] }
 export type DeskStatus = { kind: 'none' } | { kind: 'assigned'; label: string; roomName: string } | { kind: 'unavailable'; deskId: string }
 
-export const AGENT_STATUS_LABEL: Record<AgentStatus, string> = { idle: 'Idle', working: 'Working', thinking: 'Thinking', waiting: 'Waiting', error: 'Error', completed: 'Completed' }
+export const AGENT_STATUS_LABEL: Record<AgentStatus, string> = { idle: 'Idle', working: 'Working', thinking: 'Thinking', waiting: 'Waiting', error: 'Error' }
 export const TASK_STATUS_LABEL: Record<TaskStatus, string> = { queued: 'Queued', starting: 'Starting', running: 'Running', waiting_for_approval: 'Waiting for approval', completed: 'Completed', failed: 'Failed', cancelling: 'Cancelling', cancelled: 'Cancelled' }
 export const AGENT_DEPARTMENTS = Object.keys(DEPARTMENTS).filter((id) => id !== 'meeting') as AgentDepartment[]
 

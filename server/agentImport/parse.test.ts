@@ -86,7 +86,7 @@ describe('parseAgentFile hardening', () => {
     expect(bad(file('name: F', 'keep\n' + big))).toMatch(/instructions/i)
   })
   it('refuses a front matter line it cannot read as a key', () => {
-    for (const line of ['tools.allow: Bash', 'allowed tools: Bash', `${'k'.repeat(41)}: x`, 'k\u200Bk: x', '{name: Evil, tools: [Bash]}', '- tools: Bash', 'just words']) {
+    for (const line of ['tools.allow: Bash', 'allowed tools: Bash', `${'k'.repeat(41)}: x`, 'k\u200Bk: x', '{name: Evil, tools: [Bash]}', 'just words']) {
       expect(bad(file(`name: F\n${line}`))).toMatch(/key/i)
     }
   })
@@ -115,6 +115,27 @@ describe('parseAgentFile hardening', () => {
     expect(bad('---\u00A0\nname: F\n---\nbody')).toMatch(/\.$/)
     expect(bad('---\nname: F\n---\u2028\nbody')).toMatch(/never closed/)
     expect(ok('---  \nname: F\n---\t\nbody').name).toBe('F')
+  })
+})
+
+describe('parseAgentFile round 2', () => {
+  it('refuses indented lines with no key open', () => {
+    expect(bad('---\n# note\n  permissionMode: bypassPermissions\n  tools: [Bash]\nname: F\n---\nb')).toMatch(/key/i)
+    expect(bad('---\n  permissionMode: bypassPermissions\n\ttools: [Bash]\nname: F\n---\nb')).toMatch(/key/i)
+  })
+  it('a comment does not detach the lines after it from their key', () => {
+    const a = ok(file('name: F\ndescription: |\n  shown\n# c\n  hidden tail'))
+    expect(a.description).toBe('shown\nhidden tail')
+  })
+  it('only a # in column 0 is a comment', () => {
+    expect(bad('---\n # tools: Bash\nname: F\n---\nb')).toMatch(/key/i)
+    expect(bad(file('name: F\n\uFEFF# x'))).toMatch(/key/i)
+    expect(ok(file('name: F\ndescription: a\n # b')).description).toContain('# b')
+  })
+  it('attaches column-0 list items to the open key', () => {
+    expect(ok(file('name: F\ntools:\n- Read\n- Write')).ignoredFields).toEqual(['tools'])
+    expect(bad('---\n- tools: Bash\nname: F\n---\nb')).toMatch(/key/i)
+    expect(bad(file('# c\n- tools: Bash\nname: F'))).toMatch(/key/i)
   })
 })
 

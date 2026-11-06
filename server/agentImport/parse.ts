@@ -27,6 +27,7 @@ const MAX_IGNORED_LISTED = 50
 
 /** Only spaces and tabs count as blanks around a marker; other Unicode whitespace does not. */
 const stripBlanks = (line: string): string => line.replace(/[ \t]+$/, '')
+const NOT_A_KEY = 'The front matter has a line that is not a "key: value" pair with a plain key (letters, digits, dashes and underscores), so it was not imported.'
 const fail = (error: string): Parsed => ({ ok: false, error })
 const indentOf = (line: string): number => line.length - line.trimStart().length
 
@@ -75,13 +76,25 @@ export function parseAgentFile(text: string): Parsed {
     current = null
   }
   for (const line of all.slice(1, close)) {
+    // Only a # in column 0 is a comment; it leaves the open key open, so lines after it still belong to that key.
+    if (line.startsWith('#')) continue
     const indented = line.startsWith(' ') || line.startsWith('\t')
-    if (indented || line.trim() === '') { current?.rest.push(line); continue }
+    if (line.trim() === '') { current?.rest.push(line); continue }
+    if (indented) {
+      if (!current) return fail(NOT_A_KEY)
+      current.rest.push(line)
+      continue
+    }
+    // A column-0 list item belongs to the key above it; with no key open it is refused.
+    if (line === '-' || line.startsWith('- ')) {
+      if (!current) return fail(NOT_A_KEY)
+      current.rest.push(line)
+      continue
+    }
     finish()
-    if (line.trimStart().startsWith('#')) continue
     const colon = line.indexOf(':')
     const key = colon === -1 ? '' : unquote(line.slice(0, colon))
-    if (!KEY_NAME.test(key)) return fail('The front matter has a line that is not a "key: value" pair with a plain key (letters, digits, dashes and underscores), so it was not imported.')
+    if (!KEY_NAME.test(key)) return fail(NOT_A_KEY)
     const first = line.slice(colon + 1)
     if (ACCEPTED.has(key)) {
       if (values.has(key)) return fail(`The "${key}" field appears more than once.`)

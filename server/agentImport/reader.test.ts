@@ -119,7 +119,10 @@ describe('readAgentFiles hardening', () => {
     mkdirSync(agents(), { recursive: true })
     writeFileSync(join(agents(), 'bad.md'), 'no front matter')
     writeFileSync(join(agents(), 'big.md'), 'x'.repeat(65537))
-    for (const f of readAgentFiles(ws, signal).files) { expect(f.ok).toBe(false); if (f.file === 'big.md') expect(f.digest).toBe('') }
+    const files = readAgentFiles(ws, signal).files
+    expect(files.map((f) => f.file)).toEqual(['bad.md', 'big.md'])
+    for (const f of files) { expect(f.ok).toBe(false); expect(f.file === 'big.md' ? f.digest === '' : f.digest.length === 64).toBe(true) }
+    expect(files.find((f) => f.file === 'big.md')?.digest).toBe('')
   })
   it('refuses a FIFO without blocking', () => {
     mkdirSync(agents(), { recursive: true })

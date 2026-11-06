@@ -64,7 +64,7 @@ export function readAgentFiles(workspacePath: string, signal: AbortSignal): { fo
   const cut = names.length > AGENT_FILES_MAX
   const files = names.slice(0, AGENT_FILES_MAX).map((n, i): AgentFile => {
     // A refused name is never echoed: it could carry control characters, bidi marks or a secret.
-    if (!validName(n)) return { file: `(file ${i + 1})`, digest: EMPTY_DIGEST, ok: false, error: 'This file name is not allowed: use up to 100 letters, digits, dots, dashes and underscores, ending in .md.' }
+    if (!validName(n)) return { file: `(file ${i + 1})`, digest: EMPTY_DIGEST, ok: false, error: `This file name is not allowed: use up to ${AGENT_FILE_NAME_MAX} letters, digits, dots, dashes and underscores, ending in .md.` }
     const r = readOne(workspacePath, n, signal)
     return r === GONE ? { file: n, digest: EMPTY_DIGEST, ok: false, error: 'The file could not be read.' } : r
   })

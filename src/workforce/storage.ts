@@ -52,7 +52,7 @@ const isTimeOrNull = (v: unknown): v is string | null => v === null || isTime(v)
 const isOneOf = <T extends string>(v: unknown, values: readonly T[]): v is T => typeof v === 'string' && (values as readonly string[]).includes(v)
 
 function parseAgent(v: unknown): Agent | null {
-  if (!isObject(v) || !isText(v.id) || !isText(v.name) || !isText(v.role) || typeof v.department !== 'string' || v.department === 'meeting' || !(v.department in DEPARTMENTS)) return null
+  if (!isObject(v) || !isText(v.id) || !isText(v.name) || !isText(v.role) || typeof v.department !== 'string' || v.department === 'meeting' || !Object.hasOwn(DEPARTMENTS, v.department)) return null
   if (!isTextOrNull(v.deskId) || !isOneOf(v.status, AGENT_STATUSES) || !isTextOrNull(v.currentTaskId) || !isOneOf(v.runtimeMode, MODES) || typeof v.demo !== 'boolean' || !isTime(v.createdAt) || !isTimeOrNull(v.lastActivityAt)) return null
   if (typeof v.description !== 'string' || v.description.length > AGENT_DESCRIPTION_MAX || typeof v.instructions !== 'string' || v.instructions.length > AGENT_INSTRUCTIONS_MAX) return null
   if (!(v.model === null || (typeof v.model === 'string' && MODEL_NAME_PATTERN.test(v.model))) || typeof v.takesPrayerBreaks !== 'boolean' || !(v.sourceFile === null || typeof v.sourceFile === 'string')) return null

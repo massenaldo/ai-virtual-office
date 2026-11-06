@@ -19,6 +19,7 @@ export type AuditAction =
   | 'approval.requested' | 'approval.decided' | 'approval.timeout'
   | 'tool.allowed' | 'tool.denied' | 'tool.asked' | 'tool.stale' | 'workspace.rejected' | 'request.rejected' | 'runtime.note'
   | 'permission.granted' | 'permission.denied' | 'permission.revoked' | 'permission.expired' | 'permission.used' | 'permission.ended'
+  | 'agent.imported' | 'agent.reimported'
   | 'session.created' | 'session.ended' | 'session.rejected'
 
 export type AuditActor = 'api' | 'system' | 'runtime'

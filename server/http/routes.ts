@@ -1,7 +1,7 @@
 import { errorSentence } from '../errorCodes'
 import type { ServerResponse } from 'node:http'
 import pkg from '../../package.json' with { type: 'json' }
-import type { AgentPermissionsRevokedResponse, PermissionResponse, PermissionsResponse, StateResponse, WorkspacesResponse } from '../../src/workforce/api'
+import type { AgentFilePreview, AgentFilesResponse, AgentImportField, AgentPermissionsRevokedResponse, PermissionResponse, PermissionsResponse, StateResponse, WorkspacesResponse } from '../../src/workforce/api'
 import { restoreDemoAgents } from '../../src/workforce/demo'
 import { assignDesk, clearAgentError, createAgent, updateAgent } from '../../src/workforce/operations'
 import type { ServerConfig } from '../config'
@@ -14,8 +14,10 @@ import type { GrantError } from '../permissions/types'
 import { toRuleView } from '../permissions/view'
 import type { WorkforceStore } from '../store'
 import type { ManagerError, TaskManager } from '../taskManager'
-import { parseApproval, parseCreateAgent, parseCreatePermission, parseCreateTask, parseDesk, parsePatchAgent } from './inputs'
-import { WORKSPACE_ID_RE } from '../workspaces'
+import { parseApproval, parseCreateAgent, parseCreatePermission, parseCreateTask, parseDesk, parseImportAgent, parsePatchAgent, parseReimportAgent } from './inputs'
+import { listAgentFileNames, readAgentFile, readAgentFiles, type AgentFile } from '../agentImport/reader'
+import { suggestedRole } from '../agentImport/parse'
+import { resolveWorkspace, WORKSPACE_ID_RE } from '../workspaces'
 import { HttpError, type Reply, type Route } from './router'
 import { createSessionRoutes } from './sessionRoutes'
 import type { SessionStore } from '../session'
@@ -54,6 +56,10 @@ const GRANT_COPY: Record<GrantError, string> = {
 
 const HISTORY_LIMIT = 200
 
+const IMPORT_FIELDS: readonly AgentImportField[] = ['description', 'model', 'instructions']
+/** The digest prefix and file name that identify what was imported; never the content. */
+const DIGEST_PREFIX = 12
+
 const STATUS: Record<ManagerError['code'], number> = { not_found: 404, invalid: 422, conflict: 409, unavailable: 503, bad_request: 400 }
 
 /** A failed manager call becomes the HTTP error with its own message. */
@@ -68,6 +74,29 @@ function must<T extends { ok: boolean }>(r: T): Extract<T, { ok: true }> {
 export function createRoutes(deps: RouteDeps): Route[] {
   const { config, store, events, manager, permissions, now, startedAt } = deps
   const agent = (id: string) => store.state.agents.find((a) => a.id === id)
+
+  /** The workspace for this request, resolved afresh. One fixed sentence for every reason, so nothing about the server's folders leaks. */
+  const workspaceOf = (id: unknown) => {
+    const r = resolveWorkspace(config, id)
+    if (!r.ok) throw new HttpError(404, 'Workspace not found.')
+    return r.workspace
+  }
+  const sourceKey = (workspaceId: string, file: string) => `${workspaceId}:${file}`
+  // Two names that differ only by case are one file on a case-insensitive disk, so they are one agent on every disk.
+  const importedFrom = (key: string) => store.state.agents.find((a) => a.sourceFile !== null && a.sourceFile.toLowerCase() === key.toLowerCase())
+  const changesFor = (a: NonNullable<ReturnType<typeof agent>>, f: Extract<AgentFile, { ok: true }>): AgentImportField[] => IMPORT_FIELDS.filter((k) => a[k] !== f.agent[k])
+  /** The file as it is now, which must be the one the person confirmed: a changed, unreadable or failing file imports nothing. */
+  const confirmedFile = (workspacePath: string, file: string, digest: string): Extract<AgentFile, { ok: true }> => {
+    const fresh = readAgentFile(workspacePath, file, new AbortController().signal)
+    if (!fresh) throw new HttpError(404, 'That agent file was not found.')
+    // An empty digest means the read itself failed (a link, not text, not a regular file): say why, never "changed".
+    if (fresh.digest === '') throw new HttpError(422, fresh.ok ? 'That agent file could not be read.' : fresh.error)
+    if (fresh.digest !== digest) throw new HttpError(409, 'That agent file changed since you looked at it. Open the list again and review it.')
+    if (!fresh.ok) throw new HttpError(422, fresh.error)
+    return fresh
+  }
+  const auditImport = (action: 'agent.imported' | 'agent.reimported', requestId: string, workspaceId: string, agentId: string, file: string, digest: string) =>
+    deps.audit.write({ action, actor: 'api', requestId, workspaceId, agentId, detail: `file=${file} digest=${digest.slice(0, DIGEST_PREFIX)}` })
 
   const view = (rule: Parameters<typeof toRuleView>[0]) => toRuleView(rule, now())
 
@@ -112,6 +141,72 @@ export function createRoutes(deps: RouteDeps): Route[] {
         if (!r.ok) throw new HttpError(422, r.error)
         store.commit(r.state)
         return { status: 201, body: { agent: agent(r.id) } }
+      },
+    },
+    {
+      method: 'GET',
+      path: '/api/workspaces/:id/agent-files',
+      handler: ({ params }) => {
+        const workspace = workspaceOf(params.id)
+        const found = readAgentFiles(workspace.path, new AbortController().signal)
+        const files = found.files.map((f): AgentFilePreview => {
+          if (!f.ok) return f
+          const existing = importedFrom(sourceKey(workspace.id, f.file))
+          return { ...f, suggestedRole: suggestedRole(f.file), existing: existing ? { agentId: existing.id, changes: changesFor(existing, f) } : null }
+        })
+        const body: AgentFilesResponse = { folder: found.folder, cut: found.cut, files }
+        return { status: 200, body }
+      },
+    },
+    {
+      method: 'POST',
+      path: '/api/agents/import',
+      body: 'json',
+      handler: ({ body, requestId }) => {
+        const input = parseImportAgent(body as Record<string, unknown>)
+        const workspace = workspaceOf(input.workspaceId)
+        // Exactly as the folder lists it: a differently cased name must not reach a case-insensitive disk.
+        if (!listAgentFileNames(workspace.path)?.includes(input.file)) throw new HttpError(404, 'That agent file was not found.')
+        const file = confirmedFile(workspace.path, input.file, input.digest)
+        const key = sourceKey(workspace.id, input.file)
+        const existing = importedFrom(key)
+        if (existing) throw new HttpError(409, `That file is already imported as ${existing.name}. Use re-import to update it.`)
+        const { name, description, instructions, model } = file.agent
+        const r = createAgent(store.state, { name, role: input.role, department: input.department, description, instructions, model }, now(), { runtimeMode: config.runtime === 'claude' ? 'real' : 'mock', sourceFile: key })
+        if (!r.ok) throw new HttpError(422, r.error)
+        store.commit(r.state)
+        auditImport('agent.imported', requestId, workspace.id, r.id, input.file, file.digest)
+        return { status: 201, body: { agent: agent(r.id) } }
+      },
+    },
+    {
+      method: 'POST',
+      path: '/api/agents/:id/reimport',
+      body: 'json',
+      handler: ({ params, body, requestId }) => {
+        const { digest } = parseReimportAgent(body as Record<string, unknown>)
+        const target = agent(params.id)
+        if (!target) throw new HttpError(404, 'Agent not found.')
+        if (target.sourceFile === null) throw new HttpError(409, 'This agent was not imported from a file.')
+        const cut = target.sourceFile.indexOf(':')
+        if (cut <= 0) throw new HttpError(404, 'Workspace not found.')
+        const workspace = workspaceOf(target.sourceFile.slice(0, cut))
+        // A case-only rename on disk keeps working: use the name as the folder lists it now.
+        const stored = target.sourceFile.slice(cut + 1)
+        const listed = listAgentFileNames(workspace.path) ?? []
+        const fileName = listed.includes(stored) ? stored : listed.find((n) => n.toLowerCase() === stored.toLowerCase())
+        if (fileName === undefined) throw new HttpError(404, 'That agent file was not found.')
+        const file = confirmedFile(workspace.path, fileName, digest)
+        const { description, model, instructions } = file.agent
+        // Only these three: the name, role, department and desk belong to the person who edited them.
+        const r = updateAgent(store.state, target.id, { description, model, instructions }, now())
+        if (!r.ok) throw new HttpError(422, r.error)
+        // A re-import that changes nothing is not an event worth recording.
+        if (r.state !== store.state) {
+          store.commit(r.state)
+          auditImport('agent.reimported', requestId, workspace.id, target.id, fileName, file.digest)
+        }
+        return { status: 200, body: { agent: agent(target.id) } }
       },
     },
     {

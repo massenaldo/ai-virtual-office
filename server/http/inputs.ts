@@ -53,6 +53,26 @@ export function parsePatchAgent(b: Body): Partial<AgentInput> {
   return patch
 }
 
+export type ImportAgentRequest = { workspaceId: string; file: string; digest: string; role: string; department: AgentInput['department'] }
+
+const DIGEST_RE = /^[0-9a-f]{64}$/
+function digestOf(b: Body): string {
+  const d = text(b, 'digest')
+  if (!DIGEST_RE.test(d)) throw bad('"digest" must be 64 lowercase hex characters.')
+  return d
+}
+
+/** A closed list: the name, instructions, model and source of an imported agent come from the file, never from the request. */
+export function parseImportAgent(b: Body): ImportAgentRequest {
+  allow(b, ['workspaceId', 'file', 'digest', 'role', 'department'])
+  return { workspaceId: text(b, 'workspaceId'), file: text(b, 'file'), digest: digestOf(b), role: text(b, 'role'), department: text(b, 'department') as AgentInput['department'] }
+}
+
+export function parseReimportAgent(b: Body): { digest: string } {
+  allow(b, ['digest'])
+  return { digest: digestOf(b) }
+}
+
 export function parseDesk(b: Body): { deskId: string | null } {
   allow(b, ['deskId'])
   const v = b.deskId

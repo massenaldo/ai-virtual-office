@@ -159,6 +159,26 @@ A small Node server (`server/`, no framework; the only runtime dependencies are 
 
 **Persistence.** `data/workforce.json` (atomic writes, mode 0600). An unreadable file is backed up before a fresh start. When an older schema is migrated, `workforce.v2-backup.json` keeps an untouched copy of the data from before the migration. A task running at shutdown is marked failed with "Interrupted by a server restart". The event buffer is in memory, so a restart makes every old event id a `state.reset`.
 
+## Import agents from role files
+
+You can create agents from Claude-style role files (`.claude/agents/*.md`). Importing needs the server (`npm run dev:full`) and at least one workspace.
+
+1. Set a workspace in `.env` (copy `.env.example` first) and restart the server. `WORKSPACE_ROOT` is an absolute folder and each `WORKSPACES` entry is `id:relative/path` under it:
+
+   ```
+   WORKSPACE_ROOT=/Users/me/projects
+   WORKSPACES=sandbox:my-project
+   ```
+
+2. Put the role files inside that workspace, in `.claude/agents/`, for example `/Users/me/projects/my-project/.claude/agents/backend-engineer.md`.
+3. In the AI agents panel choose **Import agents**, check the preview, pick a **department** (there is no default) and press **Import**.
+
+**What is read.** The file's `name`, `description`, `model` and the text after the front matter (the instructions). **Everything else is ignored and listed** as "Ignored: ..." in the preview, including `tools` and `permissionMode`: a file grants no tools or permissions, and the agent's permissions stay where they are. A file can not grant tools and can not restrict them either: `tools: Read, Grep` still leaves an agent that can ask for Write, which needs approval. Text that looks like a secret was replaced with [REDACTED] in the preview and the stored text, so check it before importing (masking can also hit ordinary text such as "Secrets: never commit them"). An over-long description is cut (the preview says so). The preview shows the instructions as plain text. Files are never executed. A file with an invisible or reordering character is refused, naming the line and code point; ordinary emoji are fine.
+
+**Workspace limits.** The workspace folder must already exist. A workspace that contains the folder `DATA_DIR` points to stops the server at start, and the default `DATA_DIR` is inside this repo, so by default that includes the repo and any folder above it. With the Claude runtime on, a workspace that contains this repo, or your home folder, is also refused, so `~/.claude/agents` can not be imported directly: copy those files into a project folder. A `.claude/agents` folder that is a link, or not a real folder, is not read.
+
+**Re-import.** The file's row on the Import screen shows **Re-import** (with the fields that would change) once an agent was imported from it. It updates only description, model and instructions; it never changes the name, role, department or desk you set. If the file changed after you looked at it, nothing is imported and the list is read again.
+
 ## Layout data
 
 The scene renders a typed, versioned `OfficeLayout` (`src/layout/types.ts`). It is the single source of truth.

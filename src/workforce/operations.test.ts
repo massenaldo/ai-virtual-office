@@ -34,6 +34,7 @@ describe('createAgent', () => {
     expect(createAgent(s, { ...NOVA, role: ' ' }, NOW)).toEqual({ ok: false, error: 'Role is required.' })
     expect(createAgent(s, { ...NOVA, role: 'x'.repeat(61) }, NOW)).toEqual({ ok: false, error: 'Role must be 60 characters or fewer.' })
     expect(createAgent(s, { ...NOVA, department: 'meeting' as AgentInput['department'] }, NOW)).toEqual({ ok: false, error: 'Choose a department.' })
+    for (const department of ['constructor', '__proto__', 'toString']) expect(createAgent(s, { ...NOVA, department: department as AgentInput['department'] }, NOW)).toEqual({ ok: false, error: 'Choose a department.' })
   })
 
   it('records a real runtime mode when asked', () => {
@@ -512,6 +513,14 @@ describe('agent profile', () => {
     expect(state.agents[0]).toMatchObject({ description: 'Plans', instructions: 'Be brief.\nBe kind.', model: 'claude-sonnet-4-5', takesPrayerBreaks: false, sourceFile: null })
   })
 
+  it('createAgent stores sourceFile only when the caller passes it', () => {
+    const s = emptyWorkforce()
+    const r = createAgent(s, NOVA, NOW, { sourceFile: 'sandbox:nova.md' })
+    if (!r.ok) throw new Error(r.error)
+    expect(r.state.agents[0]!.sourceFile).toBe('sandbox:nova.md')
+    expect(withAgent().state.agents[0]!.sourceFile).toBeNull()
+  })
+
   it('validateAgentInput bounds the new fields', () => {
     expect(validateAgentInput({ ...NOVA, model: '-x' })).toMatch(/model/i)
     expect(validateAgentInput({ ...NOVA, model: 'a b' })).toMatch(/model/i)
@@ -599,5 +608,16 @@ describe('clearAgentError', () => {
   })
   it('reports an unknown agent', () => {
     expect(clearAgentError(emptyWorkforce(), 'nope', LATER)).toEqual({ ok: false, error: 'Agent not found.' })
+  })
+})
+
+describe('validateAgentInput name and role safety', () => {
+  const base = NOVA
+  it('refuses control characters in name and role', () => {
+    for (const bad of ['a\nb', 'a\tb', 'a\u0007b', 'a\u0085b']) {
+      expect(validateAgentInput({ ...base, name: bad })).toMatch(/name/i)
+      expect(validateAgentInput({ ...base, role: bad })).toMatch(/role/i)
+    }
+    expect(validateAgentInput(base)).toBeNull()
   })
 })

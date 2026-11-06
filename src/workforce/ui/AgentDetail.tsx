@@ -10,7 +10,7 @@ import { useBusy } from './useBusy'
 import { DESCRIPTION_MAX, TITLE_MAX, isActiveTask, type TaskInput } from '../operations'
 import type { RuntimeStatus } from '../api'
 import type { Agent } from '../types'
-import { TASK_RUNTIME_LABEL, TASK_STATUS_LABEL, agentStatusText, agentTimeline, agentPermissionChip, approveEnabled, choiceFor, shortDigest, deskOptions, deskStatus, formatTime, formatUsage } from '../view'
+import { TASK_RUNTIME_LABEL, TASK_STATUS_LABEL, agentStatusText, agentTimeline, agentPermissionChip, approveEnabled, choiceFor, shortDigest, deskOptions, deskStatus, formatTime, formatUsage, sourceFileName } from '../view'
 import { StatusDot } from './AgentList'
 
 export type AgentDetailProps = { workforce: Workforce; layout: OfficeLayout; agent: Agent; onBack(): void; onEdit(): void; onRemove(): void; onFocusDesk(): void }
@@ -124,6 +124,7 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
     {agent.description.trim() && <p className="panel-hint">{agent.description}</p>}
     <div className="field-static"><span>Instructions</span><strong>{agent.instructions.trim() ? 'Custom instructions set' : 'No custom instructions'}</strong></div>
     <div className="field-static"><span>Model</span><strong>{agent.model ?? 'Server default'}</strong></div>
+    {sourceFileName(agent.sourceFile) && <p className="panel-hint">Imported from {sourceFileName(agent.sourceFile)}</p>}
     <div className="panel-actions">
       {agent.status === 'error' && !active && <button className="panel-button" disabled={clearing.busy} onClick={clearError}>Clear error</button>}
       <button className="panel-button" onClick={onEdit}><Pencil size={13}/> Edit</button>

@@ -6,7 +6,7 @@ import { createDemoWorkforce } from './demo'
 import type { PermissionRuleView } from './api'
 import { addActivity, assignTask, cancelTask } from './operations'
 import type { RuntimeEnvironment } from './controller'
-import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskClickTarget, deskMarkers, shortDigest, environmentBadge, environmentNote, connectionLabel, agentStatusText, workforceNotice, TASK_RUNTIME_LABEL, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, allowedScopes, permissionStateText, rulesForTab, scopeSentence, choiceFor, agentPermissionChip, revokePrompt, revokeAgentPrompt, waitingApprovals, removalPrompt, TASK_STATUS_LABEL, formatUsage } from './view'
+import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskClickTarget, deskMarkers, shortDigest, environmentBadge, environmentNote, connectionLabel, agentStatusText, workforceNotice, TASK_RUNTIME_LABEL, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, allowedScopes, permissionStateText, rulesForTab, scopeSentence, choiceFor, agentPermissionChip, revokePrompt, revokeAgentPrompt, waitingApprovals, removalPrompt, TASK_STATUS_LABEL, formatUsage, sourceFileName } from './view'
 
 const NOW = '2026-10-30T09:00:00.000Z'
 const layout = createDefaultLayout()
@@ -361,5 +361,14 @@ describe('formatUsage', () => {
     [{ turns: 2, costUsd: 0.125 }, 'About $0.125 (estimate) · 2 steps'],
   ])('formats %j', (usage, text) => {
     expect(formatUsage(usage)).toBe(text)
+  })
+})
+
+describe('sourceFileName', () => {
+  it('drops the workspace id and keeps a file name that has a colon', () => {
+    expect(sourceFileName('sandbox:a.md')).toBe('a.md')
+    expect(sourceFileName('sandbox:a:b.md')).toBe('a:b.md')
+    expect(sourceFileName(null)).toBeNull()
+    expect(sourceFileName('broken')).toBeNull()
   })
 })

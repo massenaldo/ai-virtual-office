@@ -236,3 +236,16 @@ describe('AgentDetail profile', () => {
     expect(h).not.toContain('Custom instructions set')
   })
 })
+
+describe('AgentDetail import source', () => {
+  it('names the file an imported agent came from, without the workspace id', () => {
+    const state = { ...demo, agents: demo.agents.map((a) => (a.id === agent.id ? { ...a, sourceFile: 'sandbox:backend-engineer.md' } : a)) }
+    const h = view(state, null)
+    expect(h).toContain('Imported from backend-engineer.md')
+    expect(h).not.toContain('sandbox:backend')
+  })
+
+  it('says nothing for an agent that was not imported', () => {
+    expect(view(demo, null)).not.toContain('Imported from')
+  })
+})

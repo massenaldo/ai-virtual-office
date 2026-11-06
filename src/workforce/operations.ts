@@ -17,6 +17,8 @@ export const DESCRIPTION_MAX = 1000
 export const MODEL_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/
 // Everything below space except newline and tab, DEL, and the C1 range.
 const CONTROL_CHARS = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/
+// A name or role is one line of text: no control character at all, not even newline or tab.
+const LINE_CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/
 export const INTERRUPTED_MESSAGE = 'Interrupted by page reload (simulated run)'
 export const UNKNOWN_ERROR = 'The runtime reported an error without a message.'
 export const TIMEOUT_MESSAGE = (timeoutMs: number) => `Timed out after ${Math.round(timeoutMs / 1000)} s`
@@ -28,15 +30,17 @@ export function emptyWorkforce(): WorkforceState {
   return { schemaVersion: WORKFORCE_SCHEMA_VERSION, agents: [], tasks: [], activities: [] }
 }
 
-const isAgentDepartment = (v: string): v is AgentDepartment => v !== 'meeting' && v in DEPARTMENTS
+const isAgentDepartment = (v: string): v is AgentDepartment => v !== 'meeting' && Object.hasOwn(DEPARTMENTS, v)
 
 export function validateAgentInput(input: AgentInput): string | null {
   const name = input.name.trim()
   const role = input.role.trim()
   if (!name) return 'Name is required.'
   if (name.length > NAME_MAX) return `Name must be ${NAME_MAX} characters or fewer.`
+  if (LINE_CONTROL_CHARS.test(name)) return 'Name cannot contain control characters.'
   if (!role) return 'Role is required.'
   if (role.length > ROLE_MAX) return `Role must be ${ROLE_MAX} characters or fewer.`
+  if (LINE_CONTROL_CHARS.test(role)) return 'Role cannot contain control characters.'
   if (!isAgentDepartment(input.department)) return 'Choose a department.'
   if (input.description !== undefined) {
     if (input.description.length > AGENT_DESCRIPTION_MAX) return `Description must be ${AGENT_DESCRIPTION_MAX} characters or fewer.`
@@ -76,11 +80,11 @@ const sourceOf = (a: Agent) => a.runtimeMode
 /** A task's activities are labelled by the runtime the task runs on, not by its agent: a Claude task on a demo agent is real work. */
 const sourceOfTask = (t: { runtime: TaskRuntime }): ActivitySource => (t.runtime === 'claude' ? 'real' : 'mock')
 
-export function createAgent(s: WorkforceState, input: AgentInput, now: string, opts: { runtimeMode?: RuntimeMode } = {}): OpResult<{ id: string }> {
+export function createAgent(s: WorkforceState, input: AgentInput, now: string, opts: { runtimeMode?: RuntimeMode; /** Set only by the import route: `<workspaceId>:<fileName>`. */ sourceFile?: string } = {}): OpResult<{ id: string }> {
   const error = validateAgentInput(input)
   if (error) return { ok: false, error }
   const id = createId('agent', new Set(s.agents.map((a) => a.id)))
-  const agent: Agent = { id, name: input.name.trim(), role: input.role.trim(), department: input.department, deskId: null, status: 'idle', currentTaskId: null, runtimeMode: opts.runtimeMode ?? 'mock', demo: false, createdAt: now, lastActivityAt: null, description: input.description ?? '', instructions: input.instructions ?? '', model: input.model ?? null, takesPrayerBreaks: input.takesPrayerBreaks ?? true, sourceFile: null }
+  const agent: Agent = { id, name: input.name.trim(), role: input.role.trim(), department: input.department, deskId: null, status: 'idle', currentTaskId: null, runtimeMode: opts.runtimeMode ?? 'mock', demo: false, createdAt: now, lastActivityAt: null, description: input.description ?? '', instructions: input.instructions ?? '', model: input.model ?? null, takesPrayerBreaks: input.takesPrayerBreaks ?? true, sourceFile: opts.sourceFile ?? null }
   const state = addActivity({ ...s, agents: [...s.agents, agent] }, { type: 'agent-created', agentId: id, taskId: null, message: `Agent "${agent.name}" created`, timestamp: now, source: sourceOf(agent) })
   return { ok: true, state, id }
 }

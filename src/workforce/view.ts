@@ -255,3 +255,9 @@ export function agentPermissionChip(permissions: PermissionsState | null, s: Wor
   const n = permissions.active.filter((r) => r.agentId === agentId).length
   return n === 0 ? 'No permission rules' : `${n} permission ${n === 1 ? 'rule' : 'rules'}`
 }
+
+/** The file name of an imported agent's source (stored as `<workspaceId>:<fileName>`); the workspace id is left out. Null when there is none. */
+export function sourceFileName(sourceFile: string | null): string | null {
+  const cut = sourceFile === null ? -1 : sourceFile.indexOf(':')
+  return sourceFile !== null && cut > 0 && cut < sourceFile.length - 1 ? sourceFile.slice(cut + 1) : null
+}

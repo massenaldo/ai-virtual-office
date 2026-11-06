@@ -40,6 +40,7 @@ describe('AgentForm submit', () => {
   it('sends the profile fields, and an empty model as null', () => {
     expect(toAgentInput(draft)).toEqual({ name: ' Nova ', role: 'Planner', department: 'design', description: 'd', instructions: 'i', model: null, takesPrayerBreaks: true })
     expect(toAgentInput({ ...draft, model: ' claude-x ' }).model).toBe('claude-x')
+    expect(toAgentInput({ ...draft, model: ' Inherit ' }).model).toBeNull()
   })
 
   it('returns the server error so the form can show it', async () => {

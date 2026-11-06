@@ -7,10 +7,11 @@ import AgentDetail from './AgentDetail'
 import AgentForm from './AgentForm'
 import AgentList from './AgentList'
 import AssignDesk from './AssignDesk'
+import ImportAgents from './ImportAgents'
 import PairingForm from './PairingForm'
 import PermissionsPanel from './PermissionsPanel'
 
-export type WorkforceView = { kind: 'list' } | { kind: 'create' } | { kind: 'detail' | 'edit'; agentId: string } | { kind: 'assign'; deskId: string } | { kind: 'permissions'; tab: string }
+export type WorkforceView = { kind: 'list' } | { kind: 'create' } | { kind: 'detail' | 'edit'; agentId: string } | { kind: 'assign'; deskId: string } | { kind: 'permissions'; tab: string } | { kind: 'import' }
 
 export type WorkforcePanelProps = { workforce: Workforce | null; layout: OfficeLayout; view: WorkforceView; onViewChange(v: WorkforceView): void; onFocusDesk(deskId: string): void; openDialog(d: DialogRequest): void }
 
@@ -59,7 +60,8 @@ export default function WorkforcePanel({ workforce, layout, view, onViewChange: 
         <button className="panel-link" onClick={list}><ArrowLeft size={13}/> All agents</button>
         <p className="panel-hint">Permissions are managed by the local backend. This browser-only demo has no permission rules; start the app with npm run dev:full to see them.</p>
       </>)}
-    {!waiting && !pairing && shown.kind === 'list' && <AgentList state={state} layout={layout} onOpen={(id) => setView({ kind: 'detail', agentId: id })} onCreate={() => setView({ kind: 'create' })} onRestoreDemo={actions.restoreDemoAgents}/>}
+    {!waiting && !pairing && shown.kind === 'list' && <AgentList state={state} layout={layout} onOpen={(id) => setView({ kind: 'detail', agentId: id })} onCreate={() => setView({ kind: 'create' })} onImport={() => setView({ kind: 'import' })} onRestoreDemo={actions.restoreDemoAgents}/>}
+    {!waiting && !pairing && shown.kind === 'import' && <ImportAgents workspaces={workforce.workspaces} actions={actions} onBack={list} openDialog={openDialog}/>}
     {!pairing && shown.kind === 'create' && <>
       <div className="field-group-label">New agent</div>
       <AgentForm onCancel={list} onSubmit={async (input) => {

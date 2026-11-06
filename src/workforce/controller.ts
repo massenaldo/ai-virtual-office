@@ -4,7 +4,7 @@ import type { AgentInput, TaskInput } from './operations'
 import { MockRuntimeProvider } from './runtime/mockRuntime'
 import type { MockDemoControls, RuntimeProvider } from './runtime/types'
 import { loadWorkforce, saveWorkforce, type Preserved } from './storage'
-import type { CreatePermissionBody, RuntimeStatus } from './api'
+import type { AgentFilesResponse, CreatePermissionBody, ImportAgentBody, RuntimeStatus } from './api'
 import type { PermissionsState } from './permissions'
 import type { ApprovalChoice, WorkforceState } from './types'
 
@@ -36,6 +36,10 @@ export type WorkforceSnapshot = {
   workspaces: string[] | null
 }
 export type ActionResult = { ok: true } | { ok: false; error: string }
+/** Import calls keep the HTTP status, so the screen can tell a changed file from a refusal. */
+export type ImportFailure = { ok: false; error: string; status: number | null }
+export type ListFilesResult = { ok: true; response: AgentFilesResponse } | ImportFailure
+export type ImportResult = { ok: true; agentId: string } | ImportFailure
 
 export type WorkforceController = {
   getSnapshot(): WorkforceSnapshot
@@ -62,6 +66,10 @@ export type WorkforceController = {
   createPermission?(body: CreatePermissionBody): Promise<ActionResult>
   revokePermission?(permissionId: string): Promise<ActionResult>
   revokeAgentPermissions?(agentId: string): Promise<ActionResult>
+  /** Backend only: the agent files of a workspace, as the server read them. */
+  listAgentFiles?(workspaceId: string): Promise<ListFilesResult>
+  importAgent?(body: ImportAgentBody): Promise<ImportResult>
+  reimportAgent?(agentId: string, digest: string): Promise<ImportResult>
   dispose(): void
 }
 

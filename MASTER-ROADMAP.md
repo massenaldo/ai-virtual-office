@@ -295,7 +295,7 @@ Other controls include task timeout, approval timeout, and public-start configur
 
 ### M3B.6 — Persistent Agent Identity & Office Presence
 
-**Status:** IN PROGRESS; first half of the next release (with M3C.1). Slice 1 (agent profile) is done: per-agent instructions and model, and settling to idle. Import and presence remain open.
+**Status:** IN PROGRESS; first half of the next release (with M3C.1). Slice 1 (agent profile) is done: per-agent instructions and model, and settling to idle. Slice 2 (import from `.claude/agents`) is done. Presence remains open.
 
 ### Objective
 Make agents persistent members of the office, independent of task execution and runtime sessions.
@@ -314,7 +314,7 @@ A Claude subagent definition in `.claude/agents/*.md` is not automatically a per
 ### Scope (what is missing)
 1. **Agent instructions** per agent. DONE in slice 1.
 2. **Per-agent model** preference, replacing the single server-wide `CLAUDE_MODEL` as the only choice. DONE in slice 1.
-3. **Safe `.claude/agents` import**
+3. **Safe `.claude/agents` import.** DONE in slice 2 (read-only: a file sets only name, description, model and instructions; re-import never changes name, role, department or desk).
    - Read supported frontmatter/metadata and instruction text.
    - Do not execute imported files or treat their content as permission grants.
    - Validate IDs, names, model fields, and allowed metadata.
@@ -334,7 +334,7 @@ A Claude subagent definition in `.claude/agents/*.md` is not automatically a per
 - [ ] An idle agent remains visible in the 3D office.
 - [ ] Task success, failure, timeout, and cancellation do not delete the agent.
 - [ ] Refresh and server restart preserve agent identity and workstation assignment.
-- [ ] `.claude/agents` import is read-only and cannot grant tools or permissions.
+- [x] `.claude/agents` import is read-only and cannot grant tools or permissions.
 - [ ] Removing an agent is an explicit workforce-management action.
 - [ ] No Claude session or API call is created just to keep an agent visible.
 

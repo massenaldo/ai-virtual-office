@@ -1,12 +1,12 @@
 import { useState } from 'react'
-import { Plus, RotateCcw } from 'lucide-react'
+import { Download, Plus, RotateCcw } from 'lucide-react'
 import { DEPARTMENTS } from '../../layout/catalog'
 import type { OfficeLayout } from '../../layout/types'
 import { DEMO_AGENTS } from '../demo'
 import type { Agent, AgentStatus, WorkforceState } from '../types'
 import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentStatusText, deskStatus, filterAgents, type AgentFilter } from '../view'
 
-export type AgentListProps = { state: WorkforceState; layout: OfficeLayout; onOpen(id: string): void; onCreate(): void; onRestoreDemo(): void }
+export type AgentListProps = { state: WorkforceState; layout: OfficeLayout; onOpen(id: string): void; onCreate(): void; onImport(): void; onRestoreDemo(): void }
 
 const STATUSES = Object.keys(AGENT_STATUS_LABEL) as AgentStatus[]
 
@@ -20,7 +20,7 @@ function DeskChip({ layout, agent }: { layout: OfficeLayout; agent: Agent }) {
   return <span className={desk.kind === 'unavailable' ? 'agent-chip warning' : 'agent-chip'}>{desk.kind === 'unavailable' ? 'Desk unavailable' : 'No desk'}</span>
 }
 
-export default function AgentList({ state, layout, onOpen, onCreate, onRestoreDemo }: AgentListProps) {
+export default function AgentList({ state, layout, onOpen, onCreate, onImport, onRestoreDemo }: AgentListProps) {
   const [filter, setFilter] = useState<AgentFilter>({ department: 'all', status: 'all' })
   const agents = filterAgents(state.agents, filter)
   const demoMissing = DEMO_AGENTS.some((d) => !state.agents.some((a) => a.id === d.id))
@@ -54,6 +54,7 @@ export default function AgentList({ state, layout, onOpen, onCreate, onRestoreDe
         </li>)}</ul>}
     <div className="panel-actions">
       <button className="panel-button primary" onClick={onCreate}><Plus size={13}/> New agent</button>
+      <button className="panel-button" onClick={onImport}><Download size={13}/> Import agents</button>
       {demoMissing && <button className="panel-button" onClick={onRestoreDemo}><RotateCcw size={13}/> Restore demo agents</button>}
     </div>
   </>

@@ -191,3 +191,9 @@ textarea.field-input{resize:vertical;min-height:54px;font-family:inherit}
 .scope-option{display:flex;align-items:center;gap:5px;color:#f1d6a6;font-size:10px}
 .scope-option input:focus-visible,.panel-button:focus-visible{outline:2px solid #a89af5;outline-offset:2px}
 .scope-sentence{margin:4px 0 8px}
+.import-list{list-style:none;margin:0 0 12px;padding:0;display:flex;flex-direction:column;gap:10px}
+.import-row{border:1px solid #303948;border-radius:8px;padding:9px 10px;background:#0f1620}
+.import-row>strong{display:block;color:#eef1f6;font-size:12px}
+.import-row>small{display:block;color:#6e7a8c;font-size:9px;margin:2px 0 6px;overflow-wrap:anywhere}
+.import-row .form-error{margin:6px 0 0}
+.import-instructions{max-height:140px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;margin:0 0 8px;padding:7px 8px;background:#0c1119;border:1px solid #303948;border-radius:6px;color:#c9d1dc;font:500 10px/1.5 'DM Sans Variable','DM Sans',sans-serif}

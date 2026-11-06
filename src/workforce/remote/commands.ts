@@ -1,15 +1,22 @@
-import type { AgentResponse, ApprovalBody, CreatePermissionBody, CreateAgentBody, CreateTaskBody, DeskBody, PatchAgentBody } from '../api'
-import type { ActionResult, WorkforceController } from '../controller'
+import type { AgentFilesResponse, AgentResponse, ApprovalBody, ImportAgentBody, ReimportAgentBody, CreatePermissionBody, CreateAgentBody, CreateTaskBody, DeskBody, PatchAgentBody } from '../api'
+import type { ActionResult, ImportResult, ListFilesResult, WorkforceController } from '../controller'
 import type { Agent } from '../types'
 import type { ApiClient, ApiResult, MutationMethod } from './client'
 
-export type RemoteCommands = Pick<WorkforceController, 'createAgent' | 'updateAgent' | 'removeAgent' | 'clearAgentError' | 'assignDesk' | 'startTask' | 'cancelTask' | 'decideApproval' | 'requestApproval' | 'forceError' | 'restoreDemoAgents'> & PermissionCommands
+export type RemoteCommands = Pick<WorkforceController, 'createAgent' | 'updateAgent' | 'removeAgent' | 'clearAgentError' | 'assignDesk' | 'startTask' | 'cancelTask' | 'decideApproval' | 'requestApproval' | 'forceError' | 'restoreDemoAgents'> & PermissionCommands & ImportCommands
 
 /** Backend only: the local mock has no permission engine. A refusal comes back to the caller as the server's own text. */
 export type PermissionCommands = {
   createPermission(body: CreatePermissionBody): Promise<ActionResult>
   revokePermission(permissionId: string): Promise<ActionResult>
   revokeAgentPermissions(agentId: string): Promise<ActionResult>
+}
+
+/** Backend only: the local mock reads no files. A refusal comes back with its status and the server's own text. */
+export type ImportCommands = {
+  listAgentFiles(workspaceId: string): Promise<ListFilesResult>
+  importAgent(body: ImportAgentBody): Promise<ImportResult>
+  reimportAgent(agentId: string, digest: string): Promise<ImportResult>
 }
 
 const id = encodeURIComponent
@@ -31,7 +38,21 @@ export function createRemoteCommands(deps: { client: ApiClient; insertAgent(agen
     void client.send(method, path).then((r: ApiResult<unknown>) => reportError(r.ok ? null : r.error))
   }
 
+  const importCall = async (path: string, body: unknown): Promise<ImportResult> => {
+    const r = await client.send<AgentResponse>('POST', path, body)
+    if (!r.ok) return { ok: false, error: r.error, status: r.status }
+    insertAgent(r.body.agent)
+    reportError(null)
+    return { ok: true, agentId: r.body.agent.id }
+  }
+
   return {
+    async listAgentFiles(workspaceId) {
+      const r = await client.get<AgentFilesResponse>(`/api/workspaces/${id(workspaceId)}/agent-files`)
+      return r.ok ? { ok: true, response: r.body } : { ok: false, error: r.error, status: r.status }
+    },
+    importAgent: (body) => importCall('/api/agents/import', body satisfies ImportAgentBody),
+    reimportAgent: (agentId, digest) => importCall(`/api/agents/${id(agentId)}/reimport`, { digest } satisfies ReimportAgentBody),
     async createAgent(input) {
       const r = await client.send<AgentResponse>('POST', '/api/agents', input satisfies CreateAgentBody)
       if (!r.ok) return { ok: false, error: r.error }

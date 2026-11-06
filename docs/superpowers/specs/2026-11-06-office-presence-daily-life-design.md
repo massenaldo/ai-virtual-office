@@ -47,7 +47,7 @@ This work has failed, even if it technically functions, if any of these happens:
 - A finished task leaves the agent `completed` and a failed one leaves it `error`. Neither ever settles (`src/workforce/operations.ts`).
 - `server/taskManager.ts` starts a task as soon as it is assigned, and starts its timeout then. Over `MAX_CONCURRENT_TASKS`, it **refuses** a Claude task rather than queueing it.
 - The system prompt uses only name and role (`server/runtime/claudePrompt.ts`). The model is one server-wide `CLAUDE_MODEL`.
-- `.claude` is treated as a sensitive folder by `server/execSensitive.ts`, and the agent's gated tools must keep treating it that way.
+- `.claude` is treated as a sensitive folder by `server/execSensitive.ts`, for writes; the agent's gated tools can read that folder today, and this design does not change that.
 - The project builds its 3D in code with no downloaded assets, and there are no character files. `server/noProcessExecution.test.ts` stays in force.
 - `npm run dev:full` runs the backend and the app together, and was confirmed working on 2026-11-06: the page loads, agents can be listed and created through the same-origin proxy, and the backend alone answers 401 without a token. It uses the mock runtime by default, so it costs nothing.
 - The office layout is still saved per browser and per address. `localhost:5173` and `127.0.0.1:5173` keep separate layouts, and `dev:full` prints the `127.0.0.1` address. The old `/vo` link used `localhost`.
@@ -84,7 +84,7 @@ Presence states: `at-desk`, `walking`, `chatting`, `coffee`, `lunch`, `praying`.
 
 ### 6.3 Import from `.claude/agents` (M3B.6)
 
-- A read-only server route reads `<workspace>/.claude/agents/*.md` from an allowed workspace, using a narrow new reader. The agent's own `vo_*` tools still cannot read that folder.
+- A read-only server route reads `<workspace>/.claude/agents/*.md` from an allowed workspace, using a narrow new reader. This does not change what the agent's own `vo_*` tools may do with that folder.
 - It accepts only `name`, `description` and `model` from the frontmatter and uses the body as `instructions`. Unknown fields, including `tools`, are ignored and shown as ignored. Parsing is plain text with no execution and no dependency on the file being valid YAML beyond those fields. Bad files appear as per-file errors.
 - **What an import creates (design call):** a first import always creates a new agent. It never fills in an existing agent that it was not imported into.
     - `name` comes from the file, under the existing validation.

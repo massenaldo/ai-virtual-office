@@ -152,6 +152,9 @@ describe('suggestedRole', () => {
       expect(r.ok).toBe(true)
     })
     it.each([
+      ['U+FE0F twice after an emoji', '\u26a0\ufe0f\ufe0f', 'U+FE0F'],
+      ['U+FE0F five hundred times after an emoji', '\u26a0' + '\ufe0f'.repeat(500), 'U+FE0F'],
+      ['U+FE0F after a skin-tone modifier', '\u{1f468}\u{1f3fb}\ufe0f', 'U+FE0F'],
       ['a zero-width joiner between letters', 'a\u200db', 'U+200D'],
       ['U+FE0F after a letter', 'a\ufe0f', 'U+FE0F'],
       ['a zero-width space', 'a\u200bb', 'U+200B'],
@@ -164,6 +167,14 @@ describe('suggestedRole', () => {
       expect(r.ok).toBe(false)
       if (!r.ok) expect(r.error).toBe(`Line 5 has an invisible character (${cp}).`)
     })
+    it('refuses repeated U+FE0F in the name', () => {
+      const r = parseAgentFile(`---\nname: \u26a0${'\ufe0f'.repeat(20)} ops\n---\nx\n`)
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.error).toBe('Line 2 has an invisible character (U+FE0F).')
+    })
+    it('allows a joiner after a modifier and a variation selector', () => {
+      expect(body('\u{1f468}\u{1f3fb}\u200d\u{1f4bb}').ok).toBe(true)
+    })
     it('names the line of a bad character in the front matter', () => {
       const r = parseAgentFile('---\nname: F\ndescription: a\u200bb\n---\nx\n')
       expect(r.ok).toBe(false)
@@ -175,6 +186,11 @@ describe('suggestedRole', () => {
     expect(a.description).toBe('line\none "q" \\ \\u0041 \\x')
     expect(ok(file("name: F\ndescription: 'a\\nb'")).description).toBe('a\\nb')
     expect(ok(file('name: F\ndescription: a\\nb')).description).toBe('a\\nb')
+  })
+  it('leaves no dangling joiner or variation selector when a description is cut', () => {
+    const pad = 'x'.repeat(AGENT_DESCRIPTION_MAX - 2)
+    expect(ok(file(`name: F\ndescription: ${pad}\u26a0\ufe0fyy`)).description).toBe(`${pad}\u26a0`)
+    expect(ok(file(`name: F\ndescription: ${pad.slice(1)}\u{1f468}\u200d\u{1f4bb}`)).description.endsWith('\u200d')).toBe(false)
   })
   it('treats inherit case-insensitively', () => {
     expect(ok(file('name: F\nmodel: Inherit')).model).toBeNull()

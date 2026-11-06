@@ -57,20 +57,25 @@ const hex = (cp: number): string => `U+${cp.toString(16).toUpperCase().padStart(
 function unsafeCharacter(lines: Array<[number, string]>): string | null {
   for (const [no, text] of lines) {
     const chars = Array.from(text)
-    let afterPictograph = false
+    // base: the last unit was a pictograph itself (U+FE0F and a skin tone may follow); mayJoin: a joiner may follow.
+    let base = false
+    let mayJoin = false
     for (let i = 0; i < chars.length; i++) {
       const c = chars[i]!
       const cp = c.codePointAt(0)!
       let allowed = false
-      let nowPictograph = false
-      if (PICTOGRAPH.test(c)) { allowed = true; nowPictograph = true }
-      else if (EMOJI_MODIFIER.test(c) && afterPictograph) { allowed = true; nowPictograph = true }
+      let nextBase = false
+      let nextJoin = false
+      if (EMOJI_MODIFIER.test(c)) {
+        if (base) { allowed = true; nextJoin = true }
+      } else if (PICTOGRAPH.test(c)) { allowed = true; nextBase = true; nextJoin = true }
       else if (cp === 0xfe0f) {
-        if (afterPictograph) { allowed = true; nowPictograph = true }
+        if (base) { allowed = true; nextJoin = true }
         else if (KEYCAP_BASE.test(chars[i - 1] ?? '') && chars[i + 1] === '\u20e3') allowed = true
-      } else if (cp === 0x200d && afterPictograph && PICTOGRAPH.test(chars[i + 1] ?? '')) allowed = true
+      } else if (cp === 0x200d && mayJoin && PICTOGRAPH.test(chars[i + 1] ?? '') && !EMOJI_MODIFIER.test(chars[i + 1]!)) allowed = true
       if (!allowed && hasUnsafeText(c)) return `Line ${no} has ${ANY_CONTROL.test(c) ? 'a control character' : 'an invisible character'} (${hex(cp)}).`
-      afterPictograph = nowPictograph
+      base = nextBase
+      mayJoin = nextJoin
     }
   }
   return null
@@ -183,7 +188,8 @@ export function parseAgentFile(text: string): Parsed {
   const instructions = mask(body)
   if (name.length > NAME_MAX) return fail(`The name must be ${NAME_MAX} characters or fewer.`)
   if (instructions.length > AGENT_INSTRUCTIONS_MAX) return fail(`The instructions are ${instructions.length} characters long; the limit is ${AGENT_INSTRUCTIONS_MAX}.`)
-  const description = cut(described, AGENT_DESCRIPTION_MAX)
+  // A cut must not leave a joiner or variation selector dangling at the end.
+  const description = cut(described, AGENT_DESCRIPTION_MAX).replace(/[\u200d\ufe0f]+$/, '')
 
   return {
     ok: true,

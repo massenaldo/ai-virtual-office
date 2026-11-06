@@ -96,13 +96,14 @@ describe('a good file', () => {
 
   it('lists ignored fields, and says nothing when there are none', () => {
     expect(body(ready([good({}, { ignoredFields: ['tools', 'permissionMode'] })]))).toContain('Ignored: tools, permissionMode')
+    expect(body(ready([good({}, { ignoredFields: ['color'] })]))).not.toContain('can not grant tools')
     expect(body(ready([good({}, { ignoredFields: ['tools'] })]))).toContain('A file can not grant tools and can not restrict them either: tools: Read, Grep still leaves an agent that can ask for Write, which needs approval.')
     expect(h).not.toContain('Ignored:')
   })
 
   it('notes a masked secret and a cut description', () => {
     const n = body(ready([good({}, { secretsMasked: true, descriptionCut: true })]))
-    expect(n).toContain('Text that looks like a secret was replaced with [REDACTED]. Check the instructions below.')
+    expect(n).toContain('Text that looks like a secret was replaced with [REDACTED]. Check it before importing.')
     expect(n).toContain('The description was cut short.')
     expect(h).not.toContain('replaced with [REDACTED]')
     expect(h).not.toContain('cut short')

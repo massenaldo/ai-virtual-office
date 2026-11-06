@@ -35,11 +35,9 @@ function ImportRow({ file, onImport, onReimport }: RowProps) {
     <div className="field-static"><span>Model</span><strong>{agent.model ?? 'Server default'}</strong></div>
     <div className="field-group-label">Instructions</div>
     <pre className="import-instructions" tabIndex={0}>{agent.instructions}</pre>
-    {agent.ignoredFields.length > 0 && <>
-      <p className="panel-hint">Ignored: {agent.ignoredFields.join(', ')}</p>
-      <p className="panel-hint">{TOOLS_NOTE}</p>
-    </>}
-    {agent.secretsMasked && <p className="panel-hint">Text that looks like a secret was replaced with [REDACTED]. Check the instructions below.</p>}
+    {agent.ignoredFields.length > 0 && <p className="panel-hint">Ignored: {agent.ignoredFields.join(', ')}</p>}
+    {agent.ignoredFields.includes('tools') && <p className="panel-hint">{TOOLS_NOTE}</p>}
+    {agent.secretsMasked && <p className="panel-hint">Text that looks like a secret was replaced with [REDACTED]. Check it before importing.</p>}
     {agent.descriptionCut && <p className="panel-hint">The description was cut short.</p>}
     {existing
       ? existing.changes.length === 0

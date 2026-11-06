@@ -198,7 +198,13 @@ The final-blockers report described B9/B10 and the workspace picker as complete 
 
 **Required verification before relying on this baseline:**
 - [x] Confirm the final-blockers branch/changes are merged to `main` (PR #59, commit `377294f`, an ancestor of `main`).
-- [ ] Rerun the full test suite, type checks, builds, secret scan, and dependency audit on `main`. Task 3 of the step 1 cleanup completes this.
+- [ ] Rerun the full test suite, type checks, builds, secret scan, and dependency audit on merged `main`. Not yet ticked: these ran on branch `chore/step-1-cleanup` (`main` plus the step 1 cleanup, based on `1bc2ee4`, Node v24.14.0), not on merged `main`. Rerun after the cleanup PR merges.
+  - [x] Tests: 109 files passed, 1 skipped; 2303 tests passed, 10 skipped (`npm test`).
+  - [x] Type check: `tsc -b` reported no errors.
+  - [x] Builds: `npm run build` and `npm run server:build` succeeded.
+  - [x] Secret scan: `npm run check:secrets` found no secrets in `dist/` or `dist-server/` (12 files).
+  - [x] Dependency audit: `npm audit --audit-level=high` found 0 vulnerabilities.
+  - [x] CI: `.github/workflows/ci.yml` added (build, test, server build, secret scan on Node 22 and 24; separate audit job). It has not run on GitHub yet because nothing was pushed, so its first result is still unknown.
 - [ ] Decide whether repeated `permission.expired` audit entries across restarts need correction. Still an open decision.
 
 ### M3B.5 — Claude Agent SDK integration

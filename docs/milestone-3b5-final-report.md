@@ -4,7 +4,7 @@ Date: 2026-11-04. Covers PRs #60 to #66 (planning, 3B.5.1 to 3B.5.4, the public 
 
 ## 1. Result
 
-A registered agent can now run a real task on the Claude Agent SDK, read and change files in a workspace you pick, and show what it cost, next to the mock runtime, with every file action going through the server's own permission gate. **Update 2026-11-05:** the first real run (read-only plus an injection probe, no writes) has since been done and passed all its checks at about $0.026 estimated spend; see `docs/first-real-run-safety-checklist.md`. **The write path has not yet been run with a real model.** When this report was written, everything with Claude had been verified against fake SDK sessions, a scripted local API standing in for the model, and the real SDK binary with a dummy key (which ends in a sign-in failure).
+A registered agent can now run a real task on the Claude Agent SDK, read and change files in a workspace you pick, and show what it cost, next to the mock runtime, with every file action going through the server's own permission gate. **Update 2026-11-06:** the first real runs have since been done and passed all their checks at about $0.026 estimated spend each: read-only with an injection probe (twice) and a write run in which the model asked, the person saw the exact content and approved it, and exactly that content was written in a temporary workspace; see `docs/first-real-run-safety-checklist.md`. When this report was written, everything with Claude had been verified against fake SDK sessions, a scripted local API standing in for the model, and the real SDK binary with a dummy key (which ends in a sign-in failure).
 
 **Verdict: READY WITH CONDITIONS** for supervised use on a plain project folder. **NOT READY** for unattended use, for a public address with Claude enabled, or for broad write approvals.
 
@@ -70,7 +70,7 @@ Every stage also had its own task reviews (Opus for the gate, permission and rou
 
 ## 7. Open items and limits
 
-1. **The first real run:** the read-only and injection run is done (2026-11-05, passed). The `--write` run (`scripts/claudeRealRun.ts --injection --write`) and the comparison of the cost with the console are still open; behaviour under injected text has one sample.
+1. **The first real runs:** done and passed (read-only and injection twice, write once). Still open: the comparison of the cost with the console, a real rejection and a sensitive-file write with a real model, and more samples of behaviour under injected text.
 2. **No OS-level sandbox.** The child runs as the server user (same kernel, network allowed). A dedicated user reduces the blast radius; a bubblewrap wrapper via `spawnClaudeCodeProcess` was designed and not built.
 3. **File contents the model reads go to Anthropic.** Redaction and the denylist limit what it can read and echo, but they are not a confidentiality boundary.
 4. **"Independent" review means a separate model session,** not a human or outside firm.

@@ -45,4 +45,4 @@ Do not enable writes on a real workspace. Send me the output (it contains no key
 
 ## Status
 
-The read-only run with `--injection` has been done and passed (see `docs/first-real-run-safety-checklist.md`, "Result of the first run"). The `--write` run has not been done yet.
+The read-only run with `--injection` (twice) and the `--write` run have been done and passed (see `docs/first-real-run-safety-checklist.md`, "Result of the first run").

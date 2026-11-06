@@ -38,7 +38,7 @@ Statuses below were checked against the repository on 2026-11-06 (merge state, a
 | M3B.1 | Runtime backend foundation | Complete |
 | M3B.1.1–3B.1.2 | Security hardening and E2E | Complete |
 | M3B.4 | Permissions and gated tools | Complete |
-| M3B.4 final blockers | Permission reconciliation, scaling test, workspace picker | Merged in #59; the full rerun on merged `main` is still open (Task 3 of the step 1 cleanup) |
+| M3B.4 final blockers | Permission reconciliation, scaling test, workspace picker | Merged in #59; the full rerun on merged `main` is still open (to be done after the step 1 cleanup PR merges) |
 | M3B.5 | Claude Agent SDK runtime integration | **VERIFIED — REAL RUN** (not `COMPLETE`: acceptance items remain open) |
 | M3B.6 + M3C.1 | Agent identity and presence, plus seated characters (one release) | Planned |
 | M3C.2 onward | Office daily life, then sandbox and a small M4, then M5–M7 as separate decisions | Planned (order in section 4) |
@@ -198,13 +198,13 @@ The final-blockers report described B9/B10 and the workspace picker as complete 
 
 **Required verification before relying on this baseline:**
 - [x] Confirm the final-blockers branch/changes are merged to `main` (PR #59, commit `377294f`, an ancestor of `main`).
-- [ ] Rerun the full test suite, type checks, builds, secret scan, and dependency audit on merged `main`. Not yet ticked: these ran on branch `chore/step-1-cleanup` (`main` plus the step 1 cleanup, based on `1bc2ee4`, Node v24.14.0), not on merged `main`. Rerun after the cleanup PR merges.
+- [ ] Rerun the full test suite, type checks, builds, secret scan, and dependency audit on merged `main`. Not yet ticked: these ran locally on macOS with Node v24.14.0 only (not Node 22), not from a fresh `npm ci`, on branch `chore/step-1-cleanup` (`main` plus the step 1 cleanup, based on `1bc2ee4`), not on merged `main`. Rerun after the cleanup PR merges.
   - [x] Tests: 109 files passed, 1 skipped; 2303 tests passed, 10 skipped (`npm test`).
   - [x] Type check: `tsc -b` reported no errors.
   - [x] Builds: `npm run build` and `npm run server:build` succeeded.
   - [x] Secret scan: `npm run check:secrets` found no secrets in `dist/` or `dist-server/` (12 files).
   - [x] Dependency audit: `npm audit --audit-level=high` found 0 vulnerabilities.
-  - [x] CI: `.github/workflows/ci.yml` added (build, test, server build, secret scan on Node 22 and 24; separate audit job). It has not run on GitHub yet because nothing was pushed, so its first result is still unknown.
+  - [ ] CI: `.github/workflows/ci.yml` added (build, test, server build, secret scan on Node 22 and 24; separate audit job) but not yet run; CI's first run will be on the PR. Tick this only after a green run. Note on the secret scan: with no key value present in CI it can only match key shapes and variable names, so a pass there is weaker than a local run with the real key set.
 - [ ] Decide whether repeated `permission.expired` audit entries across restarts need correction. Still an open decision.
 
 ### M3B.5 — Claude Agent SDK integration
@@ -280,7 +280,7 @@ Other controls include task timeout, approval timeout, and public-start configur
 - [x] Run one small read-only task first.
 - [x] Then run one narrowly scoped write task requiring explicit approval.
 - [ ] Verify the changed files, audit events, task status, cancellation, and reported cost. Cancellation and console cost were not observed.
-- [ ] Revoke test permissions and rotate the test key if it may have been exposed.
+- [ ] Revoke test permissions and rotate the test key if it may have been exposed. Still open: neither the revoke nor the rotation is recorded as done or as decided against, so this stays unticked until the owner does one or the other.
 - [ ] Run as a dedicated non-admin OS user before any real workspace. (Not done for the first runs, see C1. `docs/os-user-hardening.md` was written for Linux (`adduser`, `/srv`) and needs adapting if the server runs on macOS.)
 
 #### Known limitations and follow-up risks
@@ -578,7 +578,7 @@ Run the office reliably outside the development machine with secure remote acces
 - Structured logs and monitoring.
 - Health checks and alerting.
 - Automated backups and restore testing.
-- Deployment (CD) and rollback procedure. CI is done in step 1 of the cleanup (Task 3).
+- Deployment (CD) and rollback procedure. CI is added in step 1 of the cleanup but has not run yet.
 - Secret management and key rotation.
 - OS-level isolation/sandboxing strategy for production: the sandbox itself is now an M4 prerequisite; M7 covers it only for the VPS.
 
@@ -636,6 +636,8 @@ These requirements apply across milestones.
 - Do not infer permissions from agent prompt files.
 - Do not claim workspace path checks are an OS sandbox.
 - Add OS-level isolation before unattended or public execution.
+- **Open:** a client with no password can make the gateway read and discard a request body of any size (500 MiB measured, 0.43 s), and a trickling no-password client stayed connected for at least 20 s. The 401 path has no byte or drain limit. This was not introduced by the step 1 cleanup branch, and the 8 MiB drain bound (`server/gateway/proxy.ts`) applies only after the password check, so it does not cover this.
+- **Open:** HTTP/1.0 clients and pipelined `Connection: close` clients can still lose a 413 response.
 
 ### Cost management
 - Mock mode must not make Anthropic model calls.

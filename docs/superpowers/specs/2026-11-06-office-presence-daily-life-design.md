@@ -85,7 +85,7 @@ Presence states: `at-desk`, `walking`, `chatting`, `coffee`, `lunch`, `praying`.
 ### 6.3 Import from `.claude/agents` (M3B.6)
 
 - A read-only server route reads `<workspace>/.claude/agents/*.md` from an allowed workspace, using a narrow new reader. This does not change what the agent's own `vo_*` tools may do with that folder.
-- It accepts only `name`, `description` and `model` from the frontmatter and uses the body as `instructions`. Unknown fields, including `tools`, are ignored and shown as ignored. Parsing is plain text with no execution and no dependency on the file being valid YAML beyond those fields. Bad files appear as per-file errors.
+- It accepts only `name`, `description` and `model` from the frontmatter and uses the body as `instructions`. Unknown fields, including `tools`, are ignored and shown as ignored. Parsing is plain text with no execution and it does not need the file to be valid YAML, but any top-level line that is not a plain `key: value` pair (apart from comments and the continuation of an open key) refuses the file, so a file can not hide what it asks for. Bad files appear as per-file errors.
 - **What an import creates (design call):** a first import always creates a new agent. It never fills in an existing agent that it was not imported into.
     - `name` comes from the file, under the existing validation.
     - `role` starts as the file name made readable and capped at the existing limit, and the person can change it in the preview.

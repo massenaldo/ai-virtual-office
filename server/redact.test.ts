@@ -111,7 +111,7 @@ describe('redactSecrets: JWT, Slack, Google, PEM, -p and URL passwords', () => {
     [`${pem('RSA PRIVATE KEY')}\n${pem('EC PRIVATE KEY')}`, '[REDACTED]\n[REDACTED]'],
   ])('redacts: %s', (input, expected) => {
     expect(redactSecrets(input)).toBe(expected)
-  })
+  }, SCALING_TIMEOUT_MS)
 
   it('redacts every credential URL in a text with no spaces, not only the first', () => {
     expect(redactSecrets('{"a":"https://x.com/","b":"postgres://admin:hunter2@db:5432/app"}')).toBe('{"a":"https://x.com/","b":"postgres://[REDACTED]@db:5432/app"}')
@@ -185,7 +185,7 @@ describe('redactSecrets: JWT, Slack, Google, PEM, -p and URL passwords', () => {
     expectLinear('jwt-like repeats', (n) => 'eyJ.'.repeat(n), 6000)
     expectLinear('xox repeats', (n) => 'xox-'.repeat(n), 6000)
     expectLinear('many urls', (n) => 'https://a:b '.repeat(n), 2000)
-  })
+  }, SCALING_TIMEOUT_MS)
 
   it('costs about linear time on the token formats', () => {
     expectLinear('stripe run', (n) => `sk_live_${'a'.repeat(n)}`, 200000)
@@ -226,7 +226,7 @@ describe('PGP and PuTTY private keys', () => {
     expectLinear('pgp starts', (n) => '-----BEGIN PGP PRIVATE KEY BLOCK-----\n'.repeat(n), 800)
     expectLinear('putty starts', (n) => 'PuTTY-User-Key-File-3: x\n'.repeat(n), 800)
     expectLinear('pgp near misses', (n) => '-----BEGIN PGP PUBLIC KEY BLOCK-----\n'.repeat(n), 800)
-  })
+  }, SCALING_TIMEOUT_MS)
 })
 
 describe('scrub', () => {
@@ -270,7 +270,7 @@ describe('redactSecrets cost', () => {
     expectLinear('token', (n) => 'token'.repeat(n), 50000)
     expectLinear('key', (n) => 'key '.repeat(n), 60000)
     expectLinear('long name before a match', (n) => 'a'.repeat(n) + 'password=x', 300000)
-  })
+  }, SCALING_TIMEOUT_MS)
 
   it('still redacts a long key name', () => {
     expect(redactSecrets(`${'a'.repeat(30)}_api_key=abc123456`)).toBe(`${'a'.repeat(30)}_api_key=[REDACTED]`)

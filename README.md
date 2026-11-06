@@ -18,7 +18,7 @@ Open http://localhost:5173.
 
 `dev:full` runs the backend and the app together on the mock runtime, with no API key and no cost. Agents are saved on the server, and it keeps running until you stop it with Ctrl+C. Use `localhost` rather than the `127.0.0.1` address Vite prints, because the layout is saved per address.
 
-### Run with the local backend (optional)
+### All the ways to run it
 
 | Command | What it starts |
 |---|---|
@@ -205,7 +205,7 @@ Add `?stats` to the URL (for example http://localhost:5173/?stats) to show a sma
 - **The mock runtime is the default and simulates work**: its task results are canned text that says so. The Claude runtime (`RUNTIME=claude`) is optional and runs a task on the Claude Agent SDK; it has **no OS-level sandbox** and runs with the server's privileges. Real runs so far are recorded in `docs/first-real-run-safety-checklist.md`, with open checks listed there.
 - Backend mode logs in with the API token or a session cookie obtained by pairing with it (8 hours, lost on backend restart), allows one server process per data folder (a lock refuses a second one) and keeps agent data in one JSON file; it is meant for the local machine only. With `RUNTIME=claude` the agent can read, write and edit files in the chosen workspace through the five gated tools, each write after a person approves it (by default; `ALLOW_BROAD_WRITE_SCOPES=yes` lets one approval cover a task or an agent, see the environment table); it cannot run commands. No sandbox exists.
 - Design documents: [`docs/gated-tools.md`](docs/gated-tools.md) (in-process Write/Edit tools for the SDK) and [`docs/browser-auth.md`](docs/browser-auth.md) (session cookie) are built; [`docs/sandbox-architecture.md`](docs/sandbox-architecture.md) (Docker) is **not built**.
-- Agent data is per browser and per origin, like the layout: `localhost:5173` and `127.0.0.1:5173` keep separate agents.
+- In the browser-only demo (`npm run dev`), agent data is per browser and per origin, like the layout: `localhost:5173` and `127.0.0.1:5173` keep separate agents. Under `npm run dev:full` agents are saved on the server.
 - One task per agent at a time, with no queue. Finished tasks are never trimmed, only activity is.
 - In the floor plan, a room's label can sit over the centre-row desks and hide the selected agent's desk outline; the marker's ring still shows which desk it is.
 - Desk clicks in the office have no keyboard equivalent; the desk picker in the agent panel does the same thing.

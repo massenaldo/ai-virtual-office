@@ -80,11 +80,11 @@ const sourceOf = (a: Agent) => a.runtimeMode
 /** A task's activities are labelled by the runtime the task runs on, not by its agent: a Claude task on a demo agent is real work. */
 const sourceOfTask = (t: { runtime: TaskRuntime }): ActivitySource => (t.runtime === 'claude' ? 'real' : 'mock')
 
-export function createAgent(s: WorkforceState, input: AgentInput, now: string, opts: { runtimeMode?: RuntimeMode } = {}): OpResult<{ id: string }> {
+export function createAgent(s: WorkforceState, input: AgentInput, now: string, opts: { runtimeMode?: RuntimeMode; /** Set only by the import route: `<workspaceId>:<fileName>`. */ sourceFile?: string } = {}): OpResult<{ id: string }> {
   const error = validateAgentInput(input)
   if (error) return { ok: false, error }
   const id = createId('agent', new Set(s.agents.map((a) => a.id)))
-  const agent: Agent = { id, name: input.name.trim(), role: input.role.trim(), department: input.department, deskId: null, status: 'idle', currentTaskId: null, runtimeMode: opts.runtimeMode ?? 'mock', demo: false, createdAt: now, lastActivityAt: null, description: input.description ?? '', instructions: input.instructions ?? '', model: input.model ?? null, takesPrayerBreaks: input.takesPrayerBreaks ?? true, sourceFile: null }
+  const agent: Agent = { id, name: input.name.trim(), role: input.role.trim(), department: input.department, deskId: null, status: 'idle', currentTaskId: null, runtimeMode: opts.runtimeMode ?? 'mock', demo: false, createdAt: now, lastActivityAt: null, description: input.description ?? '', instructions: input.instructions ?? '', model: input.model ?? null, takesPrayerBreaks: input.takesPrayerBreaks ?? true, sourceFile: opts.sourceFile ?? null }
   const state = addActivity({ ...s, agents: [...s.agents, agent] }, { type: 'agent-created', agentId: id, taskId: null, message: `Agent "${agent.name}" created`, timestamp: now, source: sourceOf(agent) })
   return { ok: true, state, id }
 }

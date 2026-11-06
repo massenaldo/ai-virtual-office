@@ -512,6 +512,14 @@ describe('agent profile', () => {
     expect(state.agents[0]).toMatchObject({ description: 'Plans', instructions: 'Be brief.\nBe kind.', model: 'claude-sonnet-4-5', takesPrayerBreaks: false, sourceFile: null })
   })
 
+  it('createAgent stores sourceFile only when the caller passes it', () => {
+    const s = emptyWorkforce()
+    const r = createAgent(s, NOVA, NOW, { sourceFile: 'sandbox:nova.md' })
+    if (!r.ok) throw new Error(r.error)
+    expect(r.state.agents[0]!.sourceFile).toBe('sandbox:nova.md')
+    expect(withAgent().state.agents[0]!.sourceFile).toBeNull()
+  })
+
   it('validateAgentInput bounds the new fields', () => {
     expect(validateAgentInput({ ...NOVA, model: '-x' })).toMatch(/model/i)
     expect(validateAgentInput({ ...NOVA, model: 'a b' })).toMatch(/model/i)

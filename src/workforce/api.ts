@@ -64,6 +64,18 @@ export type DeskBody = { deskId: string | null }
 export type CreateTaskBody = { title: string; description?: string; workspaceId?: string | null; runtime?: 'mock' | 'claude' }
 export type WorkspacesResponse = { workspaces: { id: string }[] }
 
+/** What the server read from one agent file. A file grants nothing: only name, description, model and instructions are read. */
+export type AgentFileContent = { name: string; description: string; model: string | null; instructions: string; ignoredFields: string[]; descriptionCut: boolean; secretsMasked: boolean }
+export type AgentImportField = 'description' | 'model' | 'instructions'
+/** `file` is a real file name only when the file could be read; a refused name shows as a label such as "(file 3)". `digest` is empty when the file could not be read. */
+export type AgentFilePreview = { file: string; digest: string } & (
+  | { ok: true; agent: AgentFileContent; suggestedRole: string; existing: { agentId: string; changes: AgentImportField[] } | null }
+  | { ok: false; error: string }
+)
+export type AgentFilesResponse = { folder: 'found' | 'missing'; cut: boolean; files: AgentFilePreview[] }
+export type ImportAgentBody = { workspaceId: string; file: string; digest: string; role: string; department: AgentInput['department'] }
+export type ReimportAgentBody = { digest: string }
+
 /** Send on every POST, PUT, PATCH and DELETE, even without a body: the server refuses state changes without it (Stage C). */
 export const MUTATION_HEADERS = { 'Content-Type': 'application/json' } as const
 export type ApprovalBody = { approvalId: string; decision: ApprovalChoice; digest?: string }

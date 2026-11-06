@@ -76,7 +76,7 @@ Establish the base web application and an editable office layout.
 - Room and furniture editing.
 - Synchronization between floor-plan/layout representation and 3D view.
 - Save, reload, undo/redo, and reset workflows, as implemented in the project.
-- `/vo` developer command to start the server when needed and open the application.
+- `/vo` was the original developer command; it was retired on 2026-11-06 in favour of `npm run dev:full`.
 
 ### Acceptance criteria
 - [x] Application starts using the documented local workflow.
@@ -390,14 +390,19 @@ Agents live a daily routine in the office, without any model calls.
 #### Owner decisions (recorded as the owner's)
 - Routine: work, chat, lunch, work, prayer, coffee in the kitchen.
 - The routine follows the real clock, timezone `Asia/Jakarta`, with prayer times for Jakarta.
+- Agents work 24/7: no office hours and no days off.
+- Friday: one longer prayer and lunch break, about 11:45 to 13:00.
 - Chatting is visual only (characters and speech bubbles); no Claude text, no API calls.
-- A task given during a break waits until the break ends, and the agent visibly shows it is on a break.
-- **Proposed, not decided:** an urgent-task override that interrupts a break.
+- A task given during lunch or prayer waits until the break ends, and the agent visibly shows it is on a break.
+- A "Start now" button lets an urgent task skip the rest of a break.
+- Some women characters wear a hijab and others do not.
 - Walking agents and a visible prayer are wanted **if the effort is reasonable**; otherwise they go to the next update and are not required now.
+
+The full design, including choices made while writing it, is in `docs/superpowers/specs/2026-11-06-office-presence-daily-life-design.md`.
 
 #### New needs
 - Kitchen, dining and prayer areas with furniture (the office has none today).
-- Doorways or paths between rooms (the office has no doorways today).
+- Routes between rooms, computed from the current layout (rooms already have an open front, so no doorways are needed).
 - A schedule, and no model calls for any of it.
 - Walking and navigation/collision handling, moved here from the former M3C. Meeting animations stay with M5.
 
@@ -611,7 +616,7 @@ This is the recommended sequence based on dependencies and the status checked on
 | 1 | This cleanup (step 1): roadmap and README corrections, a trustworthy test suite, CI, rerun on merged `main` | Establish a trustworthy baseline |
 | 2 | Finish the open real-run checks before any real workspace | Model used, console cost, a real rejection and cancellation, sensitive-file write, dedicated OS user, review of existing permission rules |
 | 3 | M3B.6 + M3C.1 as one release, using the mock runtime | Persistent agents that are visible, seated and animated, with no paid calls |
-| 4 | M3C.2 office daily life | Routine, kitchen, dining and prayer areas, doorways; no model calls |
+| 4 | M3C.2 office daily life | Routine, kitchen, dining and prayer areas, walking; no model calls |
 | 5 | Sandbox, command running, storage decision, then a small M4 with one plan, one handoff, one review | Agents cannot run commands yet; M4 evidence needs them |
 | 6 | M5, M6, M7 as separate decisions | Decide after using M4 |
 
@@ -720,6 +725,8 @@ Do not mark a milestone **COMPLETE** solely because code has merged. Record the 
 
 ## 8. Immediate next action
 
-The next practical step is the **design of M3B.6 + M3C.1** (persistent agent identity and presence, plus seated characters, as one release on the mock runtime), after this cleanup and its merged-`main` verification.
+The owner reaches the office as a dashboard website by URL, where they add, edit and watch agents. For now that means running `npm run dev:full` in a terminal and opening `http://localhost:5173`; `/vo` is being retired. A hosted URL comes later, under M7.
+
+The next practical step is to **build M3B.6, M3C.1 and M3C.2** from `docs/superpowers/specs/2026-11-06-office-presence-daily-life-design.md`, starting with retiring `/vo`, once the owner approves that design.
 
 The open real-run checks (section 3, M3B.5) must be finished before any real workspace is used, including running as a dedicated non-admin OS user.

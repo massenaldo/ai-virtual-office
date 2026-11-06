@@ -59,9 +59,9 @@ export function listAgentFileNames(workspacePath: string): string[] | null {
   }
 }
 
-export function readAgentFiles(workspacePath: string, signal: AbortSignal): { folder: 'found' | 'missing'; files: AgentFile[]; cut: boolean } {
+export function readAgentFiles(workspacePath: string, signal: AbortSignal): { folder: 'found' | 'missing' | 'refused'; files: AgentFile[]; cut: boolean } {
   const state = folderState(workspacePath)
-  if (state !== 'found') return { folder: 'missing', files: [], cut: false }
+  if (state !== 'found') return { folder: state, files: [], cut: false }
   let names: string[]
   try {
     names = readdirSync(join(workspacePath, ...FOLDER), { withFileTypes: true })

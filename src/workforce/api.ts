@@ -72,7 +72,7 @@ export type AgentFilePreview = { file: string; digest: string } & (
   | { ok: true; agent: AgentFileContent; suggestedRole: string; existing: { agentId: string; changes: AgentImportField[] } | null }
   | { ok: false; error: string }
 )
-export type AgentFilesResponse = { folder: 'found' | 'missing'; cut: boolean; files: AgentFilePreview[] }
+export type AgentFilesResponse = { folder: 'found' | 'missing' | 'refused'; cut: boolean; files: AgentFilePreview[] }
 export type ImportAgentBody = { workspaceId: string; file: string; digest: string; role: string; department: AgentInput['department'] }
 export type ReimportAgentBody = { digest: string }
 

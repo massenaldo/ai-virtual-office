@@ -25,6 +25,11 @@ describe('readAgentFiles', () => {
   it('reports a missing folder', () => {
     expect(readAgentFiles(ws, signal)).toEqual({ folder: 'missing', files: [], cut: false })
   })
+  it('reports a symlinked folder as refused, not missing', () => {
+    mkdirSync(join(ws, '.claude'), { recursive: true })
+    symlinkSync(outside, agents())
+    expect(readAgentFiles(ws, signal)).toEqual({ folder: 'refused', files: [], cut: false })
+  })
   it('lists only .md files directly inside, sorted', () => {
     mkdirSync(join(agents(), 'sub.md'), { recursive: true })
     writeFileSync(join(agents(), 'b.md'), doc('B'))

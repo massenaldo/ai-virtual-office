@@ -145,4 +145,48 @@ describe('suggestedRole', () => {
     expect(suggestedRole('qa_lead.md')).toBe('Qa lead')
     expect(suggestedRole(`${'a'.repeat(200)}.md`)).toHaveLength(ROLE_MAX)
   })
+  describe('invisible characters and emoji', () => {
+    const body = (b: string) => parseAgentFile(`---\nname: F\n---\n${b}\n`)
+    it.each(['\u26a0\ufe0f warning', '\u2714\ufe0f done', '1\ufe0f\u20e3 first', '\u{1f468}\u200d\u{1f4bb} dev', '\u2764\ufe0f\u200d\u{1f525} fire'])('allows a well-formed emoji sequence: %s', (t) => {
+      const r = body(t)
+      expect(r.ok).toBe(true)
+    })
+    it.each([
+      ['a zero-width joiner between letters', 'a\u200db', 'U+200D'],
+      ['U+FE0F after a letter', 'a\ufe0f', 'U+FE0F'],
+      ['a zero-width space', 'a\u200bb', 'U+200B'],
+      ['a right-to-left override', 'a\u202eb', 'U+202E'],
+      ['a joiner after an emoji but before a letter', '\u{1f468}\u200dx', 'U+200D'],
+      ['a joiner before an emoji but after a letter', 'x\u200d\u{1f4bb}', 'U+200D'],
+      ['a trailing joiner after an emoji', '\u{1f468}\u200d', 'U+200D'],
+    ])('refuses %s and names the line and code point', (_n, t, cp) => {
+      const r = parseAgentFile(`---\nname: F\n---\nok\n${t}\n`)
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.error).toBe(`Line 5 has an invisible character (${cp}).`)
+    })
+    it('names the line of a bad character in the front matter', () => {
+      const r = parseAgentFile('---\nname: F\ndescription: a\u200bb\n---\nx\n')
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.error).toBe('Line 3 has an invisible character (U+200B).')
+    })
+  })
+  it('decodes only \\n \\t \\" and \\\\ in double-quoted values', () => {
+    const a = ok(file('name: F\ndescription: "line\\none \\"q\\" \\\\ \\u0041 \\x"'))
+    expect(a.description).toBe('line\none "q" \\ \\u0041 \\x')
+    expect(ok(file("name: F\ndescription: 'a\\nb'")).description).toBe('a\\nb')
+    expect(ok(file('name: F\ndescription: a\\nb')).description).toBe('a\\nb')
+  })
+  it('treats inherit case-insensitively', () => {
+    expect(ok(file('name: F\nmodel: Inherit')).model).toBeNull()
+    expect(ok(file('name: F\nmodel: INHERIT')).model).toBeNull()
+  })
+  it('keeps a lone closing bracket with the open key, and refuses it with none', () => {
+    expect(ok(file('name: F\ntools: [\n  Read\n]\nmodel: sonnet')).ignoredFields).toEqual(['tools'])
+    expect(ok(file('name: F\nhooks: {\n  a: b\n}')).ignoredFields).toEqual(['hooks'])
+    expect(bad(file(']\nname: F'))).toMatch(/key: value/)
+  })
+  it('says how long the instructions are when over the limit', () => {
+    expect(bad(file('name: F', 'x'.repeat(AGENT_INSTRUCTIONS_MAX + 7)))).toContain(`${AGENT_INSTRUCTIONS_MAX + 7}`)
+  })
+
 })

@@ -31,10 +31,49 @@ const NOT_A_KEY = 'The front matter has a line that is not a "key: value" pair w
 const fail = (error: string): Parsed => ({ ok: false, error })
 const indentOf = (line: string): number => line.length - line.trimStart().length
 
-function unquote(value: string): string {
+const ESCAPES: Record<string, string> = { n: '\n', t: '\t', '"': '"', '\\': '\\' }
+
+/** Removes one pair of quotes. In a value (not a key) a double-quoted text also decodes \n, \t, \" and \\ and nothing else. */
+function unquote(value: string, decode = false): string {
   const v = value.trim()
-  if (v.length >= 2 && ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))) return v.slice(1, -1)
+  if (v.length >= 2 && v.startsWith('"') && v.endsWith('"')) {
+    const inner = v.slice(1, -1)
+    return decode ? inner.replace(/\\([nt"\\])/g, (_m, c: string) => ESCAPES[c]!) : inner
+  }
+  if (v.length >= 2 && v.startsWith("'") && v.endsWith("'")) return v.slice(1, -1)
   return v
+}
+
+const PICTOGRAPH = /^\p{Extended_Pictographic}$/u
+const EMOJI_MODIFIER = /^\p{Emoji_Modifier}$/u
+const KEYCAP_BASE = /^[0-9#*]$/
+const hex = (cp: number): string => `U+${cp.toString(16).toUpperCase().padStart(4, '0')}`
+
+/**
+ * The first character a file may not carry, as "Line N has ...", or null. The shared check in toolPolicy refuses every invisible
+ * character; here, and only here, a well-formed emoji sequence is let through: U+FE0F straight after a pictograph (or in a keycap),
+ * and U+200D only between two pictographs. Anything else of that kind is refused.
+ */
+function unsafeCharacter(lines: Array<[number, string]>): string | null {
+  for (const [no, text] of lines) {
+    const chars = Array.from(text)
+    let afterPictograph = false
+    for (let i = 0; i < chars.length; i++) {
+      const c = chars[i]!
+      const cp = c.codePointAt(0)!
+      let allowed = false
+      let nowPictograph = false
+      if (PICTOGRAPH.test(c)) { allowed = true; nowPictograph = true }
+      else if (EMOJI_MODIFIER.test(c) && afterPictograph) { allowed = true; nowPictograph = true }
+      else if (cp === 0xfe0f) {
+        if (afterPictograph) { allowed = true; nowPictograph = true }
+        else if (KEYCAP_BASE.test(chars[i - 1] ?? '') && chars[i + 1] === '\u20e3') allowed = true
+      } else if (cp === 0x200d && afterPictograph && PICTOGRAPH.test(chars[i + 1] ?? '')) allowed = true
+      if (!allowed && hasUnsafeText(c)) return `Line ${no} has ${ANY_CONTROL.test(c) ? 'a control character' : 'an invisible character'} (${hex(cp)}).`
+      afterPictograph = nowPictograph
+    }
+  }
+  return null
 }
 
 /** The value of one accepted key from its first-line text and its indented continuation lines. */
@@ -50,7 +89,7 @@ function valueOf(first: string, rest: string[]): string {
     return lines.join('\n').split(/\n{2,}/).map((p) => p.split('\n').join(' ')).join('\n')
   }
   const parts = [head, ...lines.filter((l) => l !== '')]
-  return unquote(parts.length > 1 ? parts.filter((p) => p !== '').join(' ') : head)
+  return unquote(parts.length > 1 ? parts.filter((p) => p !== '').join(' ') : head, true)
 }
 
 function cut(text: string, max: number): string {
@@ -70,25 +109,33 @@ export function parseAgentFile(text: string): Parsed {
 
   const values = new Map<string, string>()
   const ignored: string[] = []
-  let current: { key: string; first: string; rest: string[] } | null = null
+  let current: { key: string; first: string; rest: string[]; seen: Array<[number, string]> } | null = null
+  const scanned: Array<[number, string]> = []
   const finish = () => {
-    if (current && ACCEPTED.has(current.key)) values.set(current.key, valueOf(current.first, current.rest))
+    if (current && ACCEPTED.has(current.key)) {
+      values.set(current.key, valueOf(current.first, current.rest))
+      scanned.push(...current.seen)
+    }
     current = null
   }
-  for (const line of all.slice(1, close)) {
+  for (const [offset, line] of all.slice(1, close).entries()) {
+    const no = offset + 2
+    const open = current as { rest: string[]; seen: Array<[number, string]> } | null
     // Only a # in column 0 is a comment; it leaves the open key open, so lines after it still belong to that key.
     if (line.startsWith('#')) continue
     const indented = line.startsWith(' ') || line.startsWith('\t')
-    if (line.trim() === '') { current?.rest.push(line); continue }
+    if (line.trim() === '') { open?.rest.push(line); open?.seen.push([no, line]); continue }
     if (indented) {
-      if (!current) return fail(NOT_A_KEY)
-      current.rest.push(line)
+      if (!open) return fail(NOT_A_KEY)
+      open.rest.push(line)
+      open.seen.push([no, line])
       continue
     }
-    // A column-0 list item belongs to the key above it; with no key open it is refused.
-    if (line === '-' || line.startsWith('- ')) {
-      if (!current) return fail(NOT_A_KEY)
-      current.rest.push(line)
+    // A column-0 list item, or a lone closing bracket, belongs to the key above it; with no key open it is refused.
+    if (line === '-' || line.startsWith('- ') || /^[\]}][ \t]*$/.test(line)) {
+      if (!open) return fail(NOT_A_KEY)
+      open.rest.push(line)
+      open.seen.push([no, line])
       continue
     }
     finish()
@@ -106,24 +153,24 @@ export function parseAgentFile(text: string): Parsed {
       if (!ignored.includes(shown)) ignored.push(shown)
       if (ignored.length > MAX_IGNORED_LISTED) return fail(`The front matter has more than ${MAX_IGNORED_LISTED} other fields, so it was not imported.`)
     }
-    current = { key, first, rest: [] }
+    current = { key, first, rest: [], seen: [[no, first]] }
   }
   finish()
 
-  const body = all.slice(close + 1).join('\n').trim()
+  const bodyLines = all.slice(close + 1)
+  const body = bodyLines.join('\n').trim()
+  const unsafe = unsafeCharacter([...scanned, ...bodyLines.map((l, i): [number, string] => [close + 2 + i, l])])
+  if (unsafe) return fail(unsafe)
   const rawName = (values.get('name') ?? '').trim()
   const rawDescription = (values.get('description') ?? '').trim()
   const rawModel = (values.get('model') ?? '').trim()
 
   if (!rawName) return fail('The file has no name: add a "name:" line to the front matter.')
-  for (const v of [rawName, rawDescription, rawModel, body]) {
-    if (hasUnsafeText(v) || v.includes('\r')) return fail('The file contains control or invisible characters, which are not allowed.')
-  }
   if (ANY_CONTROL.test(rawName)) return fail('The name must be a single line without tabs or control characters.')
   if (rawName.length > NAME_MAX) return fail(`The name must be ${NAME_MAX} characters or fewer.`)
   if (redactSecrets(rawModel) !== rawModel) return fail('The model looks like a secret, so the file was not imported.')
-  if (rawModel && rawModel !== 'inherit' && !MODEL_NAME_PATTERN.test(rawModel)) return fail('The model is not a valid model name.')
-  if (body.length > AGENT_INSTRUCTIONS_MAX) return fail(`The instructions are longer than ${AGENT_INSTRUCTIONS_MAX} characters.`)
+  if (rawModel && rawModel.toLowerCase() !== 'inherit' && !MODEL_NAME_PATTERN.test(rawModel)) return fail('The model is not a valid model name.')
+  if (body.length > AGENT_INSTRUCTIONS_MAX) return fail(`The instructions are ${body.length} characters long; the limit is ${AGENT_INSTRUCTIONS_MAX}.`)
 
   let masked = false
   const mask = (v: string): string => {
@@ -135,7 +182,7 @@ export function parseAgentFile(text: string): Parsed {
   const described = mask(rawDescription)
   const instructions = mask(body)
   if (name.length > NAME_MAX) return fail(`The name must be ${NAME_MAX} characters or fewer.`)
-  if (instructions.length > AGENT_INSTRUCTIONS_MAX) return fail(`The instructions are longer than ${AGENT_INSTRUCTIONS_MAX} characters.`)
+  if (instructions.length > AGENT_INSTRUCTIONS_MAX) return fail(`The instructions are ${instructions.length} characters long; the limit is ${AGENT_INSTRUCTIONS_MAX}.`)
   const description = cut(described, AGENT_DESCRIPTION_MAX)
 
   return {
@@ -143,7 +190,7 @@ export function parseAgentFile(text: string): Parsed {
     agent: {
       name,
       description,
-      model: rawModel === '' || rawModel === 'inherit' ? null : rawModel,
+      model: rawModel === '' || rawModel.toLowerCase() === 'inherit' ? null : rawModel,
       instructions,
       ignoredFields: ignored,
       descriptionCut: description.length < described.length,

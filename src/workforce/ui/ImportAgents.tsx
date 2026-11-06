@@ -4,13 +4,15 @@ import type { DialogRequest } from '../../editor/useEditorActions'
 import { DEPARTMENTS } from '../../layout/catalog'
 import type { AgentFilePreview, AgentFilesResponse } from '../api'
 import type { WorkforceController } from '../controller'
-import type { AgentInput } from '../operations'
+import { ROLE_MAX, type AgentInput } from '../operations'
 import { AGENT_DEPARTMENTS } from '../view'
 import { IMPORT_FIELD_LABEL, IMPORT_NEEDS_SERVER, NO_WORKSPACE, attemptImport, attemptReimport, reimportPrompt } from './importAgentsLogic'
 import { useBusy } from './useBusy'
 
 export type Listing = { kind: 'loading' } | { kind: 'error'; error: string } | { kind: 'ready'; response: AgentFilesResponse }
 type Readable = Extract<AgentFilePreview, { ok: true }>
+
+const TOOLS_NOTE = 'A file can not grant tools and can not restrict them either: tools: Read, Grep still leaves an agent that can ask for Write, which needs approval.'
 
 type RowProps = { file: AgentFilePreview; onImport(file: Readable, role: string, department: AgentInput['department']): Promise<unknown>; onReimport(file: Readable): void }
 
@@ -33,8 +35,11 @@ function ImportRow({ file, onImport, onReimport }: RowProps) {
     <div className="field-static"><span>Model</span><strong>{agent.model ?? 'Server default'}</strong></div>
     <div className="field-group-label">Instructions</div>
     <pre className="import-instructions" tabIndex={0}>{agent.instructions}</pre>
-    {agent.ignoredFields.length > 0 && <p className="panel-hint">Ignored: {agent.ignoredFields.join(', ')}</p>}
-    {agent.secretsMasked && <p className="panel-hint">A secret in this file was hidden.</p>}
+    {agent.ignoredFields.length > 0 && <>
+      <p className="panel-hint">Ignored: {agent.ignoredFields.join(', ')}</p>
+      <p className="panel-hint">{TOOLS_NOTE}</p>
+    </>}
+    {agent.secretsMasked && <p className="panel-hint">Text that looks like a secret was replaced with [REDACTED]. Check the instructions below.</p>}
     {agent.descriptionCut && <p className="panel-hint">The description was cut short.</p>}
     {existing
       ? existing.changes.length === 0
@@ -44,7 +49,7 @@ function ImportRow({ file, onImport, onReimport }: RowProps) {
           {canAct && <div className="panel-actions"><button type="button" className="panel-button" disabled={busy} onClick={() => onReimport(readable)}><RefreshCw size={13}/> Re-import</button></div>}
         </>
       : canAct && <form noValidate onSubmit={(e) => { e.preventDefault(); if (department !== '' && !busy) void run(() => onImport(readable, role, department)) }}>
-        <label className="field"><span>Role</span><input className="field-input" value={role} maxLength={80} onChange={(e) => setRole(e.target.value)}/></label>
+        <label className="field"><span>Role</span><input className="field-input" value={role} maxLength={ROLE_MAX} onChange={(e) => setRole(e.target.value)}/></label>
         <label className="field"><span>Department</span>
           <select className="field-input" required value={department} onChange={(e) => setDepartment(e.target.value as AgentInput['department'])}>
             <option value="">Choose a department</option>
@@ -85,7 +90,9 @@ export function ImportAgentsBody({ workspaces, workspaceId, onWorkspace, listing
     {error && <p className="form-error" role="alert">{error}</p>}
     {listing.kind === 'loading' && <p className="panel-hint" role="status">Loading agent files…</p>}
     {listing.kind === 'error' && <p className="form-error" role="alert">{listing.error}</p>}
-    {listing.kind === 'ready' && (listing.response.folder === 'missing'
+    {listing.kind === 'ready' && (listing.response.folder === 'refused'
+      ? <p className="panel-hint">The .claude/agents folder is a link or not a real folder, so it was not read.</p>
+      : listing.response.folder === 'missing'
       ? <p className="panel-hint">This workspace has no .claude/agents folder.</p>
       : listing.response.files.length === 0
         ? <p className="panel-hint">No agent files found in .claude/agents.</p>
@@ -116,12 +123,14 @@ export default function ImportAgents({ workspaces, actions, onBack, openDialog }
   useEffect(() => {
     if (workspaceId === '' || !listAgentFiles) return
     let current = true
-    setListing({ kind: 'loading' })
     void listAgentFiles(workspaceId).then((r) => {
       if (current) setListing(r.ok ? { kind: 'ready', response: r.response } : { kind: 'error', error: r.error })
     })
     return () => { current = false }
   }, [workspaceId, listAgentFiles, reloads])
+
+  // Loading is shown only when the workspace changes; a refresh keeps the rows (keyed by file and digest) and what was typed in them.
+  useEffect(() => { setListing({ kind: 'loading' }) }, [workspaceId])
 
   const refresh = useCallback(() => setReloads((n) => n + 1), [])
   // Whatever happened, the list is read again: a changed or already imported file shows its new state.

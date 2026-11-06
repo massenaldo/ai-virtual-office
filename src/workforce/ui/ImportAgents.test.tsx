@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { AgentFilePreview, AgentFilesResponse } from '../api'
 import type { WorkforceController } from '../controller'
 import { attemptImport, attemptReimport, reimportPrompt } from './importAgentsLogic'
+import { ROLE_MAX } from '../operations'
 import { createDefaultLayout } from '../../layout/defaultLayout'
 import { createDemoWorkforce } from '../demo'
 import AgentList from './AgentList'
@@ -42,6 +43,9 @@ describe('ImportAgents without a workspace', () => {
 describe('ImportAgentsBody listing states', () => {
   it('says so for a missing folder and an empty one', () => {
     expect(body(ready([], { folder: 'missing' }))).toContain('This workspace has no .claude/agents folder.')
+    const refused = body(ready([], { folder: 'refused' }))
+    expect(refused).toContain('The .claude/agents folder is a link or not a real folder, so it was not read.')
+    expect(refused).not.toContain('has no .claude/agents folder')
     const empty = body(ready([]))
     expect(empty).toContain('No agent files found in .claude/agents.')
     expect(empty).not.toContain('has no .claude/agents folder')
@@ -92,14 +96,15 @@ describe('a good file', () => {
 
   it('lists ignored fields, and says nothing when there are none', () => {
     expect(body(ready([good({}, { ignoredFields: ['tools', 'permissionMode'] })]))).toContain('Ignored: tools, permissionMode')
+    expect(body(ready([good({}, { ignoredFields: ['tools'] })]))).toContain('A file can not grant tools and can not restrict them either: tools: Read, Grep still leaves an agent that can ask for Write, which needs approval.')
     expect(h).not.toContain('Ignored:')
   })
 
   it('notes a masked secret and a cut description', () => {
     const n = body(ready([good({}, { secretsMasked: true, descriptionCut: true })]))
-    expect(n).toContain('A secret in this file was hidden.')
+    expect(n).toContain('Text that looks like a secret was replaced with [REDACTED]. Check the instructions below.')
     expect(n).toContain('The description was cut short.')
-    expect(h).not.toContain('A secret in this file')
+    expect(h).not.toContain('replaced with [REDACTED]')
     expect(h).not.toContain('cut short')
   })
 
@@ -185,6 +190,13 @@ describe('attemptImport and attemptReimport', () => {
 
   it('reports that import is unavailable when the action is missing', async () => {
     expect(await attemptImport(undefined, 'w', preview, 'R', 'design')).toBe('Importing agents needs the server. Start the app with npm run dev:full.')
+  })
+})
+
+describe('the role field', () => {
+  it('allows as many characters as the server does', () => {
+    const f = good({}, {})
+    expect(body(ready([f]))).toContain(`maxLength="${ROLE_MAX}"`)
   })
 })
 

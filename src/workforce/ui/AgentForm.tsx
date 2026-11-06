@@ -11,8 +11,11 @@ export type AgentFormProps = { agent?: Agent; onSubmit(input: AgentInput): Await
 /** What the form holds: the model is text until it is sent. */
 export type AgentDraft = Omit<AgentInput, 'model'> & { model: string }
 
-/** An empty Model field means the server default. */
-export const toAgentInput = (d: AgentDraft): AgentInput => ({ ...d, model: d.model.trim() || null })
+/** An empty Model field, or "inherit" in any case, means the server default. */
+export const toAgentInput = (d: AgentDraft): AgentInput => {
+  const model = d.model.trim()
+  return { ...d, model: model === '' || model.toLowerCase() === 'inherit' ? null : model }
+}
 
 /** Sends the draft; returns the error to show, or null when it was applied. */
 export const attemptSave = async (onSubmit: AgentFormProps['onSubmit'], d: AgentDraft): Promise<string | null> => onSubmit(toAgentInput(d))

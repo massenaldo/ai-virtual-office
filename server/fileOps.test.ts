@@ -484,7 +484,8 @@ describe('globFiles and grepFiles', () => {
     const r = gl('**/*.log')
     expect(r.truncated).toBe(true)
     expect(r.paths.length).toBeLessThanOrEqual(GLOB_MAX_RESULTS)
-  })
+    // Creating 10 000 files takes about 0.5 s alone (the walk itself 10 ms) but 7 s while other test files load the disk.
+  }, 30_000)
   it('aborts', () => {
     put('a.txt')
     const ac = new AbortController(); ac.abort()

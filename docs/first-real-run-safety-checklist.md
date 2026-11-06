@@ -55,6 +55,8 @@ A second read-only run (`--injection`) gave the same picture (both tasks complet
 
 Still **UNKNOWN** (not reported): the script's exit code, the model used by default, the cost shown by the Anthropic console, whether the run user was `user` (in the `sudo` and `docker` groups) or a dedicated one, and whether the key's console spending limit was set.
 
+2026-11-06: the owner confirmed that the key has a spending limit and that the three runs used their normal OS user account, not a dedicated one.
+
 The verdicts above still apply to what has **not** been run: anything on a real workspace, broad write scopes, public access with Claude, and unattended use.
 
 ## 1. Verified repository state

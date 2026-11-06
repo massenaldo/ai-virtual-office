@@ -9,6 +9,11 @@ const expectLinear = (name: string, make: (n: number) => string, small: number) 
   expect(r.ratio, `${name}: ${r.smallMs.toFixed(1)} ms then ${r.largeMs.toFixed(1)} ms for 8x the input (n=${r.n})`).toBeLessThan(r.limit)
 }
 
+// Each scaling test times several inputs, each run 5 times at two sizes: together 1.5 to 6 s of CPU on a quiet machine,
+// which is over vitest's 5 s default when the machine is loaded. This is a bound on total test time, not on any one case:
+// expectLinear still fails on the ratio alone.
+const SCALING_TIMEOUT_MS = 60_000
+
 describe('redactSecrets', () => {
   it.each([
     ['key sk-ant-api03-abcdefghijklmnop end', 'key [REDACTED] end'],
@@ -71,7 +76,7 @@ describe('redactSecrets: more secret shapes', () => {
     expectLinear('basic', (n) => `Basic ${'A'.repeat(n)}`, 200000)
     expectLinear('password flags', (n) => '--password '.repeat(n), 5000)
     expectLinear('ghp', (n) => `ghp_${'a'.repeat(n)}`, 200000)
-  })
+  }, SCALING_TIMEOUT_MS)
 })
 
 describe('redactSecrets: JWT, Slack, Google, PEM, -p and URL passwords', () => {
@@ -121,7 +126,7 @@ describe('redactSecrets: JWT, Slack, Google, PEM, -p and URL passwords', () => {
     expectLinear('eyJ', (n) => 'eyJ'.repeat(n), 25000)
     expectLinear('eyJ then a run', (n) => `eyJ${'a'.repeat(n)}`, 200000)
     expectLinear('header-like repeats', (n) => 'eyJaaaaaaaaaaaa.'.repeat(n), 8000)
-  })
+  }, SCALING_TIMEOUT_MS)
 
   it('redacts a private key block that scrub cuts short', () => {
     const cut = scrub(`log ${pem('RSA PRIVATE KEY')}`, 100)
@@ -180,7 +185,7 @@ describe('redactSecrets: JWT, Slack, Google, PEM, -p and URL passwords', () => {
     expectLinear('jwt-like repeats', (n) => 'eyJ.'.repeat(n), 6000)
     expectLinear('xox repeats', (n) => 'xox-'.repeat(n), 6000)
     expectLinear('many urls', (n) => 'https://a:b '.repeat(n), 2000)
-  })
+  }, SCALING_TIMEOUT_MS)
 
   it('costs about linear time on the token formats', () => {
     expectLinear('stripe run', (n) => `sk_live_${'a'.repeat(n)}`, 200000)
@@ -193,7 +198,7 @@ describe('redactSecrets: JWT, Slack, Google, PEM, -p and URL passwords', () => {
     expectLinear('xoxe prefixes', (n) => 'xoxe.xoxp-'.repeat(n), 10000)
     expectLinear('aws assignments', (n) => 'aws_secret_access_key = '.repeat(n), 5000)
     expectLinear('aws long space', (n) => `aws_secret_access_key${' '.repeat(n)}`, 100000)
-  })
+  }, SCALING_TIMEOUT_MS)
 })
 
 describe('PGP and PuTTY private keys', () => {
@@ -221,7 +226,7 @@ describe('PGP and PuTTY private keys', () => {
     expectLinear('pgp starts', (n) => '-----BEGIN PGP PRIVATE KEY BLOCK-----\n'.repeat(n), 800)
     expectLinear('putty starts', (n) => 'PuTTY-User-Key-File-3: x\n'.repeat(n), 800)
     expectLinear('pgp near misses', (n) => '-----BEGIN PGP PUBLIC KEY BLOCK-----\n'.repeat(n), 800)
-  })
+  }, SCALING_TIMEOUT_MS)
 })
 
 describe('scrub', () => {
@@ -265,7 +270,7 @@ describe('redactSecrets cost', () => {
     expectLinear('token', (n) => 'token'.repeat(n), 50000)
     expectLinear('key', (n) => 'key '.repeat(n), 60000)
     expectLinear('long name before a match', (n) => 'a'.repeat(n) + 'password=x', 300000)
-  })
+  }, SCALING_TIMEOUT_MS)
 
   it('still redacts a long key name', () => {
     expect(redactSecrets(`${'a'.repeat(30)}_api_key=abc123456`)).toBe(`${'a'.repeat(30)}_api_key=[REDACTED]`)

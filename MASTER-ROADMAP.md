@@ -309,7 +309,6 @@ A Claude subagent definition in `.claude/agents/*.md` is not automatically a per
 - Removing an agent is an explicit action (`removeAgent` in `src/workforce/operations.ts`).
 - The system prompt uses only the agent's name and role (`server/runtime/claudePrompt.ts`).
 - The model is one server-wide setting, `CLAUDE_MODEL`.
-- A finished task sets the agent's status to `completed`, a failed one to `error`, a cancelled one to `idle` (`src/workforce/operations.ts`).
 - Done in slice 1: the agent's instructions and model reach the runtime, `CLAUDE_MODEL` is only the default, and a finished or cancelled task returns the agent to `idle` (a failed one stays in `error` until cleared).
 
 ### Scope (what is missing)

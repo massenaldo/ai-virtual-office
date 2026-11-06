@@ -76,7 +76,7 @@ Establish the base web application and an editable office layout.
 - Room and furniture editing.
 - Synchronization between floor-plan/layout representation and 3D view.
 - Save, reload, undo/redo, and reset workflows, as implemented in the project.
-- `/vo` developer command to start the server when needed and open the application.
+- `/vo` was the original developer command; it was retired on 2026-11-06 in favour of `npm run dev:full`.
 
 ### Acceptance criteria
 - [x] Application starts using the documented local workflow.

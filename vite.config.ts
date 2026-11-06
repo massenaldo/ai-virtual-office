@@ -3,13 +3,12 @@ import { resolve } from 'node:path'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { apiProxyFor } from './scripts/apiProxy'
-import { voAutoExit } from './scripts/voAutoExit'
 
 export default defineConfig(({ mode }) => {
   // Backend mode with the dev proxy: VITE_WORKFORCE_API_URL=/ (dev:full sets it). Otherwise nothing is proxied.
   const api = apiProxyFor(loadEnv(mode, process.cwd(), ''))
   return {
-    plugins: [react(), voAutoExit(process.env.VO_AUTO_EXIT === '1'), ...(api ? [api.plugin] : [])],
+    plugins: [react(), ...(api ? [api.plugin] : [])],
     server: {
       host: '127.0.0.1',
       port: 5173,

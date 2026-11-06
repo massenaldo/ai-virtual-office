@@ -34,9 +34,10 @@ try {
   vite = await createServer({ configFile: 'vite.config.ts' })
   await vite.listen()
   vite.printUrls()
+  log.info('Open the office at http://localhost:5173')
 } catch (error) {
   await backend.close()
-  log.error(`Port 5173 is in use (is npm run dev or /vo already running?). ${error instanceof Error ? error.message : ''}`.trim())
+  log.error(`Port 5173 is in use (is npm run dev already running?). ${error instanceof Error ? error.message : ''}`.trim())
   process.exit(1)
 }
 

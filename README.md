@@ -6,22 +6,23 @@ A self-hosted, browser-based 3D office prototype built with React, TypeScript, V
 
 - Node.js 22.12 or newer (CI runs 22 and 24)
 - npm
-- Claude Code (optional; only needed for the `/vo` shortcut)
 
 ## Run locally
 
 ```bash
 npm install
-npm run dev
+npm run dev:full
 ```
 
 Open http://localhost:5173.
+
+`dev:full` runs the backend and the app together on the mock runtime, with no API key and no cost. Agents are saved on the server, and it keeps running until you stop it with Ctrl+C. Use `localhost` rather than the `127.0.0.1` address Vite prints, because the layout is saved per address.
 
 ### Run with the local backend (optional)
 
 | Command | What it starts |
 |---|---|
-| `npm run dev` | Frontend only, with the browser mock (default; `/vo` uses this) |
+| `npm run dev` | Frontend only, a browser-only demo with no server: agents are saved in the browser, not on the server |
 | `npm run server` | The backend alone, on `127.0.0.1:8787` |
 | `npm run dev:full` | The backend and the frontend, with the UI reaching it through the same-origin dev proxy (no setup, no token to copy) |
 | `npm run server:build` then `npm run server:start` | The production backend bundle (`dist-server/index.js`, only `node:` imports) |
@@ -60,20 +61,6 @@ The backend keeps listening on `127.0.0.1:8787` (`HOST`/`PORT`); only the gatewa
 **What it does not.** There is one shared password and no per-user accounts or roles: anyone who has it can do everything the app can. Wrong passwords are throttled globally, not per visitor (8 wrong guesses lock everyone out for 5 minutes; requests with no password at all are not counted). So an attacker who keeps sending wrong passwords can keep the owner locked out for as long as they keep it up: every 5 minutes it unlocks, and a few more wrong guesses lock it again. Restarting resets the counter but does not help while they continue. The only fix is to stop the attacker, for example by unpublishing the port in the InstaBox dashboard. Basic auth has no log-out: on a shared computer use a private window. HTTPS comes from InstaBox; do not expose the gateway's port by other means.
 
 **`RUNTIME=claude` and `ENABLE_CLAUDE_RUNTIME=yes` are refused on the public address by default.** The entry script exits with an error. A public page would mean real model spend and file writes reachable from the internet, while the security prerequisites in `docs/milestone-3b5-prerequisites.md` (a real-key run, an independent review, the OS-user decision) are still open. Set `VO_ALLOW_PUBLIC_CLAUDE=yes` only once they are met.
-
-## Open with Claude Code `/vo`
-
-1. Open a terminal and enter this project folder.
-2. Start Claude Code from the project root: `claude`.
-3. Type `/vo`.
-
-The project command is defined in `.claude/commands/vo.md`. It invokes `scripts/vo.sh`, which starts the Vite server only if the local URL is not already responding, then opens the browser on macOS or Linux desktop environments.
-
-`/vo` opens the office at `http://localhost:5173/sessionID=<ID>`, where `<ID>` is the Claude Code session's ID, and shows that link as a note in the reply. The ID only appears in the link; the app ignores it.
-
-**Auto-stop:** a server started by `/vo` stops immediately when the last browser page is closed, and removes `.vo-server.pid`. A page reload also closes the page's connection, so it stops the server too; run `/vo` again. Anything you haven't saved is discarded, and the next start loads your last saved layout. A server you start yourself with `npm run dev` is never stopped this way.
-
-You can also run `./scripts/vo.sh [sessionID]` directly without Claude Code.
 
 ## Features
 
@@ -165,7 +152,7 @@ A small Node server (`server/`, no framework; the only runtime dependencies are 
 - *Long term:* [`docs/browser-auth.md`](docs/browser-auth.md) records the decision (session cookie after a one-time pairing, built in stage D) and states that `Sec-Fetch-Site` is not authentication against other local programs.
 - *Rotation:* restart the server (generated), or change `API_TOKEN` and restart. A configured token is never written to disk.
 - *Other clients:* `curl -H "Authorization: Bearer $(cat data/api-token)" http://127.0.0.1:8787/api/state`.
-- `/vo` and `npm run dev` stay browser-only and need no token.
+- `npm run dev` stays browser-only and needs no token.
 
 **Sandbox.** There is none yet: [`docs/sandbox-architecture.md`](docs/sandbox-architecture.md) is a design only (Docker, one workspace mounted, no network, resource limits) with its blockers. No isolation is active.
 
@@ -184,7 +171,7 @@ The scene renders a typed, versioned `OfficeLayout` (`src/layout/types.ts`). It 
 
 Agents, tasks and recent activity are typed, versioned data in `src/workforce/` (`types.ts`), kept apart from the layout.
 
-- **Storage:** `localStorage` key `ai-virtual-office:workforce:v1`, saved automatically on every change. Agent changes are not part of the layout's undo history and never touch the layout key.
+- **Storage:** with the backend (`npm run dev:full`) agents are saved on the server in `data/workforce.json`. In the browser-only demo (`npm run dev`) they are saved in `localStorage` key `ai-virtual-office:workforce:v1`, automatically on every change. Agent changes are not part of the layout's undo history and never touch the layout key.
 - **Validation:** loading checks every record and every reference (task ↔ agent, activity ↔ agent and task, one agent per desk, one active task per agent). Data that can't be read is copied to `ai-virtual-office:workforce:v1:backup`, a notice is shown, and the panel starts empty; nothing is overwritten without a backup.
 - **History:** the newest 300 activity events are kept; tasks are kept.
 - **Desks:** an agent refers to a desk by its furniture ID. If that desk is no longer in the layout (deleted, or a different layout), the agent keeps the reference and shows **Workstation unavailable** until you pick another desk.

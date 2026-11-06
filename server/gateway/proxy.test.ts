@@ -170,6 +170,20 @@ describe('proxy against a stub upstream', () => {
     expect(seen).toEqual([])
   })
 
+  it.each([['1.01 MiB', 1024 * 1024 + 10_000], ['2 MiB', 2 * 1024 * 1024], ['7 MiB', 7 * 1024 * 1024]])('delivers the 413 to clients that ask for Connection: close and send %s at once', async (_name, size) => {
+    // Node ends a connection the client asked to close right after the answer; unread inbound data would then reset it.
+    const body = Buffer.alloc(size, 'a')
+    const port = new URL(gw.url).port
+    const one = () => new Promise<number | string>((resolve) => {
+      const req = request({ hostname: '127.0.0.1', port, path: '/api/agents', method: 'POST', agent: false, headers: { authorization: BASIC, ...SAME, 'content-type': 'application/json', connection: 'close', 'content-length': String(body.length) } }, (res) => { res.resume(); resolve(res.statusCode ?? 0) })
+      req.on('error', (e) => resolve(e.message))
+      req.end(body)
+    })
+    const results = await Promise.all(Array.from({ length: 12 }, one))
+    expect(results).toEqual(Array.from({ length: 12 }, () => 413))
+    expect(seen).toEqual([])
+  })
+
   it('answers 502 with a fixed sentence when the backend is not reachable', async () => {
     stub.closeAllConnections()
     await new Promise((r) => stub.close(r))

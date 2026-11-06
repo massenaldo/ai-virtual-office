@@ -100,11 +100,29 @@ export function openWorkforceStore({ dataDir, now, log, onCommit, writeFile = wr
     if (parsed) {
       if (isObject(raw) && typeof raw.schemaVersion === 'number' && raw.schemaVersion < WORKFORCE_SCHEMA_VERSION) {
         // Older data was understood: keep the exact original text once, then save it as the current schema.
+        const refuse = (why: string) => new Error(`Migration to schema ${WORKFORCE_SCHEMA_VERSION} did not run: ${why}. ${filePath} is unchanged.`)
         let existing = true
-        try { readFileSync(v2BackupPath, 'utf8') } catch { existing = false }
-        if (!existing) writeFile(v2BackupPath, text)
+        try {
+          readFileSync(v2BackupPath, 'utf8')
+        } catch (error) {
+          // Only a missing backup counts as absent; an unreadable one must never be replaced.
+          const code = (error as NodeJS.ErrnoException).code
+          if (code !== 'ENOENT') throw refuse(`couldn't read the existing backup ${v2BackupPath}: ${code ?? (error as Error).message}`)
+          existing = false
+        }
+        if (!existing) {
+          try {
+            writeFile(v2BackupPath, text)
+          } catch (error) {
+            throw refuse(`couldn't write the backup ${v2BackupPath}: ${errorCode(error)}`)
+          }
+        }
         save(parsed)
-        log.info(`Workforce data in ${filePath} was migrated to schema ${WORKFORCE_SCHEMA_VERSION}. The original is kept at ${v2BackupPath}.`)
+        if (saveError === null) {
+          log.info(existing
+            ? `Workforce data in ${filePath} was migrated to schema ${WORKFORCE_SCHEMA_VERSION}. A backup already existed at ${v2BackupPath}, so it was left as it is and may hold different data.`
+            : `Workforce data in ${filePath} was migrated to schema ${WORKFORCE_SCHEMA_VERSION}. The original is kept at ${v2BackupPath}.`)
+        }
       }
       state = recoverInterruptedTasks(parsed, now(), SERVER_RESTART_MESSAGE)
       if (state !== parsed) {

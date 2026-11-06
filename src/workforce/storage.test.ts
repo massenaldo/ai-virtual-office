@@ -220,6 +220,8 @@ describe('parseWorkforce', () => {
     ['an unknown activity type', (r: any) => { r.activities[0].type = 'teleported' }],
     ['a bad timestamp', (r: any) => { r.tasks[0].createdAt = 'yesterday' }],
     ['the meeting department', (r: any) => { r.agents[0].department = 'meeting' }],
+    ['a department named like an inherited property', (r: any) => { r.agents[0].department = 'constructor' }],
+    ['a department named __proto__', (r: any) => { r.agents[0].department = '__proto__' }],
     ['a pendingApproval on a running task', (r: any) => { r.tasks[0].pendingApproval = { id: 'a', tool: 'Write', summary: 'x', requestedAt: NOW } }],
     ['a waiting task without pendingApproval', (r: any) => { r.tasks[0].status = 'waiting_for_approval' }],
     ['an endedReason on an active task', (r: any) => { r.tasks[0].endedReason = 'completed' }],

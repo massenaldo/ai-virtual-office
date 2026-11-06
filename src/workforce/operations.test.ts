@@ -34,6 +34,7 @@ describe('createAgent', () => {
     expect(createAgent(s, { ...NOVA, role: ' ' }, NOW)).toEqual({ ok: false, error: 'Role is required.' })
     expect(createAgent(s, { ...NOVA, role: 'x'.repeat(61) }, NOW)).toEqual({ ok: false, error: 'Role must be 60 characters or fewer.' })
     expect(createAgent(s, { ...NOVA, department: 'meeting' as AgentInput['department'] }, NOW)).toEqual({ ok: false, error: 'Choose a department.' })
+    for (const department of ['constructor', '__proto__', 'toString']) expect(createAgent(s, { ...NOVA, department: department as AgentInput['department'] }, NOW)).toEqual({ ok: false, error: 'Choose a department.' })
   })
 
   it('records a real runtime mode when asked', () => {

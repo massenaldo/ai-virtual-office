@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { AUDIT_FILE, type AuditRecord } from '../audit'
+import { createAgent } from '../../src/workforce/operations'
 import { buildSystemPrompt } from '../runtime/claudePrompt'
 import { startTestServer, type TestServer } from '../test/helpers'
 import { makeWorkspaceRoot } from '../test/workspaces'
@@ -86,14 +87,30 @@ describe('POST /api/agents/import', () => {
     expect(r.status).toBe(409)
     expect((await agents()).length).toBe(before)
   })
-  it('never accepts an empty digest, even for a file that cannot be read', async () => {
+  it('answers 422 with the read error, not "changed", for a file that cannot be read', async () => {
     mkdirSync(FOLDER(), { recursive: true })
     writeFileSync(join(FOLDER(), 'nova.md'), Buffer.from([0xff, 0xfe, 0xfd]))
-    for (const digest of ['', 'abc']) {
-      const r = await s.api('POST', '/api/agents/import', importBody({ digest }))
-      expect([400, 409]).toContain(r.status)
-    }
+    const r = await s.api('POST', '/api/agents/import', importBody({ digest: 'a'.repeat(64) }))
+    expect(r.status).toBe(422)
+    expect(r.body.error).toBe('The file is not valid UTF-8 text.')
+    expect((await s.api('POST', '/api/agents/import', importBody({ digest: '' }))).status).toBe(400)
     expect((await agents()).some((a) => a.sourceFile !== null)).toBe(false)
+  })
+  it('accepts a file name only exactly as the folder lists it', async () => {
+    put('nova.md', NOVA)
+    const r = await s.api('POST', '/api/agents/import', importBody({ file: 'NOVA.md' }))
+    expect(r.status).toBe(404)
+    expect((await agents()).some((a) => a.sourceFile !== null)).toBe(false)
+  })
+  it('treats a case-only rename of an imported file as the same agent', async () => {
+    put('nova.md', NOVA)
+    const first = await s.api('POST', '/api/agents/import', importBody())
+    renameSync(join(FOLDER(), 'nova.md'), join(FOLDER(), 'NOVA.md'))
+    const preview = (await s.api('GET', '/api/workspaces/sandbox/agent-files')).body.files[0]
+    expect(preview).toMatchObject({ file: 'NOVA.md', existing: { agentId: first.body.agent.id } })
+    const again = await s.api('POST', '/api/agents/import', importBody({ file: 'NOVA.md' }))
+    expect(again.status).toBe(409)
+    expect((await agents()).filter((a) => a.sourceFile !== null)).toHaveLength(1)
   })
   it('answers 409 and names the existing agent on a second import', async () => {
     put('nova.md', NOVA)
@@ -107,6 +124,8 @@ describe('POST /api/agents/import', () => {
     put('nova.md', NOVA)
     expect((await s.api('POST', '/api/agents/import', importBody({ department: 'nowhere' }))).status).toBe(422)
     expect((await s.api('POST', '/api/agents/import', importBody({ department: 'meeting' }))).status).toBe(422)
+    for (const department of ['constructor', '__proto__', 'toString']) expect((await s.api('POST', '/api/agents/import', importBody({ department }))).status).toBe(422)
+    expect((await s.api('POST', '/api/agents', { name: 'P', role: 'R', department: '__proto__' })).status).toBe(422)
     expect((await s.api('POST', '/api/agents/import', importBody({ role: '' }))).status).toBe(422)
     expect((await s.api('POST', '/api/agents/import', importBody({ role: 'x'.repeat(61) }))).status).toBe(422)
   })
@@ -141,6 +160,43 @@ describe('POST /api/agents/:id/reimport', () => {
     const r = await s.api('POST', `/api/agents/${a.id}/reimport`, { digest })
     expect(r.status).toBe(200)
     expect(r.body.agent).toMatchObject({ name: 'Renamed', role: 'Boss', department: 'backend', deskId: 'desk-14', description: 'New', model: null, instructions: 'New text.', sourceFile: 'sandbox:nova.md' })
+  })
+  it('follows a case-only rename on disk and leaves sourceFile as stored', async () => {
+    const a = await imported()
+    renameSync(join(FOLDER(), 'nova.md'), join(FOLDER(), 'NOVA.md'))
+    const digest = put('NOVA.md', NOVA.replace('Be brief.', 'Be long.'))
+    const r = await s.api('POST', `/api/agents/${a.id}/reimport`, { digest })
+    expect(r.status).toBe(200)
+    expect(r.body.agent).toMatchObject({ instructions: 'Be long.', sourceFile: 'sandbox:nova.md' })
+    expect(readAudit().find((x) => x.action === 'agent.reimported')!.detail).toContain('file=NOVA.md')
+  })
+  it('answers 422 with the read error for a file that cannot be read', async () => {
+    const a = await imported()
+    writeFileSync(join(FOLDER(), 'nova.md'), Buffer.from([0xff, 0xfe, 0xfd]))
+    const r = await s.api('POST', `/api/agents/${a.id}/reimport`, { digest: sha(NOVA) })
+    expect(r.status).toBe(422)
+    expect(r.body.error).toBe('The file is not valid UTF-8 text.')
+  })
+  it('answers 404 when the workspace folder itself is gone', async () => {
+    const a = await imported()
+    rmSync(ws.path('sandbox'), { recursive: true })
+    const r = await s.api('POST', `/api/agents/${a.id}/reimport`, { digest: sha(NOVA) })
+    expect(r.status).toBe(404)
+    expect(JSON.stringify(r.body)).not.toContain(ws.root)
+  })
+  it('answers 404 for a stored source that is not workspace:file', async () => {
+    for (const sourceFile of ['nocolon', ':nova.md']) {
+      const made = createAgent(s.app.store.state, { name: `Odd${sourceFile.length}`, role: 'R', department: 'backend' }, '2026-11-06T09:00:00.000Z', { sourceFile })
+      if (!made.ok) throw new Error(made.error)
+      s.app.store.commit(made.state)
+      expect((await s.api('POST', `/api/agents/${made.id}/reimport`, { digest: sha(NOVA) })).status).toBe(404)
+    }
+  })
+  it('does not write an audit record when nothing changed', async () => {
+    const a = await imported()
+    const r = await s.api('POST', `/api/agents/${a.id}/reimport`, { digest: sha(NOVA) })
+    expect(r.status).toBe(200)
+    expect(readAudit().filter((x) => x.action === 'agent.reimported')).toHaveLength(0)
   })
   it('answers 409 for an agent that was not imported', async () => {
     put('nova.md', NOVA)

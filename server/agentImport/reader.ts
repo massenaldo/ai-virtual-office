@@ -49,6 +49,16 @@ function readOne(workspacePath: string, fileName: string, signal: AbortSignal): 
   }
 }
 
+/** Every plain agent file name in the folder, as the disk lists them (not cut to the preview limit); null when the folder is missing. */
+export function listAgentFileNames(workspacePath: string): string[] | null {
+  if (folderState(workspacePath) !== 'found') return null
+  try {
+    return readdirSync(join(workspacePath, ...FOLDER), { withFileTypes: true }).filter((d) => !d.isDirectory()).map((d) => d.name).filter(validName).sort()
+  } catch {
+    return null
+  }
+}
+
 export function readAgentFiles(workspacePath: string, signal: AbortSignal): { folder: 'found' | 'missing'; files: AgentFile[]; cut: boolean } {
   const state = folderState(workspacePath)
   if (state !== 'found') return { folder: 'missing', files: [], cut: false }

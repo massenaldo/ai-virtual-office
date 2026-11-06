@@ -30,7 +30,7 @@ export function emptyWorkforce(): WorkforceState {
   return { schemaVersion: WORKFORCE_SCHEMA_VERSION, agents: [], tasks: [], activities: [] }
 }
 
-const isAgentDepartment = (v: string): v is AgentDepartment => v !== 'meeting' && v in DEPARTMENTS
+const isAgentDepartment = (v: string): v is AgentDepartment => v !== 'meeting' && Object.hasOwn(DEPARTMENTS, v)
 
 export function validateAgentInput(input: AgentInput): string | null {
   const name = input.name.trim()

@@ -7,6 +7,7 @@ import { createDemoWorkforce } from '../demo'
 import { emptyPermissions, withLists, type PermissionsState } from '../permissions'
 import type { ToolReview } from '../types'
 import type { Workforce } from '../useWorkforce'
+import { applyRuntimeEvent, assignTask, markStarting, recoverInterruptedTasks } from '../operations'
 import AgentDetail, { TaskForm } from './AgentDetail'
 
 const NOW = '2026-11-03T09:00:00.000Z'
@@ -165,7 +166,7 @@ describe('AgentDetail task usage', () => {
   const done = (usage: { turns: number; costUsd: number } | null) => ({
     ...demo,
     tasks: [{ ...demo.tasks[0], id: 'tk', agentId: agent.id, title: 'T', description: '', status: 'completed' as const, resultSummary: 'All done.', usage }],
-    agents: demo.agents.map((a) => (a.id === agent.id ? { ...a, currentTaskId: 'tk', status: 'completed' as const } : a)),
+    agents: demo.agents.map((a) => (a.id === agent.id ? { ...a, currentTaskId: 'tk', status: 'idle' as const } : a)),
   })
 
   it('shows the steps and estimated cost under the result', () => {
@@ -178,5 +179,60 @@ describe('AgentDetail task usage', () => {
     const h = view(done(null), null)
     expect(h).toContain('All done.')
     expect(h).not.toContain('(estimate)')
+  })
+})
+
+
+describe('AgentDetail profile', () => {
+  const profile = (patch: Partial<typeof agent>, extra: Partial<typeof demo> = {}, actions: Partial<WorkforceController> = {}) => {
+    const state = { ...demo, ...extra, agents: demo.agents.map((a) => (a.id === agent.id ? { ...a, ...patch } : a)) }
+    return renderToStaticMarkup(<AgentDetail workforce={{ state, permissions: null, actions } as unknown as Workforce} layout={layout} agent={state.agents.find((a) => a.id === agent.id)!} onBack={() => {}} onEdit={() => {}} onRemove={() => {}} onFocusDesk={() => {}}/>)
+  }
+
+  it('shows the description, instruction state and model', () => {
+    const h = profile({ description: 'Plans the sprint', instructions: 'Be brief', model: 'claude-x' })
+    expect(h).toContain('Plans the sprint')
+    expect(h).toContain('Custom instructions set')
+    expect(h).toContain('claude-x')
+  })
+
+  it('says so when there are no instructions and no model', () => {
+    const h = profile({ description: '', instructions: '', model: null })
+    expect(h).toContain('No custom instructions')
+    expect(h).toContain('Server default')
+  })
+
+  const render = (state: typeof demo) => renderToStaticMarkup(<AgentDetail workforce={{ state, permissions: null, actions: {} as WorkforceController } as unknown as Workforce} layout={layout} agent={state.agents.find((a) => a.id === agent.id)!} onBack={() => {}} onEdit={() => {}} onRemove={() => {}} onFocusDesk={() => {}}/>)
+  const assigned = () => {
+    const r = assignTask(demo, agent.id, { title: 'T', description: '' }, NOW)
+    if (!r.ok) throw new Error(r.error)
+    return { state: markStarting(r.state, r.taskId, NOW), taskId: r.taskId }
+  }
+
+  it('offers Clear error after a task that failed through the real operations', () => {
+    const { state, taskId } = assigned()
+    const running = applyRuntimeEvent(state, { type: 'started', taskId, executionId: 'e1' }, NOW, 'mock')
+    expect(render(running)).not.toContain('Clear error')
+    const failed = applyRuntimeEvent(running, { type: 'failed', taskId, error: 'boom' }, NOW, 'mock')
+    expect(failed.agents.find((a) => a.id === agent.id)!.status).toBe('error')
+    expect(render(failed)).toContain('Clear error</button>')
+  })
+
+  it('offers Clear error after a run interrupted by a reload', () => {
+    const { state, taskId } = assigned()
+    const running = applyRuntimeEvent(state, { type: 'started', taskId, executionId: 'e1' }, NOW, 'mock')
+    const recovered = recoverInterruptedTasks(running, NOW)
+    expect(recovered.agents.find((a) => a.id === agent.id)!.status).toBe('error')
+    expect(render(recovered)).toContain('Clear error</button>')
+  })
+
+  it('does not offer Clear error for an idle agent', () => {
+    expect(render(demo)).not.toContain('Clear error')
+  })
+
+  it('treats blank instructions and description as empty', () => {
+    const h = profile({ description: '   ', instructions: '  \n ' })
+    expect(h).toContain('No custom instructions')
+    expect(h).not.toContain('Custom instructions set')
   })
 })

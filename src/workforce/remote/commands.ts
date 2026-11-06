@@ -3,7 +3,7 @@ import type { ActionResult, WorkforceController } from '../controller'
 import type { Agent } from '../types'
 import type { ApiClient, ApiResult, MutationMethod } from './client'
 
-export type RemoteCommands = Pick<WorkforceController, 'createAgent' | 'updateAgent' | 'removeAgent' | 'assignDesk' | 'startTask' | 'cancelTask' | 'decideApproval' | 'requestApproval' | 'forceError' | 'restoreDemoAgents'> & PermissionCommands
+export type RemoteCommands = Pick<WorkforceController, 'createAgent' | 'updateAgent' | 'removeAgent' | 'clearAgentError' | 'assignDesk' | 'startTask' | 'cancelTask' | 'decideApproval' | 'requestApproval' | 'forceError' | 'restoreDemoAgents'> & PermissionCommands
 
 /** Backend only: the local mock has no permission engine. A refusal comes back to the caller as the server's own text. */
 export type PermissionCommands = {
@@ -41,6 +41,7 @@ export function createRemoteCommands(deps: { client: ApiClient; insertAgent(agen
     },
     updateAgent: (agentId, patch) => result('PATCH', `/api/agents/${id(agentId)}`, patch satisfies PatchAgentBody),
     removeAgent: (agentId) => fireAndForget('DELETE', `/api/agents/${id(agentId)}`),
+    clearAgentError: (agentId) => result('POST', `/api/agents/${id(agentId)}/clear-error`),
     assignDesk: (agentId, deskId) => result('PUT', `/api/agents/${id(agentId)}/desk`, { deskId } satisfies DeskBody),
     startTask: (agentId, input, opts) => result('POST', `/api/agents/${id(agentId)}/tasks`, { title: input.title, description: input.description, ...(opts?.workspaceId ? { workspaceId: opts.workspaceId } : {}), ...(opts?.runtime ? { runtime: opts.runtime } : {}) } satisfies CreateTaskBody),
     cancelTask: (taskId) => result('POST', `/api/tasks/${id(taskId)}/cancel`),

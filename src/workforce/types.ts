@@ -1,11 +1,11 @@
 import type { DepartmentId } from '../layout/types'
 
-export const WORKFORCE_SCHEMA_VERSION = 2
+export const WORKFORCE_SCHEMA_VERSION = 3
 
 /** The most recent activity events kept in total; older ones are dropped. */
 export const ACTIVITY_LIMIT = 300
 
-export type AgentStatus = 'idle' | 'working' | 'thinking' | 'waiting' | 'error' | 'completed'
+export type AgentStatus = 'idle' | 'working' | 'thinking' | 'waiting' | 'error'
 
 export type TaskStatus = 'queued' | 'starting' | 'running' | 'waiting_for_approval' | 'completed' | 'failed' | 'cancelling' | 'cancelled'
 
@@ -39,8 +39,12 @@ export type ActivitySource = 'mock' | 'real'
 
 export type AgentDepartment = Exclude<DepartmentId, 'meeting'>
 
+/** Bounds on an agent's free text, in characters. */
+export const AGENT_DESCRIPTION_MAX = 500
+export const AGENT_INSTRUCTIONS_MAX = 8192
+
 /** deskId is a desk furniture ID and may point at a desk the layout no longer has. currentTaskId is the latest task, active or finished. */
-export type Agent = { id: string; name: string; role: string; department: AgentDepartment; deskId: string | null; status: AgentStatus; currentTaskId: string | null; runtimeMode: RuntimeMode; demo: boolean; createdAt: string; lastActivityAt: string | null }
+export type Agent = { id: string; name: string; role: string; department: AgentDepartment; deskId: string | null; status: AgentStatus; currentTaskId: string | null; runtimeMode: RuntimeMode; demo: boolean; createdAt: string; lastActivityAt: string | null; description: string; instructions: string; /** null means the server's default model. */ model: string | null; takesPrayerBreaks: boolean; /** Set only by an import from a file; never settable through the API or form. */ sourceFile: string | null }
 
 /** Steps and the runtime's own cost estimate for a finished task. Numbers only. */
 export type TaskUsage = { turns: number; costUsd: number }

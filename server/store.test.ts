@@ -167,7 +167,7 @@ describe('openWorkforceStore: existing data', () => {
   })
 
   it('reports a newer schema as unsupported-version', () => {
-    writeFileSync(file(), JSON.stringify({ schemaVersion: 3, agents: [], tasks: [], activities: [] }))
+    writeFileSync(file(), JSON.stringify({ schemaVersion: 4, agents: [], tasks: [], activities: [] }))
     expect(open().load).toMatchObject({ problem: 'unsupported-version', preserved: 'backup-created' })
   })
 
@@ -176,5 +176,94 @@ describe('openWorkforceStore: existing data', () => {
     broken.agents[1].deskId = broken.agents[0].deskId
     writeFileSync(file(), JSON.stringify(broken))
     expect(open().load.problem).toBe('corrupt')
+  })
+})
+
+describe('v2 to v3 migration on disk', () => {
+  const v2Path = () => join(dir, 'workforce.v2-backup.json')
+  const agent = (id: string, status: string) => ({ id, name: id, role: 'R', department: 'backend', deskId: null, status, currentTaskId: null, runtimeMode: 'mock', demo: false, createdAt: NOW, lastActivityAt: null })
+  const task = (id: string, agentId: string, status: string, done: boolean) => ({ id, agentId, title: id, description: '', status, createdAt: NOW, startedAt: NOW, completedAt: done ? NOW : null, resultSummary: done ? 'ok' : null, errorMessage: null, executionId: 'e', timeoutMs: null, runtime: 'mock', workspaceId: null, sessionId: null, endedReason: done ? 'completed' : null, usage: null, pendingApproval: null })
+  const activity = { id: 'act-1', agentId: 'a1', taskId: 't-done', type: 'task-completed', message: 'ok', timestamp: NOW, source: 'mock' }
+  const v2Text = () => JSON.stringify({ schemaVersion: 2, agents: [{ ...agent('a1', 'completed'), currentTaskId: 't-done' }, { ...agent('a2', 'working'), currentTaskId: 't-run' }], tasks: [task('t-done', 'a1', 'completed', true), task('t-run', 'a2', 'running', false)], activities: [activity] }, null, 1)
+
+  it('keeps agents, tasks and activities, recovers the running task, rewrites as schema 3 and keeps the original text', () => {
+    const text = v2Text()
+    writeFileSync(file(), text)
+    const logs: string[] = []
+    const store = open({ log: { ...silentLogger, info: (m: string) => logs.push(m), warn: (m: string) => logs.push(m) } })
+    expect(store.load).toMatchObject({ problem: null, seeded: false, recovered: true })
+    expect(store.state.agents.map((a) => [a.id, a.status])).toEqual([['a1', 'idle'], ['a2', 'error']])
+    expect(store.state.tasks.map((t) => [t.id, t.status])).toEqual([['t-done', 'completed'], ['t-run', 'failed']])
+    expect(store.state.tasks[0].resultSummary).toBe('ok')
+    expect(store.state.activities.some((x) => x.id === 'act-1')).toBe(true)
+    const disk = onDisk()!
+    expect(JSON.parse(readFileSync(file(), 'utf8')).schemaVersion).toBe(3)
+    expect(disk.agents).toHaveLength(2)
+    expect(disk.tasks.map((t) => t.status)).toEqual(['completed', 'failed'])
+    expect(disk.activities.some((x) => x.id === 'act-1')).toBe(true)
+    expect(disk.agents[0]).toMatchObject({ description: '', instructions: '', model: null, takesPrayerBreaks: true, sourceFile: null })
+    expect(readFileSync(v2Path(), 'utf8')).toBe(text)
+    expect(logs.filter((l) => l.includes('was migrated') && l.includes('The original is kept at'))).toHaveLength(1)
+  })
+
+  it('does not claim success when the save fails, and leaves the v2 file as it was', () => {
+    const text = v2Text()
+    writeFileSync(file(), text)
+    const logs: string[] = []
+    const store = open({
+      log: { ...silentLogger, info: (m: string) => logs.push(`info ${m}`), error: (m: string) => logs.push(`error ${m}`) },
+      writeFile: (path, t) => { if (path === file()) throw new Error('disk full'); writeFileSync(path, t) },
+    })
+    expect(store.saveError).not.toBeNull()
+    expect(logs.some((l) => l.startsWith('error'))).toBe(true)
+    expect(logs.some((l) => l.includes('was migrated'))).toBe(false)
+    expect(readFileSync(file(), 'utf8')).toBe(text)
+    expect(readFileSync(v2Path(), 'utf8')).toBe(text)
+  })
+
+  it('says the existing backup was kept, not that the original is kept there', () => {
+    writeFileSync(v2Path(), 'older')
+    writeFileSync(file(), v2Text())
+    const logs: string[] = []
+    open({ log: { ...silentLogger, info: (m: string) => logs.push(m) } })
+    const line = logs.find((l) => l.includes('was migrated'))!
+    expect(line).toContain('already existed')
+    expect(line).not.toContain('The original is kept at')
+  })
+
+  it('refuses to start when the existing backup is unreadable, and replaces nothing', () => {
+    mkdirSync(v2Path())
+    const text = v2Text()
+    writeFileSync(file(), text)
+    expect(() => open()).toThrow(/Migration to schema 3 did not run: couldn't read the existing backup .*EISDIR.*workforce\.json is unchanged/)
+    expect(readFileSync(file(), 'utf8')).toBe(text)
+    expect(statSync(v2Path()).isDirectory()).toBe(true)
+  })
+
+  it('refuses to start with a clear message when the backup cannot be written', () => {
+    const text = v2Text()
+    writeFileSync(file(), text)
+    expect(() => open({ writeFile: (path, t) => { if (path === v2Path()) throw new Error('nope'); writeFileSync(path, t) } })).toThrow(/Migration to schema 3 did not run: couldn't write the backup .*workforce\.json is unchanged/)
+    expect(readFileSync(file(), 'utf8')).toBe(text)
+  })
+
+  it('does not overwrite the backup on a second load', () => {
+    const text = v2Text()
+    writeFileSync(file(), text)
+    open()
+    open()
+    expect(readFileSync(v2Path(), 'utf8')).toBe(text)
+  })
+
+  it('does not replace an existing backup with a different v2 file', () => {
+    writeFileSync(v2Path(), 'older')
+    writeFileSync(file(), v2Text())
+    open()
+    expect(readFileSync(v2Path(), 'utf8')).toBe('older')
+  })
+
+  it('still treats schema 4 as unsupported-version', () => {
+    writeFileSync(file(), JSON.stringify({ schemaVersion: 4, agents: [], tasks: [], activities: [] }))
+    expect(open().load).toMatchObject({ problem: 'unsupported-version', preserved: 'backup-created' })
   })
 })

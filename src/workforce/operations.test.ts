@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activeTaskFor, addActivity, applyRuntimeEvent, assignDesk, assignTask, cancelTask, createAgent, decideApproval, emptyWorkforce, INTERRUPTED_MESSAGE, markStarting, recoverInterruptedTasks, removeAgent, requestCancel, timeOutTask, TIMEOUT_MESSAGE, updateAgent, type AgentInput } from './operations'
+import { activeTaskFor, clearAgentError, MODEL_NAME_PATTERN, validateAgentInput, addActivity, applyRuntimeEvent, assignDesk, assignTask, cancelTask, createAgent, decideApproval, emptyWorkforce, INTERRUPTED_MESSAGE, markStarting, recoverInterruptedTasks, removeAgent, requestCancel, timeOutTask, TIMEOUT_MESSAGE, updateAgent, type AgentInput } from './operations'
 import { parseWorkforce, serializeWorkforce } from './storage'
 import type { AgentTask, WorkforceState } from './types'
 
@@ -215,7 +215,7 @@ describe('applyRuntimeEvent', () => {
 
     const done = applyRuntimeEvent(approved, { type: 'completed', taskId, summary: 'Simulated result' }, LATER, 'mock')
     expect(done.tasks[0]).toMatchObject({ status: 'completed', completedAt: LATER, resultSummary: 'Simulated result', endedReason: 'completed', pendingApproval: null })
-    expect(done.agents[0]).toMatchObject({ status: 'completed', currentTaskId: taskId })
+    expect(done.agents[0]).toMatchObject({ status: 'idle', currentTaskId: taskId })
   })
 
   it('ignores out-of-order events', () => {
@@ -497,5 +497,107 @@ describe('activities are labelled by the runtime of the task, not of the agent',
     expect(sources(recovered, taskId).every((x) => x === expected)).toBe(true)
     const cancelling = requestCancel(markStarting(s, taskId, NOW), taskId, NOW, expected)
     expect(sources(recoverInterruptedTasks(cancelling, LATER), taskId).every((x) => x === expected)).toBe(true)
+  })
+})
+
+
+describe('agent profile', () => {
+  it('new agents get the defaults', () => {
+    const { state } = withAgent()
+    expect(state.agents[0]).toMatchObject({ description: '', instructions: '', model: null, takesPrayerBreaks: true, sourceFile: null })
+  })
+
+  it('createAgent stores trimmed-free profile fields as given', () => {
+    const { state } = withAgent({ ...NOVA, description: 'Plans', instructions: 'Be brief.\nBe kind.', model: 'claude-sonnet-4-5', takesPrayerBreaks: false })
+    expect(state.agents[0]).toMatchObject({ description: 'Plans', instructions: 'Be brief.\nBe kind.', model: 'claude-sonnet-4-5', takesPrayerBreaks: false, sourceFile: null })
+  })
+
+  it('validateAgentInput bounds the new fields', () => {
+    expect(validateAgentInput({ ...NOVA, model: '-x' })).toMatch(/model/i)
+    expect(validateAgentInput({ ...NOVA, model: 'a b' })).toMatch(/model/i)
+    expect(validateAgentInput({ ...NOVA, model: 'a'.repeat(101) })).toMatch(/model/i)
+    expect(validateAgentInput({ ...NOVA, model: null })).toBeNull()
+    expect(validateAgentInput({ ...NOVA, model: 'claude-opus-4.5:x_y' })).toBeNull()
+    expect(validateAgentInput({ ...NOVA, description: 'x'.repeat(500) })).toBeNull()
+    expect(validateAgentInput({ ...NOVA, description: 'x'.repeat(501) })).toMatch(/500/)
+    expect(validateAgentInput({ ...NOVA, instructions: 'x'.repeat(8192) })).toBeNull()
+    expect(validateAgentInput({ ...NOVA, instructions: 'x'.repeat(8193) })).toMatch(/8192/)
+    expect(validateAgentInput({ ...NOVA, instructions: 'a\nb\tc' })).toBeNull()
+    for (const bad of ['a\u0000b', 'a\rb', 'a\u001bb', 'a\u007fb']) {
+      expect(validateAgentInput({ ...NOVA, description: bad })).toMatch(/control/i)
+      expect(validateAgentInput({ ...NOVA, instructions: bad })).toMatch(/control/i)
+    }
+    expect(MODEL_NAME_PATTERN.test('claude-x')).toBe(true)
+  })
+
+  it('updateAgent changes the new fields, and reports no change for identical values', () => {
+    const { state, id } = withAgent()
+    const r = updateAgent(state, id, { instructions: 'Do it', takesPrayerBreaks: false, model: 'm1' }, LATER)
+    if (!r.ok) throw new Error(r.error)
+    expect(r.state.agents[0]).toMatchObject({ instructions: 'Do it', takesPrayerBreaks: false, model: 'm1' })
+    expect(r.state.activities.at(-1)).toMatchObject({ type: 'agent-updated' })
+    const same = updateAgent(r.state, id, { instructions: 'Do it', takesPrayerBreaks: false, model: 'm1' }, LATER)
+    expect(same).toEqual({ ok: true, state: r.state })
+    expect(updateAgent(r.state, id, { model: null }, LATER)).toMatchObject({ ok: true })
+    expect(updateAgent(r.state, id, { model: 'bad model' }, LATER)).toMatchObject({ ok: false })
+  })
+})
+
+describe('agent status after a task', () => {
+  function runningTask() {
+    const { state, id } = withAgent()
+    const r = assignTask(state, id, { title: 'T', description: '' }, NOW)
+    if (!r.ok) throw new Error(r.error)
+    return { state: applyRuntimeEvent(markStarting(r.state, r.taskId, NOW), { type: 'started', taskId: r.taskId, executionId: 'e' }, NOW, 'mock'), id, taskId: r.taskId }
+  }
+  it('completed returns the agent to idle and the task stays completed', () => {
+    const { state, taskId } = runningTask()
+    const done = applyRuntimeEvent(state, { type: 'completed', taskId, summary: 'All done' }, LATER, 'mock')
+    expect(done.agents[0].status).toBe('idle')
+    expect(done.tasks[0]).toMatchObject({ status: 'completed', resultSummary: 'All done' })
+  })
+  it('failed leaves the agent in error', () => {
+    const { state, taskId } = runningTask()
+    expect(applyRuntimeEvent(state, { type: 'failed', taskId, error: 'boom' }, LATER, 'mock').agents[0].status).toBe('error')
+  })
+})
+
+describe('clearAgentError', () => {
+  function inError() {
+    const { state, id, taskId } = (() => {
+      const { state, id } = withAgent()
+      const r = assignTask(state, id, { title: 'T', description: '' }, NOW)
+      if (!r.ok) throw new Error(r.error)
+      return { state: r.state, id, taskId: r.taskId }
+    })()
+    return { id, state: applyRuntimeEvent(applyRuntimeEvent(markStarting(state, taskId, NOW), { type: 'started', taskId, executionId: 'e' }, NOW, 'mock'), { type: 'failed', taskId, error: 'boom' }, NOW, 'mock') }
+  }
+  it('sets error to idle and records an activity', () => {
+    const { state, id } = inError()
+    const r = clearAgentError(state, id, LATER)
+    if (!r.ok) throw new Error(r.error)
+    expect(r.state.agents[0].status).toBe('idle')
+    expect(r.state.tasks).toEqual(state.tasks)
+  })
+  it('changes nothing for any other status', () => {
+    const { state, id } = withAgent()
+    expect(clearAgentError(state, id, LATER)).toEqual({ ok: true, state })
+    const r = assignTask(state, id, { title: 'T', description: '' }, NOW)
+    if (!r.ok) throw new Error(r.error)
+    const active = markStarting(r.state, r.taskId, NOW)
+    const out = clearAgentError(active, id, LATER)
+    expect(out).toEqual({ ok: true, state: active })
+    expect(out.ok && out.state).toBe(active)
+  })
+  it('does not change an agent that is in error but has an active task', () => {
+    const { state, id } = inError()
+    const r = assignTask(state, id, { title: 'Next', description: '' }, LATER)
+    if (!r.ok) throw new Error(r.error)
+    const forced = { ...r.state, agents: r.state.agents.map((a) => ({ ...a, status: 'error' as const })) }
+    const out = clearAgentError(forced, id, LATER)
+    expect(out.ok && out.state).toBe(forced)
+  })
+  it('reports an unknown agent', () => {
+    expect(clearAgentError(emptyWorkforce(), 'nope', LATER)).toEqual({ ok: false, error: 'Agent not found.' })
   })
 })

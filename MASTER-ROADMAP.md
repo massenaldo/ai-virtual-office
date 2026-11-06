@@ -40,7 +40,7 @@ Statuses below were checked against the repository on 2026-11-06 (merge state, a
 | M3B.4 | Permissions and gated tools | Complete |
 | M3B.4 final blockers | Permission reconciliation, scaling test, workspace picker | Merged in #59; the full rerun on merged `main` is still open (to be done after the step 1 cleanup PR merges) |
 | M3B.5 | Claude Agent SDK runtime integration | **VERIFIED — REAL RUN** (not `COMPLETE`: acceptance items remain open) |
-| M3B.6 + M3C.1 | Agent identity and presence, plus seated characters (one release) | Planned |
+| M3B.6 + M3C.1 | Agent identity and presence, plus seated characters (one release) | IN PROGRESS (slice 1: agent profile) |
 | M3C.2 onward | Office daily life, then sandbox and a small M4, then M5–M7 as separate decisions | Planned (order in section 4) |
 
 ### Important baseline caveat
@@ -295,7 +295,7 @@ Other controls include task timeout, approval timeout, and public-start configur
 
 ### M3B.6 — Persistent Agent Identity & Office Presence
 
-**Status:** PLANNED; first half of the next release (with M3C.1).
+**Status:** IN PROGRESS; first half of the next release (with M3C.1). Slice 1 (agent profile) is done: per-agent instructions and model, and settling to idle. Import and presence remain open.
 
 ### Objective
 Make agents persistent members of the office, independent of task execution and runtime sessions.
@@ -309,11 +309,11 @@ A Claude subagent definition in `.claude/agents/*.md` is not automatically a per
 - Removing an agent is an explicit action (`removeAgent` in `src/workforce/operations.ts`).
 - The system prompt uses only the agent's name and role (`server/runtime/claudePrompt.ts`).
 - The model is one server-wide setting, `CLAUDE_MODEL`.
-- A finished task sets the agent's status to `completed`, a failed one to `error`, a cancelled one to `idle` (`src/workforce/operations.ts`).
+- Done in slice 1: the agent's instructions and model reach the runtime, `CLAUDE_MODEL` is only the default, and a finished or cancelled task returns the agent to `idle` (a failed one stays in `error` until cleared).
 
 ### Scope (what is missing)
-1. **Agent instructions** per agent (today the prompt uses only name and role).
-2. **Per-agent model** preference, replacing the single server-wide `CLAUDE_MODEL` as the only choice.
+1. **Agent instructions** per agent. DONE in slice 1.
+2. **Per-agent model** preference, replacing the single server-wide `CLAUDE_MODEL` as the only choice. DONE in slice 1.
 3. **Safe `.claude/agents` import**
    - Read supported frontmatter/metadata and instruction text.
    - Do not execute imported files or treat their content as permission grants.
@@ -321,8 +321,8 @@ A Claude subagent definition in `.claude/agents/*.md` is not automatically a per
    - Show import errors rather than silently creating invalid agents.
    - Define how file changes are reconciled with manually edited workforce profiles.
 4. **Presence states**
-   - `idle`, `working`, `thinking`, `waiting`, `error`, and `offline` (final vocabulary to be agreed).
-   - Decide how `completed` and `error` settle back to `idle` after a finished or failed task (when, and whether by time or by user action). Today only a cancelled task returns the agent to `idle`.
+   - `idle`, `working`, `thinking`, `waiting` and `error`.
+   - Settling to `idle`: DONE in slice 1. A finished or cancelled task returns the agent to `idle`; an agent in `error` returns by the **Clear error** action.
    - Runtime session disposal does not remove the agent.
 5. **UI**
    - Persistent office roster.

@@ -86,7 +86,7 @@ The backend keeps listening on `127.0.0.1:8787` (`HOST`/`PORT`); only the gatewa
   - Six demo agents (Project Management, Tech Lead, Backend, Frontend, QA, DevOps) seated at default desks, added once on first start; **Restore demo agents** brings back any you removed
   - Filter agents by department and status; create, edit and remove agents (removing one with task history asks first)
   - Assign one agent per desk from a picker grouped by room, or unassign
-  - Start a simulated task: the agent goes Thinking, then Working, then Completed (about 6 seconds), with an activity timeline. **Cancel task**, and demo buttons for **Simulate waiting** / **Resume** / **Simulate error**
+  - Start a simulated task: the agent goes Thinking, then Working, then back to Idle when the task completes (about 6 seconds), with an activity timeline. **Cancel task**, and demo buttons for **Simulate waiting** / **Resume** / **Simulate error**
   - In the office: a status marker over each assigned desk (3D and floor plan); the selected agent's desk is outlined and **Focus desk** moves the camera to it; with the panel open, click a desk to open its agent, or click a free desk to assign one
   - Layout editing and the agents panel are separate modes; opening the panel with unsaved layout changes asks you to save or discard first
 - Local-only development server bound to 127.0.0.1
@@ -115,7 +115,7 @@ A small Node server (`server/`, no framework; the only runtime dependencies are 
 | `ANTHROPIC_API_KEY` | unset | Server only, for the Claude runtime (`RUNTIME=claude` or `ENABLE_CLAUDE_RUNTIME=yes`). Held in a wrapper that cannot print; never in a log, event or response; never a frontend variable |
 | `ALLOW_BROAD_WRITE_SCOPES` | no | Only the exact value `yes` lets a person approve Write and Edit for a whole task or agent (Claude tasks, on any server where Claude is enabled). Off: every write is approved one at a time, and so is a simulated write approval on a server where Claude is enabled (so a demo approval can never pre-authorise real writes). On: a broad approval can later write files that tools run on their own, such as ones the next `npm test` or editor loads; known cases still need a fresh approval, but the list is not complete |
 | `MAX_CONCURRENT_TASKS` | 2 | Most Claude tasks running at once (1 to 32); more are refused with a message. Not applied to the mock |
-| `CLAUDE_MODEL`, `CLAUDE_MAX_TURNS`, `CLAUDE_MAX_BUDGET_USD` | Claude Code default, 12, 0.5 | Model, most model steps and most spend (US dollars, the SDK's own estimate) per task |
+| `CLAUDE_MODEL`, `CLAUDE_MAX_TURNS`, `CLAUDE_MAX_BUDGET_USD` | Claude Code default, 12, 0.5 | The default model (an agent's own model wins), most model steps and most spend (US dollars, the SDK's own estimate) per task |
 | `API_TOKEN` | generated at each start | Token every API request must send as `Authorization: Bearer <token>`. At least 32 characters, no spaces. Server only: never a `VITE_` variable (refused at start) |
 | `VITE_WORKFORCE_API_URL` | empty | Frontend only. Empty = browser mock; `/` = same-origin backend through the dev proxy |
 
@@ -128,6 +128,7 @@ A small Node server (`server/`, no framework; the only runtime dependencies are 
 | `GET /api/workspaces` | Workspace ids (never paths) |
 | `GET /api/events` | Server-sent events; resume with `Last-Event-ID` or `?lastEventId=` |
 | `POST /api/agents`, `PATCH` / `DELETE /api/agents/:id` | Create, update, remove an agent |
+| `POST /api/agents/:id/clear-error` | Return an agent in `error` with no active task to idle |
 | `PUT /api/agents/:id/desk` | Assign or clear a desk |
 | `POST /api/agents/:id/tasks` | Start a task (`title`, `description`, optional `workspaceId` and `runtime`) |
 | `POST /api/tasks/:id/cancel`, `POST /api/tasks/:id/approval` | Cancel; approve or deny (`approvalId`, `decision`, and the pending approval's `digest` when it has one, or the answer is 409) |
@@ -156,7 +157,7 @@ A small Node server (`server/`, no framework; the only runtime dependencies are 
 
 **Sandbox.** There is none yet: [`docs/sandbox-architecture.md`](docs/sandbox-architecture.md) is a design only (Docker, one workspace mounted, no network, resource limits) with its blockers. No isolation is active.
 
-**Persistence.** `data/workforce.json` (atomic writes, mode 0600). An unreadable file is backed up before a fresh start. A task running at shutdown is marked failed with "Interrupted by a server restart". The event buffer is in memory, so a restart makes every old event id a `state.reset`.
+**Persistence.** `data/workforce.json` (atomic writes, mode 0600). An unreadable file is backed up before a fresh start. When an older schema is migrated, `workforce.v2-backup.json` keeps an untouched copy of the data from before the migration. A task running at shutdown is marked failed with "Interrupted by a server restart". The event buffer is in memory, so a restart makes every old event id a `state.reset`.
 
 ## Layout data
 
@@ -171,10 +172,11 @@ The scene renders a typed, versioned `OfficeLayout` (`src/layout/types.ts`). It 
 
 Agents, tasks and recent activity are typed, versioned data in `src/workforce/` (`types.ts`), kept apart from the layout.
 
-- **Storage:** with the backend (`npm run dev:full`) agents are saved on the server in `data/workforce.json`. In the browser-only demo (`npm run dev`) they are saved in `localStorage` key `ai-virtual-office:workforce:v1`, automatically on every change. Agent changes are not part of the layout's undo history and never touch the layout key.
-- **Validation:** loading checks every record and every reference (task ↔ agent, activity ↔ agent and task, one agent per desk, one active task per agent). Data that can't be read is copied to `ai-virtual-office:workforce:v1:backup`, a notice is shown, and the panel starts empty; nothing is overwritten without a backup.
+- **Storage:** with the backend (`npm run dev:full`) agents are saved on the server in `data/workforce.json`. In the browser-only demo (`npm run dev`) they are saved in `localStorage` key `ai-virtual-office:workforce:v3`, automatically on every change. Agent changes are not part of the layout's undo history and never touch the layout key.
+- **Validation:** loading checks every record and every reference (task ↔ agent, activity ↔ agent and task, one agent per desk, one active task per agent). Data that can't be read is copied to `ai-virtual-office:workforce:v3:backup`, a notice is shown, and the panel starts empty; nothing is overwritten without a backup.
 - **History:** the newest 300 activity events are kept; tasks are kept.
 - **Desks:** an agent refers to a desk by its furniture ID. If that desk is no longer in the layout (deleted, or a different layout), the agent keeps the reference and shows **Workstation unavailable** until you pick another desk.
+- **Profile:** besides name, role and department an agent has a description, instructions, a model and a prayer-breaks setting (all editable in the panel). Instructions and model only apply on the Claude runtime. After a task ends an agent returns to Idle; an agent left in Error can be cleared with **Clear error**.
 - **Reload:** a task that was running when the page closed is marked failed with "Interrupted by page reload (simulated run)".
 - **Runtime boundary:** a `RuntimeProvider` interface (`src/workforce/runtime/types.ts`) separates the app from whatever executes a task. `MockRuntimeProvider` is the browser-timer simulation used today. `ClaudeRuntimeProvider` is a placeholder that only reports "Not available: requires a server-side runtime." A real Claude runtime must run on a server: the browser must never hold Anthropic credentials or API keys, or get shell or process access.
 

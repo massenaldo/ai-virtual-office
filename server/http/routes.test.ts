@@ -27,6 +27,26 @@ async function startForge(): Promise<string> {
   return r.body.task.id
 }
 
+describe('agent profile routes', () => {
+  it('creates and patches the profile fields', async () => {
+    const r = await s.api('POST', '/api/agents', { name: 'Nova', role: 'R', department: 'backend', description: 'd', instructions: 'i', model: 'claude-x', takesPrayerBreaks: false })
+    expect(r).toMatchObject({ status: 201, body: { agent: { description: 'd', instructions: 'i', model: 'claude-x', takesPrayerBreaks: false, sourceFile: null } } })
+    expect(await s.api('PATCH', `/api/agents/${r.body.agent.id}`, { model: null })).toMatchObject({ status: 200, body: { agent: { model: null } } })
+    expect((await s.api('POST', '/api/agents', { name: 'N2', role: 'R', department: 'backend', sourceFile: 'x' })).status).toBe(400)
+  })
+  it('a bad model on PATCH is 422', async () => {
+    expect(await s.api('PATCH', '/api/agents/agent-demo-qa', { model: '-x' })).toMatchObject({ status: 422 })
+  })
+  it('POST /api/agents/:id/clear-error clears an error and 404s for an unknown agent', async () => {
+    const id = await startForge()
+    await s.api('POST', '/api/demo/tasks/' + id + '/force-error')
+    await until(async () => (await state()).state.agents.find((a: { id: string }) => a.id === 'agent-demo-backend').status === 'error')
+    const r = await s.api('POST', '/api/agents/agent-demo-backend/clear-error')
+    expect(r).toMatchObject({ status: 200, body: { agent: { id: 'agent-demo-backend', status: 'idle' } } })
+    expect((await s.api('POST', '/api/agents/nope/clear-error')).status).toBe(404)
+  })
+})
+
 describe('state and agents', () => {
   it('GET /api/state returns the snapshot', async () => {
     const r = await s.api('GET', '/api/state')

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseApproval, parseCreatePermission, parseCreateTask } from './inputs'
+import { parseApproval, parseCreateAgent, parseCreatePermission, parseCreateTask, parsePatchAgent } from './inputs'
 
 describe('parseApproval', () => {
   it('accepts an optional 64-hex digest', () => {
@@ -52,5 +52,30 @@ describe('parseCreateTask runtime', () => {
   })
   it.each([['Claude'], [''], ['real'], [1], [null], [true], [{}]])('refuses %j', (runtime) => {
     expect(() => parseCreateTask({ title: 'T', runtime })).toThrow('"runtime" must be "mock" or "claude".')
+  })
+})
+
+describe('agent profile fields', () => {
+  const base = { name: 'N', role: 'R', department: 'backend' }
+  const full = { description: 'd', instructions: 'i', model: 'claude-x', takesPrayerBreaks: false }
+  it('parseCreateAgent accepts the four fields and null model', () => {
+    expect(parseCreateAgent({ ...base, ...full })).toEqual({ ...base, ...full })
+    expect(parseCreateAgent({ ...base, model: null })).toEqual({ ...base, model: null })
+    expect(parseCreateAgent(base)).toEqual(base)
+  })
+  it('parsePatchAgent accepts them, alone or with others', () => {
+    expect(parsePatchAgent(full)).toEqual(full)
+    expect(parsePatchAgent({ model: null })).toEqual({ model: null })
+    expect(parsePatchAgent({ takesPrayerBreaks: true })).toEqual({ takesPrayerBreaks: true })
+  })
+  it('rejects sourceFile and wrong types with 400', () => {
+    for (const f of [parseCreateAgent, (b: Record<string, unknown>) => parsePatchAgent(b)]) {
+      expect(() => f({ ...base, sourceFile: 'a.md' })).toThrow('Unknown field "sourceFile".')
+      expect(() => f({ ...base, instructions: 5 })).toThrow('"instructions" must be a string.')
+      expect(() => f({ ...base, description: null })).toThrow('"description" must be a string.')
+      expect(() => f({ ...base, model: 5 })).toThrow('"model" must be a string or null.')
+      expect(() => f({ ...base, takesPrayerBreaks: 'yes' })).toThrow('"takesPrayerBreaks" must be a boolean.')
+    }
+    expect(() => parsePatchAgent({})).toThrow(/description.*instructions.*model.*takesPrayerBreaks/)
   })
 })

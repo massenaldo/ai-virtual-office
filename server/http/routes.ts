@@ -3,7 +3,7 @@ import type { ServerResponse } from 'node:http'
 import pkg from '../../package.json' with { type: 'json' }
 import type { AgentPermissionsRevokedResponse, PermissionResponse, PermissionsResponse, StateResponse, WorkspacesResponse } from '../../src/workforce/api'
 import { restoreDemoAgents } from '../../src/workforce/demo'
-import { assignDesk, createAgent, updateAgent } from '../../src/workforce/operations'
+import { assignDesk, clearAgentError, createAgent, updateAgent } from '../../src/workforce/operations'
 import type { ServerConfig } from '../config'
 import type { AuditLog } from '../audit'
 import type { Logger } from '../log'
@@ -122,6 +122,17 @@ export function createRoutes(deps: RouteDeps): Route[] {
         const patch = parsePatchAgent(body as Record<string, unknown>)
         const r = updateAgent(store.state, params.id, patch, now())
         if (!r.ok) throw new HttpError(r.error === 'Agent not found.' ? 404 : 422, r.error)
+        store.commit(r.state)
+        return { status: 200, body: { agent: agent(params.id) } }
+      },
+    },
+    {
+      method: 'POST',
+      path: '/api/agents/:id/clear-error',
+      body: 'none',
+      handler: ({ params }) => {
+        const r = clearAgentError(store.state, params.id, now())
+        if (!r.ok) throw new HttpError(404, r.error)
         store.commit(r.state)
         return { status: 200, body: { agent: agent(params.id) } }
       },

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { LAYOUT_STORAGE_KEY } from '../layout/storage'
 import { createDemoWorkforce } from './demo'
 import { addActivity, applyRuntimeEvent, assignTask, INTERRUPTED_MESSAGE, markStarting, removeAgent } from './operations'
-import { loadWorkforce, migrateWorkforceV1, parseWorkforce, saveWorkforce, serializeWorkforce, WORKFORCE_BACKUP_KEY, WORKFORCE_STORAGE_KEY, WORKFORCE_V1_KEY } from './storage'
+import { loadWorkforce, migrateWorkforce, migrateWorkforceV1, migrateWorkforceV2, parseWorkforce, saveWorkforce, serializeWorkforce, WORKFORCE_BACKUP_KEY, WORKFORCE_STORAGE_KEY, WORKFORCE_V1_KEY, WORKFORCE_V2_KEY } from './storage'
 import { REVIEW_MAX_BYTES, type WorkforceState } from './types'
 
 const NOW = '2026-10-30T09:00:00.000Z'
@@ -61,9 +61,9 @@ describe('loadWorkforce', () => {
     saveWorkforce(s, loadWorkforce(s, NOW).state)
     loadWorkforce(s, NOW)
     expect(s.touched).not.toContain(LAYOUT_STORAGE_KEY)
-    expect(new Set(s.touched)).toEqual(new Set([WORKFORCE_STORAGE_KEY, WORKFORCE_V1_KEY]))
+    expect(new Set(s.touched)).toEqual(new Set([WORKFORCE_STORAGE_KEY, WORKFORCE_V2_KEY, WORKFORCE_V1_KEY]))
     expect(s.writes.every((k) => k === WORKFORCE_STORAGE_KEY)).toBe(true)
-    expect(WORKFORCE_STORAGE_KEY).toBe('ai-virtual-office:workforce:v2')
+    expect(WORKFORCE_STORAGE_KEY).toBe('ai-virtual-office:workforce:v3')
   })
 
   it('backs up corrupt data once and starts empty', () => {
@@ -84,7 +84,7 @@ describe('loadWorkforce', () => {
   })
 
   it('treats a newer schemaVersion as unsupported-version', () => {
-    const json = JSON.stringify({ ...JSON.parse(serializeWorkforce(createDemoWorkforce(NOW))), schemaVersion: 3 })
+    const json = JSON.stringify({ ...JSON.parse(serializeWorkforce(createDemoWorkforce(NOW))), schemaVersion: 4 })
     const s = memoryStorage({ [WORKFORCE_STORAGE_KEY]: json })
     expect(loadWorkforce(s, NOW)).toMatchObject({ seeded: false, problem: 'unsupported-version' })
     expect(s.data.get(WORKFORCE_BACKUP_KEY)).toBe(json)
@@ -281,7 +281,7 @@ function v1Json(): string {
   const agents = createDemoWorkforce(NOW).agents.map((a) => ({ ...a }))
   const forge = agents.find((a) => a.id === 'agent-demo-backend')!
   const sentry = agents.find((a) => a.id === 'agent-demo-qa')!
-  forge.currentTaskId = 'task-done'; forge.status = 'completed'
+  forge.currentTaskId = 'task-done'; (forge as { status: string }).status = 'completed'
   sentry.currentTaskId = 'task-wait'; sentry.status = 'waiting'
   const base = { description: '', createdAt: NOW, completedAt: null, resultSummary: null, errorMessage: null, executionId: 'exec-1' }
   return JSON.stringify({
@@ -317,8 +317,10 @@ describe('v1 migration', () => {
     const r = loadWorkforce(memoryStorage({ [WORKFORCE_V1_KEY]: v1Json() }), NOW)
     expect(r.state.tasks.find((t) => t.id === 'task-wait')).toMatchObject({ status: 'failed', endedReason: 'failed', errorMessage: INTERRUPTED_MESSAGE, pendingApproval: null })
     expect(r.state.activities.find((a) => a.id === 'activity-2')).toMatchObject({ type: 'task-approval-requested', approvalId: 'legacy-task-wait' })
-    const migrated = migrateWorkforceV1(JSON.parse(v1Json())) as any
-    expect(migrated.schemaVersion).toBe(2)
+    const v2 = migrateWorkforceV1(JSON.parse(v1Json())) as any
+    expect(v2.schemaVersion).toBe(2)
+    const migrated = migrateWorkforce(JSON.parse(v1Json())) as any
+    expect(migrated.schemaVersion).toBe(3)
     expect(migrated.tasks[1]).toMatchObject({ status: 'waiting_for_approval', pendingApproval: { id: 'legacy-task-wait', tool: 'unknown', summary: 'Waiting for input (from an earlier version)', requestedAt: NOW } })
     expect(parseWorkforce(migrated)).not.toBeNull()
   })
@@ -364,3 +366,81 @@ describe('task workspaceId', () => {
   })
 })
 
+
+
+const V2_AGENT = { id: 'a1', name: 'Nova', role: 'Planner', department: 'backend', deskId: null, status: 'completed', currentTaskId: 't1', runtimeMode: 'mock', demo: false, createdAt: NOW, lastActivityAt: NOW }
+const V2_TASK = { id: 't1', agentId: 'a1', title: 'T', description: '', status: 'completed', createdAt: NOW, startedAt: NOW, completedAt: NOW, resultSummary: 'ok', errorMessage: null, executionId: null, timeoutMs: null, runtime: 'mock', workspaceId: null, sessionId: null, endedReason: 'completed', usage: null, pendingApproval: null }
+const V2_ACTIVITY = { id: 'x1', agentId: 'a1', taskId: 't1', type: 'task-completed', message: 'ok', timestamp: NOW, source: 'mock' }
+const v2State = (agents: unknown[] = [V2_AGENT, { ...V2_AGENT, id: 'a2', status: 'error', currentTaskId: null }]) => ({ schemaVersion: 2, agents, tasks: [V2_TASK], activities: [V2_ACTIVITY] })
+const PROFILE_DEFAULTS = { description: '', instructions: '', model: null, takesPrayerBreaks: true, sourceFile: null }
+
+describe('migrateWorkforceV2', () => {
+  it('returns schema 3 with the five defaults, completed becomes idle, error stays, tasks and activities unchanged', () => {
+    const out = migrateWorkforceV2(v2State()) as { schemaVersion: number; agents: Record<string, unknown>[]; tasks: unknown[]; activities: unknown[] }
+    expect(out.schemaVersion).toBe(3)
+    expect(out.agents.map((a) => a.status)).toEqual(['idle', 'error'])
+    for (const a of out.agents) expect(a).toMatchObject(PROFILE_DEFAULTS)
+    expect(out.tasks).toEqual([V2_TASK])
+    expect(out.activities).toEqual([V2_ACTIVITY])
+    expect(parseWorkforce(out)).not.toBeNull()
+  })
+
+  it('passes through anything that is not a v2 object', () => {
+    for (const v of [null, 'x', 5, [], { schemaVersion: 3, agents: [], tasks: [], activities: [] }, { schemaVersion: 1 }, { schemaVersion: 2 }, { schemaVersion: 2, agents: [], tasks: [] }]) expect(migrateWorkforceV2(v)).toBe(v)
+  })
+
+  it('migrateWorkforce runs v1 then v2', () => {
+    const v1 = { schemaVersion: 1, agents: [{ ...V2_AGENT, status: 'idle' }], tasks: [{ id: 't1', agentId: 'a1', title: 'T', description: '', status: 'completed', createdAt: NOW, startedAt: NOW, completedAt: NOW, resultSummary: 'ok', errorMessage: null, executionId: null }], activities: [] }
+    const out = parseWorkforce(migrateWorkforce(v1))
+    expect(out?.schemaVersion).toBe(3)
+    expect(out?.agents[0]).toMatchObject(PROFILE_DEFAULTS)
+  })
+})
+
+describe('parseWorkforce agent profile', () => {
+  const good = () => migrateWorkforceV2(v2State([{ ...V2_AGENT, status: 'idle' }])) as { agents: Record<string, unknown>[] }
+  const withAgent = (patch: Record<string, unknown>) => { const s = good(); s.agents[0] = { ...s.agents[0], ...patch }; return s }
+  it('accepts a full profile', () => {
+    expect(parseWorkforce(withAgent({ description: 'd', instructions: 'i', model: 'claude-sonnet-4-5', takesPrayerBreaks: false, sourceFile: 'a.md' }))).not.toBeNull()
+  })
+  it.each([
+    ['status completed', { status: 'completed' }],
+    ['model with a leading dash', { model: '-x' }],
+    ['model with a space', { model: 'a b' }],
+    ['over-long instructions', { instructions: 'x'.repeat(8193) }],
+    ['over-long description', { description: 'x'.repeat(501) }],
+    ['non-boolean takesPrayerBreaks', { takesPrayerBreaks: 'yes' }],
+    ['non-string instructions', { instructions: 5 }],
+    ['non-string sourceFile', { sourceFile: 5 }],
+  ])('rejects %s', (_n, patch) => { expect(parseWorkforce(withAgent(patch))).toBeNull() })
+  it.each(['description', 'instructions', 'model', 'takesPrayerBreaks', 'sourceFile'])('rejects a missing %s', (key) => {
+    const s = good()
+    delete s.agents[0][key]
+    expect(parseWorkforce(s)).toBeNull()
+  })
+  it('round-trips through serialize', () => {
+    const r = createDemoWorkforce(NOW)
+    expect(roundTrip(r)).toEqual(r)
+    expect(JSON.parse(serializeWorkforce(r)).agents[0]).toMatchObject(PROFILE_DEFAULTS)
+  })
+})
+
+describe('loadWorkforce v2 browser data', () => {
+  it('migrates the v2 key in memory and never writes or removes it', () => {
+    const s = memoryStorage({ 'ai-virtual-office:workforce:v2': JSON.stringify(v2State()) })
+    const r = loadWorkforce(s, NOW)
+    expect(r).toMatchObject({ seeded: false, migrated: true, problem: null })
+    expect(r.state.agents.map((a) => a.status)).toEqual(['idle', 'error'])
+    expect(s.writes).toEqual([])
+    expect(WORKFORCE_STORAGE_KEY).toBe('ai-virtual-office:workforce:v3')
+    expect(WORKFORCE_BACKUP_KEY).toBe('ai-virtual-office:workforce:v3:backup')
+    expect(WORKFORCE_V2_KEY).toBe('ai-virtual-office:workforce:v2')
+  })
+  it('prefers v3 over v2', () => {
+    const s = memoryStorage({ 'ai-virtual-office:workforce:v2': JSON.stringify(v2State()) })
+    expect(saveWorkforce(s, createDemoWorkforce(NOW)).ok).toBe(true)
+    const r = loadWorkforce(s, NOW)
+    expect(r.migrated).toBe(false)
+    expect(r.state.agents).toHaveLength(6)
+  })
+})

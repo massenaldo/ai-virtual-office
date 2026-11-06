@@ -1,6 +1,6 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, request, type IncomingHttpHeaders, type Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
+import { connect, type AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
@@ -183,6 +183,29 @@ describe('proxy against a stub upstream', () => {
     expect(results).toEqual(Array.from({ length: 12 }, () => 413))
     expect(seen).toEqual([])
   })
+
+  it('closes the connection soon after the drain for a client that asked for Connection: close', async () => {
+    // A raw socket sees the server's FIN, which an http client hides by closing its own side first.
+    const body = Buffer.alloc(2 * 1024 * 1024, 'a')
+    const head = `POST /api/agents HTTP/1.1\r\nHost: x\r\nauthorization: ${BASIC}\r\nsec-fetch-site: same-origin\r\ncontent-type: application/json\r\nconnection: close\r\ncontent-length: ${body.length}\r\n\r\n`
+    const run = () => new Promise<{ text: string; ms: number }>((resolve, reject) => {
+      const t0 = Date.now()
+      const chunks: Buffer[] = []
+      const sock = connect({ host: '127.0.0.1', port: Number(new URL(gw.url).port) })
+      sock.on('data', (c: Buffer) => chunks.push(c))
+      sock.on('end', () => resolve({ text: Buffer.concat(chunks).toString('utf8'), ms: Date.now() - t0 }))
+      sock.on('error', reject)
+      // No half-close: a client that ends its side lets the server close at once for any reason.
+      sock.write(head)
+      sock.write(body)
+    })
+    const results = await Promise.all(Array.from({ length: 6 }, run))
+    for (const r of results) {
+      expect(r.text).toMatch(/^HTTP\/1\.1 413 /)
+      expect(r.ms).toBeLessThan(2000)
+    }
+    expect(seen).toEqual([])
+  }, 20_000)
 
   it('answers 502 with a fixed sentence when the backend is not reachable', async () => {
     stub.closeAllConnections()

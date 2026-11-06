@@ -22,8 +22,10 @@ const DRAIN_TIMEOUT_MS = 10_000
 
 function refuseBody(req: IncomingMessage, res: ServerResponse, alreadyRead: number): void {
   // Node ends the connection right after the answer when the client sent Connection: close, which would reset it while
-  // the body is still arriving. Say keep-alive explicitly and end the connection ourselves once the drain is over.
-  const clientWantsClose = /\bclose\b/i.test(String(req.headers.connection ?? ''))
+  // the body is still arriving. Say keep-alive explicitly, and once the drain is over end the connection ourselves (req.socket:
+  // res.socket is already detached by then). Delivery of the 413 is best effort above the drain limit: the connection is
+  // destroyed there, and a client still writing may see a reset instead.
+  const clientWantsClose = String(req.headers.connection ?? '').split(',').some((t) => t.trim().toLowerCase() === 'close')
   res.setHeader('connection', 'keep-alive')
   sendJson(res, 413, 'The request body is too large.')
   let drained = alreadyRead
@@ -31,7 +33,7 @@ function refuseBody(req: IncomingMessage, res: ServerResponse, alreadyRead: numb
   const timer = setTimeout(stop, DRAIN_TIMEOUT_MS)
   timer.unref()
   req.on('data', (chunk: Buffer) => { drained += chunk.length; if (drained > DRAIN_LIMIT_BYTES) stop() })
-  req.once('end', () => { clearTimeout(timer); if (clientWantsClose) res.socket?.end() })
+  req.once('end', () => { clearTimeout(timer); if (clientWantsClose) req.socket.end() })
   req.once('close', () => clearTimeout(timer))
   req.resume()
 }

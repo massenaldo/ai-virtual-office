@@ -601,3 +601,14 @@ describe('clearAgentError', () => {
     expect(clearAgentError(emptyWorkforce(), 'nope', LATER)).toEqual({ ok: false, error: 'Agent not found.' })
   })
 })
+
+describe('validateAgentInput name and role safety', () => {
+  const base = NOVA
+  it('refuses control characters in name and role', () => {
+    for (const bad of ['a\nb', 'a\tb', 'a\u0007b', 'a\u0085b']) {
+      expect(validateAgentInput({ ...base, name: bad })).toMatch(/name/i)
+      expect(validateAgentInput({ ...base, role: bad })).toMatch(/role/i)
+    }
+    expect(validateAgentInput(base)).toBeNull()
+  })
+})

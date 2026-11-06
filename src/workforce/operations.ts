@@ -17,6 +17,8 @@ export const DESCRIPTION_MAX = 1000
 export const MODEL_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/
 // Everything below space except newline and tab, DEL, and the C1 range.
 const CONTROL_CHARS = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/
+// A name or role is one line of text: no control character at all, not even newline or tab.
+const LINE_CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/
 export const INTERRUPTED_MESSAGE = 'Interrupted by page reload (simulated run)'
 export const UNKNOWN_ERROR = 'The runtime reported an error without a message.'
 export const TIMEOUT_MESSAGE = (timeoutMs: number) => `Timed out after ${Math.round(timeoutMs / 1000)} s`
@@ -35,8 +37,10 @@ export function validateAgentInput(input: AgentInput): string | null {
   const role = input.role.trim()
   if (!name) return 'Name is required.'
   if (name.length > NAME_MAX) return `Name must be ${NAME_MAX} characters or fewer.`
+  if (LINE_CONTROL_CHARS.test(name)) return 'Name cannot contain control characters.'
   if (!role) return 'Role is required.'
   if (role.length > ROLE_MAX) return `Role must be ${ROLE_MAX} characters or fewer.`
+  if (LINE_CONTROL_CHARS.test(role)) return 'Role cannot contain control characters.'
   if (!isAgentDepartment(input.department)) return 'Choose a department.'
   if (input.description !== undefined) {
     if (input.description.length > AGENT_DESCRIPTION_MAX) return `Description must be ${AGENT_DESCRIPTION_MAX} characters or fewer.`

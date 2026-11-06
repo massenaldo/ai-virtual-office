@@ -130,6 +130,11 @@ const INVISIBLE = /[\u0080-\u009f\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cs}\u180e\ufe00-\ufe
 /** Content may keep tab, newline and carriage return; every other control character and everything in INVISIBLE is refused. */
 const UNSAFE_TO_SHOW = new RegExp(`[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]|${INVISIBLE.source}`, 'u')
 
+/** True when the text holds a control character (other than tab, newline, carriage return) or an invisible one. */
+export function hasUnsafeText(text: string): boolean {
+  return UNSAFE_TO_SHOW.test(text)
+}
+
 /**
  * The exact content or change of a Write or Edit, for a person to read. Null when it cannot be shown safely and whole:
  * too big, characters that would make what is shown differ from what is written, a secret that redaction would change,

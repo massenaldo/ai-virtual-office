@@ -1,0 +1,136 @@
+import { AGENT_DESCRIPTION_MAX, AGENT_INSTRUCTIONS_MAX } from '../../src/workforce/types'
+import { MODEL_NAME_PATTERN, NAME_MAX, ROLE_MAX } from '../../src/workforce/operations'
+import { redactSecrets } from '../redact'
+import { hasUnsafeText } from '../toolPolicy'
+
+/**
+ * An agent file is untrusted text. Only `name`, `description` and `model` are read; every other key is listed by name
+ * and otherwise ignored, so a file can grant nothing (no tools, no permission mode). Nothing here runs or follows anything.
+ */
+export type ParsedAgentFile = {
+  name: string
+  description: string
+  model: string | null
+  instructions: string
+  ignoredFields: string[]
+  descriptionCut: boolean
+  secretsMasked: boolean
+}
+
+type Parsed = { ok: true; agent: ParsedAgentFile } | { ok: false; error: string }
+
+const ACCEPTED = new Set(['name', 'description', 'model'])
+const KEY_LINE = /^([A-Za-z0-9_-]{1,40})[ \t]*:(.*)$/
+const BLOCK_HEADER = /^[>|][+-]?$/
+const ANY_CONTROL = /[\u0000-\u001f\u007f-\u009f]/
+const MAX_IGNORED_LISTED = 50
+
+const fail = (error: string): Parsed => ({ ok: false, error })
+const indentOf = (line: string): number => line.length - line.trimStart().length
+
+function unquote(value: string): string {
+  const v = value.trim()
+  if (v.length >= 2 && ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))) return v.slice(1, -1)
+  return v
+}
+
+/** The value of one accepted key from its first-line text and its indented continuation lines. */
+function valueOf(first: string, rest: string[]): string {
+  const head = first.trim()
+  const indents = rest.filter((l) => l.trim() !== '').map(indentOf)
+  const base = indents.length > 0 ? Math.min(...indents) : 0
+  const lines = rest.map((l) => (l.trim() === '' ? '' : l.slice(base).trimEnd()))
+  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
+  if (BLOCK_HEADER.test(head)) {
+    if (head.startsWith('|')) return lines.join('\n')
+    // Folded: lines within a paragraph join with a space, blank lines separate paragraphs.
+    return lines.join('\n').split(/\n{2,}/).map((p) => p.split('\n').join(' ')).join('\n')
+  }
+  const parts = [head, ...lines.filter((l) => l !== '')]
+  return unquote(parts.length > 1 ? parts.filter((p) => p !== '').join(' ') : head)
+}
+
+function cut(text: string, max: number): string {
+  if (text.length <= max) return text
+  let out = text.slice(0, max)
+  // Never leave half of a surrogate pair at the end.
+  const last = out.charCodeAt(out.length - 1)
+  if (last >= 0xd800 && last <= 0xdbff) out = out.slice(0, -1)
+  return out
+}
+
+export function parseAgentFile(text: string): Parsed {
+  const all = text.replace(/^﻿/, '').replace(/\r\n?/g, '\n').split('\n')
+  if (all[0]?.trimEnd() !== '---') return fail('The file must start with a "---" line that opens the front matter.')
+  const close = all.findIndex((l, i) => i > 0 && l.trimEnd() === '---')
+  if (close === -1) return fail('The front matter is never closed: add a "---" line after it.')
+
+  const values = new Map<string, string>()
+  const ignored: string[] = []
+  let current: { key: string; first: string; rest: string[] } | null = null
+  const finish = () => {
+    if (current && ACCEPTED.has(current.key)) values.set(current.key, valueOf(current.first, current.rest))
+    current = null
+  }
+  for (const line of all.slice(1, close)) {
+    const indented = line.startsWith(' ') || line.startsWith('\t')
+    if (indented || line.trim() === '') { current?.rest.push(line); continue }
+    const m = KEY_LINE.exec(line)
+    if (!m) { finish(); continue }
+    finish()
+    const key = m[1]!
+    if (ACCEPTED.has(key)) {
+      if (values.has(key)) return fail(`The "${key}" field appears more than once.`)
+      // Reserve the slot so a second one is caught even before this value is finished.
+      values.set(key, '')
+    } else if (!ignored.includes(key) && ignored.length < MAX_IGNORED_LISTED) ignored.push(key)
+    current = { key, first: m[2]!, rest: [] }
+  }
+  finish()
+
+  const body = all.slice(close + 1).join('\n').trim()
+  const rawName = (values.get('name') ?? '').trim()
+  const rawDescription = (values.get('description') ?? '').trim()
+  const rawModel = (values.get('model') ?? '').trim()
+
+  if (!rawName) return fail('The file has no name: add a "name:" line to the front matter.')
+  for (const v of [rawName, rawDescription, rawModel, body]) {
+    if (hasUnsafeText(v) || v.includes('\r')) return fail('The file contains control or invisible characters, which are not allowed.')
+  }
+  if (ANY_CONTROL.test(rawName)) return fail('The name must be a single line without tabs or control characters.')
+  if (rawName.length > NAME_MAX) return fail(`The name must be ${NAME_MAX} characters or fewer.`)
+  if (rawModel && rawModel !== 'inherit' && !MODEL_NAME_PATTERN.test(rawModel)) return fail('The model is not a valid model name.')
+
+  let masked = false
+  const mask = (v: string): string => {
+    const r = redactSecrets(v)
+    if (r !== v) masked = true
+    return r
+  }
+  const name = mask(rawName)
+  const described = mask(rawDescription)
+  const instructions = mask(body)
+  if (name.length > NAME_MAX) return fail(`The name must be ${NAME_MAX} characters or fewer.`)
+  if (instructions.length > AGENT_INSTRUCTIONS_MAX) return fail(`The instructions are longer than ${AGENT_INSTRUCTIONS_MAX} characters.`)
+  const description = cut(described, AGENT_DESCRIPTION_MAX)
+
+  return {
+    ok: true,
+    agent: {
+      name,
+      description,
+      model: rawModel === '' || rawModel === 'inherit' ? null : rawModel,
+      instructions,
+      ignoredFields: ignored,
+      descriptionCut: description.length < described.length,
+      secretsMasked: masked,
+    },
+  }
+}
+
+/** A role suggested from a file name: `backend-engineer.md` becomes `Backend engineer`. */
+export function suggestedRole(fileName: string): string {
+  const words = fileName.replace(/\.md$/i, '').replace(/[-_.]+/g, ' ').trim().toLowerCase()
+  const role = words === '' ? 'Agent' : words[0]!.toUpperCase() + words.slice(1)
+  return cut(role, ROLE_MAX)
+}

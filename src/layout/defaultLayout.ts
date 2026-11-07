@@ -1,4 +1,5 @@
 import { DEFAULT_WALL_HEIGHT, DEPARTMENTS } from './catalog'
+import { breakAreaItems } from './breakAreas'
 import { LAYOUT_SCHEMA_VERSION, type DepartmentId, type Furniture, type OfficeLayout, type Room } from './types'
 
 const ROOMS: [id: string, name: string, department: DepartmentId, x: number, z: number, width: number, depth: number][] = [
@@ -24,7 +25,7 @@ const DESKS: [x: number, z: number, rotation: 0 | 180, roomId: string | null][] 
   [1.6, 1.4, 180, null], [3.0, 1.4, 180, null],
 ]
 
-const PLANTS: [x: number, z: number][] = [[-8.7, -7.8], [-4.5, -7.8], [0, -7.8], [4.5, -7.8], [10.3, -5.9], [10.3, -3.1], [10.3, -0.3], [10.3, 2.5], [10.3, 5.3], [-9.8, 7.5], [1.2, 7.5]]
+const PLANTS: [x: number, z: number][] = [[-8.7, -7.8], [-4.5, -7.8], [0, -7.8], [4.5, -7.8], [10.3, -5.9], [10.3, -3.1], [10.3, -0.3], [10.3, 2.5], [10.3, 5.3], [-9.8, 7.5], [1.2, 8.2]]
 
 // Meeting room (centre −3.9, 2.2): table in the middle, three chairs along each long side facing it.
 const MEETING_TABLE: [x: number, z: number] = [-3.9, 2.2]
@@ -59,5 +60,6 @@ export function createDefaultLayout(): OfficeLayout {
     { id: 'storage-cabinet-01', type: 'storage-cabinet', x: -9.0, z: -5.4, rotation: 90, roomId: 'room-ceo-office' },
     { id: 'shelf-01', type: 'shelf', x: -4.0, z: -5.3, rotation: 90, roomId: 'room-project-management' },
   )
-  return { schemaVersion: LAYOUT_SCHEMA_VERSION, office: { width: 25, depth: 20, gridSize: 0.25 }, rooms, furniture }
+  const breakAreas = breakAreaItems()
+  return { schemaVersion: LAYOUT_SCHEMA_VERSION, office: { width: 25, depth: 20, gridSize: 0.25 }, rooms: [...rooms, ...breakAreas.rooms], furniture: [...furniture, ...breakAreas.furniture] }
 }

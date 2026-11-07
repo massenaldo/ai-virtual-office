@@ -1,4 +1,5 @@
 import { DEPARTMENTS, FURNITURE_SPECS } from './catalog'
+import { withBreakAreasIfTheyFit } from './breakAreas'
 import { createDefaultLayout } from './defaultLayout'
 import { LAYOUT_SCHEMA_VERSION, type Furniture, type OfficeLayout, type OfficeSettings, type Room } from './types'
 
@@ -22,9 +23,19 @@ export function serializeLayout(l: OfficeLayout): string {
   })
 }
 
-/** Upgrades older saved shapes to the current schema. v1 is current, so it passes through. */
+/**
+ * Upgrades older saved shapes to the current schema, in memory only: nothing is written until the person saves.
+ * Schema 1 becomes 2 by adding the break rooms where they fit (all three or none), and never moves anything.
+ * Never throws, whatever it is given. Anything that isn't a valid schema 1 layout passes through unchanged.
+ */
 export function migrateLayout(raw: unknown): unknown {
-  return raw
+  try {
+    if (!isObject(raw) || raw.schemaVersion !== 1) return raw
+    const parsed = parseLayout({ ...raw, schemaVersion: LAYOUT_SCHEMA_VERSION })
+    return parsed ? withBreakAreasIfTheyFit(parsed) : raw
+  } catch {
+    return raw
+  }
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)

@@ -6,8 +6,16 @@ const base = { hidden: false, editing: false, floorPlan: false, characters: 3, a
 describe('drawRate', () => {
   it('idle characters draw at 5', () => expect(drawRate(base)).toBe(IDLE_FPS))
   it('anything active draws at 30', () => expect(drawRate({ ...base, active: true })).toBe(ACTIVE_FPS))
-  it.each([{ hidden: true }, { editing: true }, { floorPlan: true }, { characters: 0 }])('%o never draws on a timer', (o) => {
+  it.each([{ hidden: true }, { editing: true }, { characters: 0 }])('%o never draws on a timer', (o) => {
     expect(drawRate({ ...base, active: true, ...o })).toBe(0)
+  })
+  // The dots in floor plan move with the routine, so they need timer frames: 5 fps at rest, 30 fps while someone walks.
+  it('floor plan draws like 3D so the dots move, and still not when hidden or editing', () => {
+    expect(drawRate({ ...base, floorPlan: true })).toBe(IDLE_FPS)
+    expect(drawRate({ ...base, floorPlan: true, active: true })).toBe(ACTIVE_FPS)
+    expect(drawRate({ ...base, floorPlan: true, hidden: true, active: true })).toBe(0)
+    expect(drawRate({ ...base, floorPlan: true, editing: true, active: true })).toBe(0)
+    expect(drawRate({ ...base, floorPlan: true, characters: 0 })).toBe(0)
   })
 })
 
@@ -67,7 +75,7 @@ describe('createDrawLoop', () => {
   })
 
   it('creates no timer at rate 0', () => {
-    for (const o of [{ editing: true }, { floorPlan: true }, { characters: 0 }, { hidden: true }]) {
+    for (const o of [{ editing: true }, { editing: true, floorPlan: true }, { characters: 0 }, { hidden: true }]) {
       const { loop } = setup(o)
       loop.start()
       expect(vi.getTimerCount()).toBe(0)

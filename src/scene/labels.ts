@@ -34,3 +34,8 @@ export const PLAN_MARKER_HEIGHT = 0.35
 export function markerAnchor(m: Pick<DeskMarker, 'x' | 'z' | 'seated'>, floorPlan: boolean, out = new THREE.Vector3()): THREE.Vector3 {
   return out.set(m.x, floorPlan ? PLAN_MARKER_HEIGHT : m.seated ? MARKER_HEIGHT : STANDING_MARKER_HEIGHT, m.z)
 }
+
+/** The marker's text: the agent's name, then what it is doing away from the desk. A task phase wins and leaves the name alone. */
+export function markerText(name: string, presenceLabel: string | null, phase: string | null): string {
+  return presenceLabel && !phase ? `${name} · ${presenceLabel}` : name
+}

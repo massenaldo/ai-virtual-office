@@ -3,9 +3,12 @@ export const IDLE_FPS = 5
 
 export type DrawState = { hidden: boolean; editing: boolean; floorPlan: boolean; characters: number; active: boolean }
 
-/** Timer frames per second: 0 when nothing animates on a timer (hidden tab, editing, floor plan, no characters). */
+/**
+ * Timer frames per second: 0 when nothing animates on a timer (hidden tab, editing, no characters). Floor plan draws like 3D,
+ * because its dots move with the routine; `active` is set there only while someone walks.
+ */
 export function drawRate(s: DrawState): number {
-  if (s.hidden || s.editing || s.floorPlan || s.characters === 0) return 0
+  if (s.hidden || s.editing || s.characters === 0) return 0
   return s.active ? ACTIVE_FPS : IDLE_FPS
 }
 

@@ -16,9 +16,11 @@ import { useEditorActions, type DialogRequest } from './editor/useEditorActions'
 import { useLayoutEditor } from './editor/useLayoutEditor'
 import type { FocusRequest } from './scene/OfficeScene'
 import WorkforcePanel, { selectedAgentId, type WorkforceView } from './workforce/ui/WorkforcePanel'
-import { deskCharacters, deskClickTarget, deskMarkers, deskStatus, workforceNotice } from './workforce/view'
+import { deskCharacters, deskClickTarget, deskMarkers, deskStatus, routineAgents, workforceNotice } from './workforce/view'
 import { useWorkforce } from './workforce/useWorkforce'
 import { createOfficeClock } from './office/officeClock'
+import { createRoutine } from './office/presence'
+import { createPresenceSource } from './workforce/scenePresence'
 import { OfficeClockContext } from './workforce/officeClockContext'
 import OfficeClockChip from './workforce/ui/OfficeClockChip'
 
@@ -97,6 +99,22 @@ export default function App() {
   const officeClock = useMemo(() => createOfficeClock(officeInfo, Date.now), [officeInfo])
   const markers = useMemo(() => (workforceState && !editing ? deskMarkers(state.layout, workforceState, selectedAgent?.id ?? null) : undefined), [workforceState, editing, state.layout, selectedAgent?.id])
   const characters = useMemo(() => (workforceState && !editing ? deskCharacters(state.layout, workforceState) : undefined), [workforceState, editing, state.layout])
+  // The routine changes only when an agent's routine fields or the layout do, so a state event that touches neither (a log line, a
+  // status change) keeps it. Times are rounded to the second in the key, so a new clock anchor from a fresh reply doesn't rebuild it.
+  const routineList = useMemo(() => (workforceState && !editing ? routineAgents(workforceState, state.layout, officeClock) : null), [workforceState, editing, state.layout, officeClock])
+  const routineKey = routineList === null ? '' : JSON.stringify(routineList.map((r) => [r.id, r.deskId, r.takesPrayerBreaks, r.activeSince === null ? null : Math.round(r.activeSince / 1000), r.busyUntil === null ? null : Math.round(r.busyUntil / 1000)]))
+  const routine = useMemo(() => (routineList ? createRoutine(routineList, state.layout) : null), [routineKey, state.layout]) // eslint-disable-line react-hooks/exhaustive-deps
+  const presence = useMemo(() => (characters ? createPresenceSource(routine, officeClock, characters) : undefined), [routine, officeClock, characters])
+  // The first answer for a day does tens of milliseconds of work (its walk map, schedules and chats). Do it here once the routine
+  // exists, outside the render path, and again shortly before the Jakarta day changes, so no frame pays for it.
+  useEffect(() => {
+    const id = routineList?.find((r) => r.deskId !== null)?.id
+    if (!routine || !officeClock.routine || id === undefined) return
+    const warm = (aheadMs: number) => routine.presenceAt(id, officeClock.now() + aheadMs)
+    const first = setTimeout(() => warm(0), 0)
+    const timer = setInterval(() => warm(30 * 60_000), 15_000)
+    return () => { clearTimeout(first); clearInterval(timer) }
+  }, [routine, officeClock]) // eslint-disable-line react-hooks/exhaustive-deps
   const highlightDeskId = selectedAgent && deskStatus(state.layout, selectedAgent).kind === 'assigned' ? selectedAgent.deskId : null
   const onDeskClick = agentsOpen && workforce ? (deskId: string) => {
     const target = deskClickTarget(workforce.state, deskId)
@@ -131,7 +149,7 @@ export default function App() {
         <div className="editor-body">
         {editing && <OutlinerPanel layout={state.layout} selection={state.selection} issues={issues} onSelect={actions.select} onAddRoom={actions.addRoom} onAddFurniture={actions.addFurniture}/>}
         <div className="canvas-wrap">{ready || editor.phase === 'offline' ? <OfficeScene layout={state.layout} floorPlan={floorPlan} viewKey={viewKey} editing={editing} selection={state.selection} issues={issues} onSelect={actions.select} onTransformStart={actions.transformStart} onTransform={actions.transform} onTransformEnd={actions.transformEnd}
-          markers={markers} characters={characters} highlightDeskId={highlightDeskId} onDeskClick={onDeskClick} focus={focus}/> : <div className="scene-hint" role="status">Loading office…</div>}
+          markers={markers} characters={characters} presence={presence} highlightDeskId={highlightDeskId} onDeskClick={onDeskClick} focus={focus}/> : <div className="scene-hint" role="status">Loading office…</div>}
           {!editing && <OfficeClockChip speed={officeInfo?.speed ?? 1}/>}
           {editor.loadProblem && <div className="scene-notice" role="alert"><AlertTriangle size={15}/><span>{LOAD_PROBLEM_MESSAGE[editor.loadProblem]}</span><button className="notice-close" onClick={editor.dismissLoadProblem} aria-label="Dismiss"><X size={14}/></button></div>}
           {breakNotice && <div className="scene-notice" role="status"><span>{breakNotice}</span><button className="notice-action" onClick={addBreakAreasFromNotice}>Add break areas</button><button className="notice-close" onClick={dismissBreakNoticeForever} aria-label="Dismiss"><X size={14}/></button></div>}

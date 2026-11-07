@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { characterLook, type CharacterLook } from './characterLook'
 import {
   CHARACTER_PARTS, DONE_GESTURE_MS, HAND_POINT, HEAD_TOP_POINT, JOINTS, SOLE_POINT, characterAction, jointMatrices, partColor, partMatrix, partVisible,
-  stepPose, targetPose, type CharacterAction, type CharacterPart, type Joint, type Pose,
+  chooseAction, easeRotation, gaitAfter, stepPose, targetPose, type CharacterAction, type CharacterPart, type Joint, type Pose,
 } from './characterRig'
 
 const matrices = (pose: Pose, body: CharacterLook['body'] = 'man') => {
@@ -183,6 +183,19 @@ describe('parts', () => {
     for (const a of ACTIONS) expect(partVisible('badge', a)).toBe(a === 'error')
     for (const a of ACTIONS) expect(partVisible('skin', a)).toBe(true)
   })
+  it('the badge shows in any action when the status is error', () => {
+    for (const a of [...ACTIONS, ...MORE_ACTIONS]) {
+      expect(partVisible('badge', a, 'error')).toBe(true)
+      expect(partVisible('badge', a, 'working')).toBe(a === 'error')
+    }
+  })
+  it('the badge stays upright above a standing and a walking head', () => {
+    for (const pose of [targetPose('walk', false, 0, 0, 1.3), targetPose('pray', false, 0, 0)]) {
+      const head = matrices(pose)[JOINTS.indexOf('head')]
+      const badge = partMatrix('badge', head, new THREE.Matrix4())
+      expect(new THREE.Vector3(0, 1, 0).transformDirection(badge).y).toBeCloseTo(1)
+    }
+  })
   it('the error badge stays upright and above a slumped head', () => {
     const head = matrices(seated('error'))[JOINTS.indexOf('head')]
     const badge = partMatrix('badge', head, new THREE.Matrix4())
@@ -213,5 +226,149 @@ describe('parts', () => {
   it('reads only its arguments: no look field beyond the colours and styles', () => {
     expect(partColor.length).toBe(3)
     expect(characterAction.length).toBe(3)
+  })
+})
+
+const MORE_ACTIONS: CharacterAction[] = ['walk', 'coffee', 'eat', 'chat', 'pray']
+const footY = (p: Pose, joint: 'shinL' | 'shinR') => at(p, joint, SOLE_POINT).y
+const handOf = (p: Pose, joint: 'forearmL' | 'forearmR') => at(p, joint, HAND_POINT)
+
+describe('walking', () => {
+  const cycle = Array.from({ length: 24 }, (_, i) => targetPose('walk', false, 0, 0, (i / 24) * Math.PI * 2))
+  it('swings an arm opposite to the leg on its side', () => {
+    for (const p of cycle) {
+      expect(Math.sign(p.armL) * Math.sign(p.thighL)).toBeLessThanOrEqual(0)
+      expect(Math.sign(p.armR) * Math.sign(p.thighR)).toBeLessThanOrEqual(0)
+    }
+    expect(Math.max(...cycle.map((p) => p.thighL))).toBeGreaterThan(0.3)
+    expect(Math.min(...cycle.map((p) => p.thighL))).toBeLessThan(-0.3)
+  })
+  it('keeps the feet near the floor and the head under 1.85', () => {
+    for (const p of cycle) {
+      expect(footY(p, 'shinL')).toBeGreaterThan(-0.04)
+      expect(footY(p, 'shinR')).toBeGreaterThan(-0.04)
+      expect(Math.min(footY(p, 'shinL'), footY(p, 'shinR'))).toBeLessThan(0.04)
+      expect(Math.max(footY(p, 'shinL'), footY(p, 'shinR'))).toBeLessThan(0.2)
+      expect(at(p, 'head', HEAD_TOP_POINT).y).toBeLessThanOrEqual(1.85)
+    }
+  })
+  it('does not bob the hips', () => {
+    expect(new Set(cycle.map((p) => p.hipsY)).size).toBe(1)
+  })
+  it('depends on the distance walked and not on the time', () => {
+    expect(targetPose('walk', false, 0, 0.3, 2)).toEqual(targetPose('walk', false, 99, 0.3, 2))
+    expect(targetPose('walk', false, 0, 0, 0)).not.toEqual(targetPose('walk', false, 0, 0, 1.5))
+  })
+  it('gaitAfter advances by distance, wraps, and ignores bad values', () => {
+    const a = gaitAfter(0, 0.65)
+    expect(a).toBeGreaterThan(0)
+    expect(gaitAfter(a, 0.65)).toBeCloseTo((a * 2) % (Math.PI * 2))
+    expect(gaitAfter(1, 0)).toBe(1)
+    expect(gaitAfter(1, Number.NaN)).toBe(1)
+    expect(gaitAfter(Number.NaN, 1)).toBeGreaterThanOrEqual(0)
+    expect(gaitAfter(1, 1000)).toBeLessThan(Math.PI * 2)
+  })
+})
+
+describe('praying', () => {
+  const sample = [0, 1.3, 4.1, 9.9].map((t) => targetPose('pray', false, t, 0.4))
+  it('stands upright with the head only slightly lowered, never bowing', () => {
+    for (const p of sample) {
+      expect(Math.abs(p.spine)).toBeLessThan(0.1)
+      expect(p.headPitch).toBeGreaterThan(0)
+      expect(p.headPitch).toBeLessThan(0.3)
+    }
+  })
+  it('keeps the hands low and relaxed at the sides, and the feet on the floor', () => {
+    for (const p of sample) {
+      for (const j of ['forearmL', 'forearmR'] as const) expect(handOf(p, j).y).toBeLessThan(0.95)
+      expect(Math.abs(footY(p, 'shinL'))).toBeLessThanOrEqual(0.06)
+      expect(Math.abs(footY(p, 'shinR'))).toBeLessThanOrEqual(0.06)
+    }
+  })
+  it('only breathes: arms and legs do not move over time', () => {
+    const a = targetPose('pray', false, 0, 0.4)
+    const b = targetPose('pray', false, 3, 0.4)
+    for (const k of ['armL', 'armR', 'elbowL', 'elbowR', 'thighR', 'kneeL', 'kneeR', 'hipsY'] as const) expect(b[k]).toBe(a[k])
+    expect(Math.abs(b.spine - a.spine)).toBeLessThan(0.03)
+    expect(Math.abs(b.armL - a.armL)).toBeLessThan(0.03)
+  })
+})
+
+describe('coffee, chat and eat', () => {
+  it('coffee holds one forearm up in front, the other hand low', () => {
+    const p = targetPose('coffee', false, 0.5, 0.1)
+    const hands = [handOf(p, 'forearmL'), handOf(p, 'forearmR')]
+    const high = hands.find((h) => h.y > 1.0)!
+    expect(high).toBeDefined()
+    expect(high.z).toBeLessThan(-0.1)
+    expect(hands.filter((h) => h.y < 0.95)).toHaveLength(1)
+    expect(Math.abs(footY(p, 'shinL'))).toBeLessThanOrEqual(0.06)
+  })
+  it('chat keeps the hands within reach, below the chin, with the feet on the floor', () => {
+    for (const t of [0, 0.7, 1.9]) {
+      const p = targetPose('chat', false, t, 0.1)
+      for (const j of ['forearmL', 'forearmR'] as const) {
+        const h = handOf(p, j)
+        expect(h.y).toBeGreaterThan(0.6)
+        expect(h.y).toBeLessThan(1.45)
+      }
+      expect(Math.abs(footY(p, 'shinR'))).toBeLessThanOrEqual(0.06)
+      expect(at(p, 'head', HEAD_TOP_POINT).y).toBeLessThanOrEqual(1.85)
+    }
+  })
+  it('eat, seated, puts both hands at the table in front of the chair', () => {
+    const p = targetPose('eat', true, 0.4, 0.2)
+    for (const j of ['forearmL', 'forearmR'] as const) {
+      const h = handOf(p, j)
+      expect(h.z).toBeLessThan(-0.25)
+      expect(h.y).toBeGreaterThan(0.6)
+      expect(h.y).toBeLessThan(0.95)
+    }
+    expect(Math.abs(footY(p, 'shinL') - footY(seated('idle'), 'shinL'))).toBeLessThan(0.01)
+  })
+  it('every new action gives a finite pose for bad time and phase', () => {
+    for (const a of MORE_ACTIONS) for (const s of [true, false]) {
+      const p = targetPose(a, s, Number.NaN, Number.NaN, Number.NaN)
+      for (const v of Object.values(p)) expect(Number.isFinite(v)).toBe(true)
+    }
+  })
+})
+
+describe('chooseAction', () => {
+  const base = { status: 'idle' as const, doneAt: null, nowMs: 1000, pose: 'sit' as const, activity: 'idle' as const, atDesk: true }
+  it('a task status acts only when the character is at its desk', () => {
+    expect(chooseAction({ ...base, status: 'working' })).toBe('typing')
+    expect(chooseAction({ ...base, status: 'thinking', pose: 'stand' })).toBe('thinking')
+    expect(chooseAction({ ...base, status: 'working', pose: 'walk', atDesk: false })).toBe('walk')
+    expect(chooseAction({ ...base, status: 'working', pose: 'stand', activity: 'pray', atDesk: false })).toBe('pray')
+  })
+  it('walk, then the activity, then done, then idle', () => {
+    expect(chooseAction({ ...base, pose: 'walk', atDesk: false, activity: 'coffee' })).toBe('walk')
+    for (const activity of ['coffee', 'eat', 'chat', 'pray'] as const) expect(chooseAction({ ...base, pose: 'stand', atDesk: false, activity })).toBe(activity)
+    expect(chooseAction({ ...base, doneAt: 500 })).toBe('done')
+    expect(chooseAction({ ...base, doneAt: 500, pose: 'stand', atDesk: false, activity: 'chat' })).toBe('chat')
+    expect(chooseAction(base)).toBe('idle')
+  })
+})
+
+describe('easeRotation', () => {
+  it('turns the short way round', () => {
+    expect(easeRotation(350, 10, 0.05)).toBeGreaterThan(350)
+    expect(easeRotation(10, 350, 0.05)).toBeLessThan(10)
+  })
+  it('eases and does not snap for an ordinary turn, and never overshoots', () => {
+    const r = easeRotation(0, 90, 0.016)
+    expect(r).toBeGreaterThan(0)
+    expect(r).toBeLessThan(45)
+    let cur = 0
+    for (let i = 0; i < 100; i++) cur = easeRotation(cur, 90, 0.016)
+    expect(cur).toBeCloseTo(90, 0)
+    expect(cur).toBeLessThanOrEqual(90.0001)
+  })
+  it('a long gap lands on the target, and bad input is safe', () => {
+    expect(easeRotation(0, 170, 30)).toBe(170)
+    expect(easeRotation(Number.NaN, 20, 0.016)).toBe(20)
+    expect(easeRotation(5, 20, Number.NaN)).toBe(5)
   })
 })

@@ -1,6 +1,8 @@
 import { DEPARTMENTS } from '../layout/catalog'
 import type { OfficeLayout } from '../layout/types'
 import { seatForDesk } from '../layout/seats'
+import type { SceneCharacter } from '../scene/characterInstances'
+import type { CharacterStatus } from '../scene/characterRig'
 import type { DeskMarker } from '../scene/labels'
 import type { PermissionRuleView } from './api'
 import type { PermissionsState } from './permissions'
@@ -92,6 +94,38 @@ export function deskMarkers(layout: OfficeLayout, s: WorkforceState, selectedAge
     // The label sits over the seat, not the desk, so it stays above the character.
     const seat = seatForDesk(layout, f)
     return [{ id: agent.id, label: agent.name, status: agent.status, x: seat.x, z: seat.z, seated: seat.seated, selected: agent.id === selectedAgentId, phase: markerPhase(activeTaskFor(s, agent.id)) }]
+  })
+}
+
+// Every agent status is mapped on purpose. A status this build does not know shows as idle rather than as a made-up action.
+const CHARACTER_STATUS: Record<AgentStatus, CharacterStatus> = { idle: 'idle', working: 'working', thinking: 'thinking', waiting: 'waiting', error: 'error' }
+
+/** When the agent's latest task finished, if it completed and the agent is idle; null for anything else, including an unreadable time. */
+function finishedAt(s: WorkforceState, agent: Agent): number | null {
+  if (agent.status !== 'idle' || agent.currentTaskId === null) return null
+  const task = s.tasks.find((t) => t.id === agent.currentTaskId && t.agentId === agent.id)
+  if (!task || task.status !== 'completed' || task.completedAt === null) return null
+  const at = Date.parse(task.completedAt)
+  return Number.isFinite(at) ? at : null
+}
+
+/** One character per desk that has an agent, in layout order, at the desk's seat. The agent is the one the desk's marker shows. */
+export function deskCharacters(layout: OfficeLayout, s: WorkforceState): SceneCharacter[] {
+  return layout.furniture.flatMap((f) => {
+    const agent = f.type === 'desk' ? agentAtDesk(s, f.id) : undefined
+    if (!agent) return []
+    const seat = seatForDesk(layout, f)
+    return [{
+      id: agent.id,
+      deskId: f.id,
+      x: seat.x,
+      z: seat.z,
+      rotation: seat.rotation,
+      seated: seat.seated,
+      status: CHARACTER_STATUS[agent.status] ?? 'idle',
+      doneAt: finishedAt(s, agent),
+      accent: DEPARTMENTS[agent.department]?.color ?? DEPARTMENTS.executive.color,
+    }]
   })
 }
 

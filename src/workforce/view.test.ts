@@ -2,11 +2,12 @@ import { describe, expect, it } from 'vitest'
 import css from '../styles.css?raw'
 import { createDefaultLayout } from '../layout/defaultLayout'
 import type { OfficeLayout } from '../layout/types'
+import { DEPARTMENTS } from '../layout/catalog'
 import { createDemoWorkforce } from './demo'
 import type { PermissionRuleView } from './api'
 import { addActivity, assignTask, cancelTask } from './operations'
 import type { RuntimeEnvironment } from './controller'
-import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskClickTarget, deskMarkers, shortDigest, environmentBadge, environmentNote, connectionLabel, agentStatusText, workforceNotice, TASK_RUNTIME_LABEL, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, allowedScopes, permissionStateText, rulesForTab, scopeSentence, choiceFor, agentPermissionChip, revokePrompt, revokeAgentPrompt, waitingApprovals, removalPrompt, TASK_STATUS_LABEL, formatUsage, sourceFileName } from './view'
+import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskCharacters, deskClickTarget, deskMarkers, shortDigest, environmentBadge, environmentNote, connectionLabel, agentStatusText, workforceNotice, TASK_RUNTIME_LABEL, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, allowedScopes, permissionStateText, rulesForTab, scopeSentence, choiceFor, agentPermissionChip, revokePrompt, revokeAgentPrompt, waitingApprovals, removalPrompt, TASK_STATUS_LABEL, formatUsage, sourceFileName } from './view'
 
 const NOW = '2026-10-30T09:00:00.000Z'
 const layout = createDefaultLayout()
@@ -131,6 +132,63 @@ describe('deskMarkers', () => {
     const { state } = withTask('agent-demo-pm')
     const running = { ...state, agents: state.agents.map((a) => (a.id === 'agent-demo-pm' ? { ...a, status: 'working' as const } : a)) }
     expect(deskMarkers(layout, running, null).find((m) => m.id === 'agent-demo-pm')?.status).toBe('working')
+  })
+})
+
+describe('deskCharacters', () => {
+  const COMPLETED = '2026-10-30T09:00:05.000Z'
+  const finished = (status: 'completed' | 'failed' | 'cancelled', completedAt: string | null, agentStatus: 'idle' | 'working' = 'idle') => {
+    const { state, taskId } = withTask('agent-demo-pm')
+    return {
+      ...state,
+      agents: state.agents.map((a) => (a.id === 'agent-demo-pm' ? { ...a, status: agentStatus } : a)),
+      tasks: state.tasks.map((t) => (t.id === taskId ? { ...t, status, completedAt } : t)),
+    }
+  }
+  const pm = (s = demo, l = layout) => deskCharacters(l, s).find((c) => c.id === 'agent-demo-pm')
+
+  it('one character per occupied desk at its seat', () => {
+    const characters = deskCharacters(layout, demo)
+    expect(characters).toHaveLength(6)
+    expect(pm()).toEqual({ id: 'agent-demo-pm', deskId: 'desk-03', x: -2.7, z: -3.84, rotation: 0, seated: true, status: 'idle', doneAt: null, accent: DEPARTMENTS['project-management'].color })
+  })
+
+  it('no character for an agent with no desk or a missing desk', () => {
+    expect(deskCharacters(without(layout, 'desk-03'), demo)).toHaveLength(5)
+    const s = { ...demo, agents: demo.agents.map((a) => (a.id === 'agent-demo-qa' ? { ...a, deskId: null } : a)) }
+    expect(deskCharacters(layout, s).map((c) => c.id)).not.toContain('agent-demo-qa')
+  })
+
+  it('two agents on one desk give one character, the same agent the marker shows', () => {
+    const s = { ...demo, agents: demo.agents.map((a) => (a.id === 'agent-demo-qa' ? { ...a, deskId: 'desk-03' } : a)) }
+    const characters = deskCharacters(layout, s).filter((c) => c.deskId === 'desk-03')
+    expect(characters).toHaveLength(1)
+    expect(characters[0].id).toBe(deskMarkers(layout, s, null).find((m) => m.x === characters[0].x && m.z === characters[0].z)?.id)
+  })
+
+  it('accent is the department colour', () => {
+    for (const c of deskCharacters(layout, demo)) expect(c.accent).toBe(DEPARTMENTS[agent(c.id).department].color)
+  })
+
+  it('maps every agent status, and an unknown one to idle', () => {
+    const status = (st: string) => pm({ ...demo, agents: demo.agents.map((a) => (a.id === 'agent-demo-pm' ? { ...a, status: st as 'idle' } : a)) })?.status
+    expect(['idle', 'working', 'thinking', 'waiting', 'error'].map(status)).toEqual(['idle', 'working', 'thinking', 'waiting', 'error'])
+    expect(status('sleeping')).toBe('idle')
+  })
+
+  it('doneAt is the time of a completed current task of an idle agent', () => {
+    expect(pm(finished('completed', COMPLETED))?.doneAt).toBe(Date.parse(COMPLETED))
+  })
+
+  it('doneAt is null for a failed or cancelled task, or a working agent', () => {
+    expect(pm(finished('failed', COMPLETED))?.doneAt).toBeNull()
+    expect(pm(finished('cancelled', COMPLETED))?.doneAt).toBeNull()
+    expect(pm(finished('completed', COMPLETED, 'working'))?.doneAt).toBeNull()
+  })
+
+  it('an unparseable completedAt gives doneAt null', () => {
+    expect(pm(finished('completed', 'not a date'))?.doneAt).toBeNull()
+    expect(pm(finished('completed', null))?.doneAt).toBeNull()
   })
 })
 

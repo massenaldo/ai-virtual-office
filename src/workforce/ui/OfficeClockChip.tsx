@@ -13,8 +13,8 @@ export default function OfficeClockChip({ speed = 1 }: { speed?: number }) {
       stop()
       const now = clock.now()
       setLabel(officeClockLabel(now, speed))
-      // At most once a minute: on the minute when the clock is real, every real minute when it is sped up.
-      timer = setTimeout(tick, speed === 1 ? 60000 - (now % 60000) + 50 : 60000)
+      // On each office minute, however fast the clock runs, and at most once a second.
+      timer = setTimeout(tick, Math.max(1000, (60000 - (now % 60000)) / speed + 50))
     }
     const onVisibility = () => { if (document.hidden) stop(); else tick() }
     document.addEventListener('visibilitychange', onVisibility)

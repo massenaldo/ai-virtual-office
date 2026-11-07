@@ -73,7 +73,7 @@ it.each([
   ['2026-03-01', { subuh: '04:45', dzuhur: '12:10' }],
   ['2026-05-31', { subuh: '04:36', dzuhur: '11:54' }],
   ['2026-07-31', { subuh: '04:45', dzuhur: '12:03' }],
-  ['2026-09-23', { subuh: '04:27', dzuhur: '11:49', ashar: '14:52', maghrib: '17:51', isya: '19:00' }],
+  ['2026-09-23', { subuh: '04:27', dzuhur: '11:49', ashar: '14:58', maghrib: '17:52', isya: '19:00' }],
 ])('%s matches a published Jakarta timetable', ...)
 // schedule.test.ts
 it('has all five prayers, lunch and three coffees on a weekday, with the prayer setting on', ...)

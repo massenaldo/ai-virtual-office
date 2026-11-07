@@ -199,3 +199,5 @@ textarea.field-input{resize:vertical;min-height:54px;font-family:inherit}
 .import-row>small{display:block;color:#6e7a8c;font-size:9px;margin:2px 0 6px;overflow-wrap:anywhere}
 .import-row .form-error{margin:6px 0 0}
 .import-instructions{max-height:140px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;margin:0 0 8px;padding:7px 8px;background:#0c1119;border:1px solid #303948;border-radius:6px;color:#c9d1dc;font:500 10px/1.5 'DM Sans Variable','DM Sans',sans-serif}
+.today-schedule{list-style:none;margin:0 2px 8px;padding:0;display:flex;flex-direction:column;gap:3px;color:#c9d1dc}
+.today-schedule span{display:inline-block;min-width:76px;color:#8e9bad;font-variant-numeric:tabular-nums}

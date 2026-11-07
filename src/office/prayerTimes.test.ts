@@ -6,8 +6,8 @@ import { prayerTimes, type PrayerName } from './prayerTimes'
 // - 2026-02-19: momsmoney.kontan.co.id, Ramadan 2026 table for Jakarta Pusat
 // - 2026-03-01: tafsirweb.com
 // - 2026-05-31 and 2026-07-31: liputan6.com (May and July 2026 tables)
-// - 2026-09-23: journalarta.com
-// Note: liputan6.com lists 14:58 for Ashar on 2026-09-23, so the 14:52 in the fixture below looks like a typo in its source.
+// - 2026-09-23: liputan6.com (September 2026 table), matching journalarta.com's DKI Jakarta table. One other article gives
+//   Ashar as 14:52, which disagrees with both tables and with the sun's position.
 // The allowed difference is 2 minutes. It must not be widened to make a fixture pass.
 const TOLERANCE_MINUTES = 2
 const toMinutes = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3))
@@ -17,7 +17,7 @@ const FIXTURES: Array<[string, Partial<Record<PrayerName, string>>]> = [
   ['2026-03-01', { subuh: '04:45', dzuhur: '12:10' }],
   ['2026-05-31', { subuh: '04:36', dzuhur: '11:54' }],
   ['2026-07-31', { subuh: '04:45', dzuhur: '12:03' }],
-  ['2026-09-23', { subuh: '04:27', dzuhur: '11:49', ashar: '14:52', maghrib: '17:51', isya: '19:00' }],
+  ['2026-09-23', { subuh: '04:27', dzuhur: '11:49', ashar: '14:58', maghrib: '17:52', isya: '19:00' }],
 ]
 
 describe('prayerTimes', () => {

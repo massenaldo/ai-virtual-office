@@ -1,5 +1,7 @@
 import { readdirSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { jakartaDay } from '../../src/office/jakartaClock'
+import { daySchedule } from '../../src/office/schedule'
 import { startTestServer, type TestServer } from '../test/helpers'
 import { makeWorkspaceRoot } from '../test/workspaces'
 
@@ -57,13 +59,16 @@ describe('state and agents', () => {
   })
 
   it('/api/state carries the office clock, computed when the response is built', async () => {
-    const a = (await s.api('GET', '/api/state')).body.office
-    expect(a).toEqual({ nowMs: expect.any(Number), speed: 1, routine: true })
-    const real = Date.now()
-    expect(Math.abs(a.nowMs - real)).toBeLessThan(60000)
-    // A second response is not older than the first: nothing is cached or stored.
-    const b = (await s.api('GET', '/api/state')).body.office
-    expect(b.nowMs).toBeGreaterThanOrEqual(a.nowMs)
+    const on = await startTestServer({ OFFICE_ROUTINE: 'on' })
+    try {
+      const a = (await on.api('GET', '/api/state')).body.office
+      expect(a).toEqual({ nowMs: expect.any(Number), speed: 1, routine: true })
+      const real = Date.now()
+      expect(Math.abs(a.nowMs - real)).toBeLessThan(60000)
+      // A second response is not older than the first: nothing is cached or stored.
+      const b = (await on.api('GET', '/api/state')).body.office
+      expect(b.nowMs).toBeGreaterThanOrEqual(a.nowMs)
+    } finally { await on.close() }
   })
 
   it('OFFICE_ROUTINE=off reports routine false', async () => {
@@ -75,7 +80,7 @@ describe('state and agents', () => {
 
   it('a dev clock is reported as it runs, and moves between two replies', async () => {
     let real = 1_000_000
-    const dev = await startTestServer({ VO_DEV_CLOCK: '2031-03-04T11:40:00+07:00@60' }, { officeNow: () => real })
+    const dev = await startTestServer({ OFFICE_ROUTINE: 'on', VO_DEV_CLOCK: '2031-03-04T11:40:00+07:00@60' }, { officeNow: () => real })
     try {
       const start = Date.parse('2031-03-04T11:40:00+07:00')
       expect((await dev.api('GET', '/api/state')).body.office).toEqual({ nowMs: start, speed: 60, routine: true })
@@ -313,3 +318,44 @@ describe('the demo tool request', () => {
   })
 })
 
+
+describe('tasks held during a break', () => {
+  const DAY = jakartaDay(Date.parse('2026-11-09T12:00:00+07:00'))
+  const FORGE = 'agent-demo-backend'
+  const lunch = daySchedule({ id: FORGE, takesPrayerBreaks: true }, DAY).find((e) => e.kind === 'lunch')!
+  const atLunch = lunch.startMs + 60000
+  const body = { title: 'Build API', description: 'REST' }
+  let held: TestServer
+  beforeEach(async () => { held = await startTestServer({ OFFICE_ROUTINE: 'on' }, { mockTimings: SLOW, officeNow: () => atLunch }) })
+  afterEach(async () => { await held.close() })
+
+  it('a task given at lunch is accepted as queued with its hold, and /api/state carries it', async () => {
+    const r = await held.api('POST', `/api/agents/${FORGE}/tasks`, body)
+    expect(r.status).toBe(202)
+    expect(r.body.task).toMatchObject({ status: 'queued', hold: { label: 'On lunch', untilMs: lunch.endMs, blockedBy: null } })
+    const seen = (await held.api('GET', '/api/state')).body.state.tasks.find((t: { id: string }) => t.id === r.body.task.id)
+    expect(seen).toMatchObject({ status: 'queued', hold: { label: 'On lunch' } })
+  })
+
+  it('start-now starts it, a second call is 409, and it needs a login', async () => {
+    const id = (await held.api('POST', `/api/agents/${FORGE}/tasks`, body)).body.task.id
+    const noAuth = await fetch(`${held.url}/api/tasks/${id}/start-now`, { method: 'POST' })
+    expect(noAuth.status).toBe(401)
+    const r = await held.api('POST', `/api/tasks/${id}/start-now`)
+    expect(r.status).toBe(202)
+    expect(r.body.task.status).not.toBe('queued')
+    expect(r.body.task.hold).toBeNull()
+    const again = await held.api('POST', `/api/tasks/${id}/start-now`)
+    expect(again).toMatchObject({ status: 409, body: { error: 'That task is not waiting for a break.' } })
+    expect((await held.api('POST', '/api/tasks/nope/start-now')).status).toBe(404)
+  })
+
+  it('OFFICE_ROUTINE=off at the same time starts at once', async () => {
+    const off = await startTestServer({ OFFICE_ROUTINE: 'off' }, { mockTimings: SLOW, officeNow: () => atLunch })
+    try {
+      const r = await off.api('POST', `/api/agents/${FORGE}/tasks`, body)
+      expect(r.status).toBe(202)
+      expect(r.body.task).toMatchObject({ status: 'starting', hold: null })
+    } finally { await off.close() }
+  })
+})

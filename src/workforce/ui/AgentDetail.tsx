@@ -11,10 +11,16 @@ import { useOfficeClock } from '../officeClockContext'
 import { DESCRIPTION_MAX, TITLE_MAX, isActiveTask, type TaskInput } from '../operations'
 import type { RuntimeStatus } from '../api'
 import type { Agent } from '../types'
-import { TASK_RUNTIME_LABEL, TASK_STATUS_LABEL, agentStatusText, agentTimeline, agentPermissionChip, todaySchedule, approveEnabled, choiceFor, shortDigest, deskOptions, deskStatus, formatTime, formatUsage, sourceFileName } from '../view'
+import { heldStartError, heldTaskText, TASK_RUNTIME_LABEL, TASK_STATUS_LABEL, agentStatusText, agentTimeline, agentPermissionChip, todaySchedule, approveEnabled, choiceFor, shortDigest, deskOptions, deskStatus, formatTime, formatUsage, sourceFileName } from '../view'
 import { StatusDot } from './AgentList'
 
 export type AgentDetailProps = { workforce: Workforce; layout: OfficeLayout; agent: Agent; onBack(): void; onEdit(): void; onRemove(): void; onFocusDesk(): void }
+
+/** Ends a waiting task's hold; null on success, otherwise the server's own refusal text. */
+export async function startHeldNow(actions: Pick<Workforce['actions'], 'startHeldTask'>, taskId: string): Promise<string | null> {
+  const r = await actions.startHeldTask(taskId)
+  return r.ok ? null : r.error
+}
 
 const RUNTIME_OPTION_LABEL = { mock: 'Simulated (mock)', claude: 'Claude' } as const
 
@@ -85,6 +91,8 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
   // The approval whose full change has been opened: Approve stays disabled until then (Deny never is).
   const [reviewOpenFor, setReviewOpenFor] = useState<string | null>(null)
   const cancel = useBusy()
+  const startNow = useBusy()
+  const [startRefusal, setStartRefusal] = useState<{ taskId: string; error: string } | null>(null)
   const clearing = useBusy()
   // With a backend the person also chooses how far an allow reaches; the browser demo keeps Approve and Deny.
   const remote = workforce.permissions !== null
@@ -104,6 +112,11 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
     if (!task) return
     const r = await cancel.run(() => actions.cancelTask(task.id))
     if (r !== undefined) setActionError(r.ok ? null : r.error)
+  }
+  const startHeld = async () => {
+    if (!task) return
+    const error = await startNow.run(() => startHeldNow(actions, task.id))
+    if (error !== undefined) setStartRefusal(error === null ? null : { taskId: task.id, error })
   }
   const clearError = async () => {
     const r = await clearing.run(() => actions.clearAgentError(agent.id))
@@ -128,7 +141,7 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
     <div className="field-static"><span>Model</span><strong>{agent.model ?? 'Server default'}</strong></div>
     {sourceFileName(agent.sourceFile) && <p className="panel-hint">Imported from {sourceFileName(agent.sourceFile)}</p>}
     <div className="panel-actions">
-      {agent.status === 'error' && !active && <button className="panel-button" disabled={clearing.busy} onClick={clearError}>Clear error</button>}
+      {agent.status === 'error' && (!active || task?.hold) && <button className="panel-button" disabled={clearing.busy} onClick={clearError}>Clear error</button>}
       <button className="panel-button" onClick={onEdit}><Pencil size={13}/> Edit</button>
       <button className="panel-button danger" onClick={onRemove}><Trash2 size={13}/> Remove</button>
     </div>
@@ -162,6 +175,7 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
       {task.description && <p>{task.description}</p>}
       <small>{task.startedAt ? `Started ${formatTime(task.startedAt)}` : `Queued ${formatTime(task.createdAt)}`}{task.completedAt && ` · Ended ${formatTime(task.completedAt)}`} · {TASK_RUNTIME_LABEL[task.runtime]}{task.workspaceId && ` · Workspace ${task.workspaceId}`}</small>
       {task.resultSummary && <p className="task-result">{task.resultSummary}</p>}
+      {task.hold && <p role="status">{heldTaskText(task.hold)}</p>}
       {task.errorMessage && <p className="task-error">{task.errorMessage}</p>}
       {usageText && <small className="task-usage">{usageText}</small>}
     </div> : <p className="panel-hint">No task yet.</p>}
@@ -179,7 +193,11 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
       {actionError && <p className="form-error" role="alert">{actionError}</p>}
     </div>}
     {active ? <>
-      {task.status !== 'cancelling' && <div className="panel-actions"><button className="panel-button" disabled={cancel.busy} onClick={cancelTask}><Square size={13}/> Cancel task</button></div>}
+      {task.status !== 'cancelling' && <div className="panel-actions">
+        {task.hold && <button className="panel-button primary" disabled={startNow.busy} onClick={startHeld}><Play size={13}/> Start now</button>}
+        <button className="panel-button" disabled={cancel.busy} onClick={cancelTask}><Square size={13}/> Cancel task</button>
+      </div>}
+      {heldStartError(startRefusal, task) && <p className="form-error" role="alert">{heldStartError(startRefusal, task)}</p>}
       {actionError && task.status !== 'waiting_for_approval' && <p className="form-error" role="alert">{actionError}</p>}
       {task.status === 'running' && task.runtime === 'mock' && demoServed && <>
         <div className="field-group-label">Demo controls</div>

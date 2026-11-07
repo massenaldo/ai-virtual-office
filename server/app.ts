@@ -7,6 +7,7 @@ import { createSessionStore, type SessionStore } from './session'
 import { openAuditLog, type AuditInput, type AuditLog } from './audit'
 import { claudeEnabled, type ServerConfig } from './config'
 import { deriveEvents } from './deriveEvents'
+import { officeClockInfo } from './officeClock'
 import { EventLog } from './eventLog'
 import { createSecurityGuards, securityHeaders } from './http/guards'
 import { createRoutes } from './http/routes'
@@ -82,6 +83,9 @@ function permissionAudit(change: PermissionChange): AuditInput | null {
 /** How often expired permissions are noticed for the audit log. Whether a rule applies is decided at each request, never by this timer. */
 export const PERMISSION_SWEEP_MS = 30000
 
+/** How often held tasks are checked for the end of their break. A task starts within this much of the break ending. */
+export const HOLD_CHECK_MS = 1000
+
 /** Wires the store, event log, provider, task manager and routes. Throws if the data file can't be read. */
 export function createApp(config: ServerConfig, deps: AppDeps = {}): App {
   const log = redactingLogger(deps.log ?? consoleLogger)
@@ -114,11 +118,15 @@ export function createApp(config: ServerConfig, deps: AppDeps = {}): App {
       const unbound = countUnboundWriteRules(permissions.rules, now())
       if (unbound > 0) log.warn(UNBOUND_WRITE_RULES_WARNING(unbound))
     }
-    const manager = new TaskManager({ store, provider, extraProviders, permissions, config, policy: toolPolicyFrom(config), now, log, onLifecycle: (e) => audit.write(toAuditInput(e)) })
+    // One office clock for /api/state and for holding tasks, so the browser and the server agree on when a break ends.
+    const officeRealNow = deps.officeNow ?? Date.now
+    const officeBootMs = officeRealNow()
+    const officeNow = config.officeRoutine ? () => officeClockInfo(config, officeRealNow, officeBootMs).nowMs : undefined
+    const manager = new TaskManager({ store, provider, extraProviders, permissions, config, policy: toolPolicyFrom(config), now, officeNow, log, onLifecycle: (e) => audit.write(toAuditInput(e)) })
     const streams = new Set<ServerResponse>()
     const startedAt = now()
     const sessions = createSessionStore({ now: () => Date.parse(now()) })
-    const routes = createRoutes({ config, store, layoutStore, events, manager, permissions, now, startedAt, heartbeatMs: deps.heartbeatMs ?? HEARTBEAT_MS, streams, log, maxStreams: deps.maxStreams, audit, sessions, apiToken: apiToken.value, officeNow: deps.officeNow })
+    const routes = createRoutes({ config, store, layoutStore, events, manager, permissions, now, startedAt, heartbeatMs: deps.heartbeatMs ?? HEARTBEAT_MS, streams, log, maxStreams: deps.maxStreams, audit, sessions, apiToken: apiToken.value, officeNow: officeRealNow, officeBootMs })
     const onReject = (r: { requestId: string; code: string; method: string; path: string }) => audit.write({ action: 'request.rejected', actor: 'api', requestId: r.requestId, reason: r.code, detail: `${r.method} ${r.path}` })
     const guards = [...createSecurityGuards({ allowedOrigins: config.allowedOrigins, apiToken: apiToken.value, sessions, onReject }), ...(deps.guards ?? [])]
     const responseHeaders = (req: IncomingMessage) => ({ ...securityHeaders(req, config.allowedOrigins), ...(deps.responseHeaders?.(req) ?? {}) })
@@ -156,6 +164,8 @@ export async function startServer(config: ServerConfig, deps: AppDeps = {}): Pro
   handler = app.handler
   const sweep = setInterval(() => app.permissions.sweep(), PERMISSION_SWEEP_MS)
   sweep.unref()
+  const holdCheck = setInterval(() => app.manager.releaseHeldTasks(), HOLD_CHECK_MS)
+  holdCheck.unref()
   const port = (server.address() as AddressInfo).port
   app.audit.write(startupRecord(config, port, app.apiToken.source))
   const host = config.host.includes(':') ? `[${config.host}]` : config.host
@@ -165,6 +175,7 @@ export async function startServer(config: ServerConfig, deps: AppDeps = {}): Pro
     app,
     close: async () => {
       clearInterval(sweep)
+      clearInterval(holdCheck)
       app.closeStreams()
       await app.manager.dispose()
       await stop()

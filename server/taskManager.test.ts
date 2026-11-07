@@ -2,6 +2,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { dayStartMs, jakartaDay } from '../src/office/jakartaClock'
+import { daySchedule, holdAt } from '../src/office/schedule'
 import type { AgentTask } from '../src/workforce/types'
 import { openPermissionStore } from './permissions/store'
 import { silentLogger } from './log'
@@ -23,8 +25,11 @@ const BASE_CONFIG = { taskTimeoutMs: 600000, cancelGraceMs: 5000, approvalTimeou
 let dir: string
 let store: WorkforceStore
 let manager: TaskManager | null = null
+/** The office clock the manager holds tasks by; absent means no holding. */
+let officeNow: (() => number) | undefined
 
 beforeEach(() => {
+  officeNow = undefined
   vi.useFakeTimers()
   dir = mkdtempSync(join(tmpdir(), 'vo-manager-'))
   store = openWorkforceStore({ dataDir: dir, now: () => NOW, log: silentLogger, writeFile: () => {} })
@@ -39,7 +44,7 @@ afterEach(async () => {
 let perms: ReturnType<typeof openPermissionStore>
 function make(provider: ServerRuntimeProvider, config: Partial<typeof BASE_CONFIG> = {}, onLifecycle?: TaskManagerOptions['onLifecycle'], allowed: readonly string[] = DEFAULT_ALLOWED_TOOLS, extraProviders?: ServerRuntimeProvider[]): TaskManager {
   perms = openPermissionStore({ dataDir: dir, now: () => NOW, log: silentLogger, writeFile: () => {} })
-  manager = new TaskManager({ store, provider, extraProviders, permissions: perms, config: { ...BASE_CONFIG, ...config }, policy: { allowedTools: new Set(allowed), protectedRoots: [] }, now: () => NOW, log: silentLogger, onLifecycle })
+  manager = new TaskManager({ store, provider, extraProviders, permissions: perms, config: { ...BASE_CONFIG, ...config }, policy: { allowedTools: new Set(allowed), protectedRoots: [] }, now: () => NOW, log: silentLogger, onLifecycle, officeNow })
   return manager
 }
 const mock = () => new ServerMockProvider({ timings: { thinkingMs: 100, workingMs: 200 } })
@@ -941,5 +946,286 @@ describe('routing without a fallback to the default provider', () => {
     store.commit({ ...store.state, tasks: [...store.state.tasks, running], agents: store.state.agents.map((a) => (a.id === 'agent-demo-pm' ? { ...a, currentTaskId: 'task-old2' } : a)) })
     expect(m.cancelTask('task-old2').ok).toBe(true)
     expect(mockP.cancels).toEqual([])
+  })
+})
+
+describe('holding tasks during breaks', () => {
+  let ws: ReturnType<typeof makeWorkspaceRoot>
+  let office = 0
+  beforeEach(() => { ws = makeWorkspaceRoot(['sandbox']); office = QUIET; officeNow = () => office })
+  afterEach(() => { ws.cleanup() })
+  const wsConfig = (extra: Record<string, unknown> = {}) => ({ workspaceRoot: ws.root, workspaces: [{ id: 'sandbox', relativePath: 'sandbox' }], ...extra }) as never
+  const DAY = jakartaDay(Date.parse('2026-11-09T12:00:00+07:00'))
+  const PM = 'agent-demo-pm'
+  /** 01:00 Jakarta: before every break of the day. */
+  const QUIET = dayStartMs(DAY) + 3600000
+  const eventOf = (id: string, kind: string, prayer?: string) => daySchedule(agent(id), DAY).find((e) => e.kind === kind && (prayer === undefined || e.prayer === prayer))!
+  const lunchOf = (id: string) => eventOf(id, 'lunch')
+  const duringLunch = (id = FORGE) => { office = lunchOf(id).startMs + 60000 }
+  const held = (m: TaskManager, id = FORGE, opts: { workspaceId?: string } = {}) => {
+    const r = m.startTask(id, INPUT, opts)
+    if (!r.ok) throw new Error(r.error)
+    return r.task.id
+  }
+  const pendingTasks = () => store.state.tasks.filter((t) => t.status === 'queued')
+
+  it('held during lunch: stays queued, records the hold, provider never started, no run, no timer', async () => {
+    const fake = new FakeProvider()
+    const m = make(fake)
+    duringLunch()
+    const r = m.startTask(FORGE, INPUT)
+    expect(r.ok && r.task).toMatchObject({ status: 'queued', hold: { label: 'On lunch', untilMs: lunchOf(FORGE).endMs, blockedBy: null } })
+    expect(vi.getTimerCount()).toBe(0)
+    await vi.advanceTimersByTimeAsync(BASE_CONFIG.taskTimeoutMs * 2)
+    expect(fake.starts).toEqual([])
+    expect(task(r.ok ? r.task.id : '').status).toBe('queued')
+    expect(agent().status).not.toBe('thinking')
+  })
+
+  it('reports task.held with the audit detail', () => {
+    const events: Array<Record<string, unknown>> = []
+    const m = make(new FakeProvider(), {}, (e) => events.push(e as Record<string, unknown>))
+    duringLunch()
+    m.startTask(FORGE, INPUT, { requestId: 'r1' })
+    expect(events).toEqual([expect.objectContaining({ action: 'task.held', actor: 'api', requestId: 'r1', detail: expect.stringContaining('until') })])
+  })
+
+  it('releases when the break ends and counts the timeout from then', async () => {
+    const fake = new FakeProvider()
+    const m = make(fake)
+    duringLunch()
+    const id = held(m)
+    await vi.advanceTimersByTimeAsync(BASE_CONFIG.taskTimeoutMs * 2)
+    office = lunchOf(FORGE).endMs
+    m.releaseHeldTasks()
+    await tick()
+    expect(fake.starts.map((x) => x.task.id)).toEqual([id])
+    expect(task(id)).toMatchObject({ status: 'starting', hold: null })
+    m.releaseHeldTasks()
+    await tick()
+    expect(fake.starts).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(BASE_CONFIG.taskTimeoutMs - 1)
+    expect(task(id).status).toBe('starting')
+    await vi.advanceTimersByTimeAsync(1)
+    expect(task(id)).toMatchObject({ status: 'failed', endedReason: 'timeout' })
+  })
+
+  it('coffee does not hold, and no officeNow means no holding', async () => {
+    const fake = new FakeProvider()
+    const m = make(fake)
+    const coffee = daySchedule(agent(), DAY).find((e) => e.kind === 'coffee')!
+    office = coffee.startMs + 60000
+    expect(holdAt(agent(), office)).toBeNull()
+    held(m)
+    await tick()
+    expect(fake.starts).toHaveLength(1)
+    manager = null
+    officeNow = undefined
+    const other = new FakeProvider()
+    const m2 = make(other)
+    duringLunch(PM)
+    held(m2, PM)
+    await tick()
+    expect(other.starts).toHaveLength(1)
+  })
+
+  it('a bad request during a break is still refused', () => {
+    const m = make(new FakeProvider({ kind: 'claude' }), wsConfig())
+    duringLunch()
+    expect(m.startTask(FORGE, INPUT)).toEqual({ ok: false, code: 'invalid', error: 'The claude runtime needs a workspace.' })
+    expect(m.startTask(FORGE, INPUT, { workspaceId: 'nope' })).toMatchObject({ ok: false, code: 'invalid' })
+    expect(m.startTask(FORGE, { title: ' ', description: '' }, { workspaceId: 'sandbox' })).toMatchObject({ ok: false, code: 'invalid' })
+    expect(store.state.tasks).toHaveLength(0)
+    held(m, FORGE, { workspaceId: 'sandbox' })
+    expect(m.startTask(FORGE, INPUT, { workspaceId: 'sandbox' })).toEqual({ ok: false, code: 'conflict', error: 'Forge already has an active task.' })
+  })
+
+  it('a held task does not count against the Claude limit', async () => {
+    const claude = new FakeProvider({ kind: 'claude' })
+    const m = make(claude, wsConfig({ maxConcurrentTasks: 1 }))
+    duringLunch()
+    held(m, FORGE, { workspaceId: 'sandbox' })
+    office = QUIET
+    expect(m.startTask(PM, INPUT, { workspaceId: 'sandbox' }).ok).toBe(true)
+    await tick()
+    expect(claude.starts).toHaveLength(1)
+  })
+
+  it('cancel a held task: cancelled, no provider cancel, and a later release starts nothing', async () => {
+    const fake = new FakeProvider()
+    const m = make(fake)
+    duringLunch()
+    const id = held(m)
+    expect(m.cancelTask(id).ok).toBe(true)
+    expect(task(id)).toMatchObject({ status: 'cancelled', hold: null })
+    expect(agent().status).toBe('idle')
+    expect(fake.cancels).toEqual([])
+    office = lunchOf(FORGE).endMs
+    m.releaseHeldTasks()
+    await tick()
+    expect(fake.starts).toEqual([])
+  })
+
+  it('remove an agent with a held task: gone, and a later release starts nothing', async () => {
+    const fake = new FakeProvider()
+    const m = make(fake)
+    duringLunch()
+    const lunchEnd = lunchOf(FORGE).endMs
+    held(m)
+    expect(m.removeAgent(FORGE).ok).toBe(true)
+    expect(store.state.tasks).toEqual([])
+    expect(fake.cancels).toEqual([])
+    office = lunchEnd
+    m.releaseHeldTasks()
+    await tick()
+    expect(fake.starts).toEqual([])
+  })
+
+  it('Start now starts through the normal path once, reported as api', async () => {
+    const fake = new FakeProvider()
+    const events: Array<Record<string, unknown>> = []
+    const m = make(fake, {}, (e) => events.push(e as Record<string, unknown>))
+    duringLunch()
+    const id = held(m)
+    const r = m.startHeldTask(id, { requestId: 'r2' })
+    expect(r.ok && r.task).toMatchObject({ status: 'starting', hold: null })
+    await tick()
+    expect(fake.starts).toHaveLength(1)
+    expect(events.at(-1)).toMatchObject({ action: 'task.start', actor: 'api', requestId: 'r2', taskId: id })
+    expect(m.startHeldTask(id)).toEqual({ ok: false, code: 'conflict', error: 'That task is not waiting for a break.' })
+    expect(m.startHeldTask('missing')).toEqual({ ok: false, code: 'not_found', error: 'Task not found.' })
+    manager = null
+  })
+
+  it('Start now on an unheld running task is a conflict', () => {
+    const m = make(new FakeProvider())
+    const id = held(m)
+    expect(m.startHeldTask(id)).toEqual({ ok: false, code: 'conflict', error: 'That task is not waiting for a break.' })
+  })
+
+  it('Start now at the Claude limit is a conflict and the task stays held', async () => {
+    const claude = new FakeProvider({ kind: 'claude' })
+    const m = make(claude, wsConfig({ maxConcurrentTasks: 1 }))
+    office = QUIET
+    held(m, PM, { workspaceId: 'sandbox' })
+    duringLunch()
+    const id = held(m, FORGE, { workspaceId: 'sandbox' })
+    expect(m.startHeldTask(id)).toEqual({ ok: false, code: 'conflict', error: 'A Claude task is already running, which is the limit. Wait for one to finish.' })
+    expect(task(id)).toMatchObject({ status: 'queued', hold: expect.any(Object) })
+    await tick()
+    expect(claude.starts).toHaveLength(1)
+  })
+
+  it('at the limit when the break ends: one starts, the other stays held and says why, then starts when the slot frees', async () => {
+    const claude = new FakeProvider({ kind: 'claude' })
+    const m = make(claude, wsConfig({ maxConcurrentTasks: 1 }))
+    office = Math.max(lunchOf(FORGE).startMs, lunchOf(PM).startMs) + 60000
+    expect(holdAt(agent(PM), office)).not.toBeNull()
+    expect(holdAt(agent(), office)).not.toBeNull()
+    const a = held(m, FORGE, { workspaceId: 'sandbox' })
+    const b = held(m, PM, { workspaceId: 'sandbox' })
+    office = Math.max(lunchOf(FORGE).endMs, lunchOf(PM).endMs)
+    expect(holdAt(agent(PM), office) ?? holdAt(agent(), office)).toBeNull()
+    m.releaseHeldTasks()
+    await tick()
+    expect(task(a).status).toBe('starting')
+    expect(task(b)).toMatchObject({ status: 'queued', hold: { blockedBy: 'Waiting for a free Claude slot. It starts as soon as one finishes.' } })
+    expect(claude.starts).toHaveLength(1)
+    claude.emit({ type: 'started', taskId: a, executionId: 'e' })
+    claude.emit({ type: 'completed', taskId: a, summary: 'done' })
+    m.releaseHeldTasks()
+    await tick()
+    expect(task(b).status).toBe('starting')
+    expect(claude.starts.map((x) => x.task.id)).toEqual([a, b])
+  })
+
+  it('turning prayer breaks off during a prayer hold starts the task at the next check', async () => {
+    const fake = new FakeProvider()
+    const m = make(fake)
+    const prayer = eventOf(FORGE, 'prayer', 'ashar')
+    office = prayer.startMs + 60000
+    const id = held(m)
+    expect(task(id).hold?.label).toBe('Praying')
+    store.commit({ ...store.state, agents: store.state.agents.map((a) => (a.id === FORGE ? { ...a, takesPrayerBreaks: false } : a)) })
+    m.releaseHeldTasks()
+    await tick()
+    expect(fake.starts.map((x) => x.task.id)).toEqual([id])
+  })
+
+  it('a hold that runs into another break keeps waiting with the new label and time', async () => {
+    const fake = new FakeProvider()
+    const m = make(fake)
+    office = eventOf(FORGE, 'prayer', 'ashar').startMs + 60000
+    const id = held(m)
+    const later = eventOf(FORGE, 'prayer', 'maghrib')
+    office = later.startMs + 60000
+    m.releaseHeldTasks()
+    await tick()
+    expect(task(id)).toMatchObject({ status: 'queued', hold: { label: 'Praying', untilMs: later.endMs, blockedBy: null } })
+    expect(fake.starts).toEqual([])
+  })
+
+  it('a workspace that vanished during the hold fails the task visibly without paths', async () => {
+    const claude = new FakeProvider({ kind: 'claude' })
+    const events: Array<Record<string, unknown>> = []
+    const m = make(claude, wsConfig(), (e) => events.push(e as Record<string, unknown>))
+    duringLunch()
+    const id = held(m, FORGE, { workspaceId: 'sandbox' })
+    rmSync(ws.path('sandbox'), { recursive: true })
+    office = lunchOf(FORGE).endMs
+    m.releaseHeldTasks()
+    await tick()
+    expect(task(id)).toMatchObject({ status: 'failed', errorMessage: 'Workspace "sandbox" is not available.', hold: null })
+    expect(task(id).errorMessage).not.toContain(ws.root)
+    expect(agent().status).toBe('error')
+    expect(claude.starts).toEqual([])
+    expect(events.at(-1)).toMatchObject({ action: 'workspace.rejected', taskId: id, workspaceId: 'sandbox' })
+  })
+
+  it('a runtime that became unavailable during the hold fails the task visibly', async () => {
+    const fake = new FakeProvider()
+    const m = make(fake)
+    duringLunch()
+    const id = held(m)
+    fake.availability = { available: false, reason: 'no key' }
+    office = lunchOf(FORGE).endMs
+    m.releaseHeldTasks()
+    await tick()
+    expect(task(id)).toMatchObject({ status: 'failed', errorMessage: 'The mock runtime is not available: no key.' })
+    expect(agent().status).toBe('error')
+    expect(fake.starts).toEqual([])
+  })
+
+  it('a held task whose runtime is no longer registered fails with a fixed sentence', () => {
+    const m = make(new FakeProvider())
+    duringLunch()
+    const id = held(m)
+    store.commit({ ...store.state, tasks: store.state.tasks.map((t) => (t.id === id ? { ...t, runtime: 'claude' as const } : t)) })
+    const r = m.startHeldTask(id)
+    expect(r.ok && r.task).toMatchObject({ status: 'failed', errorMessage: 'The "claude" runtime is not enabled on this server.' })
+  })
+
+  it('one bad task does not stop the others in a check, and it fails visibly instead of waiting silently', async () => {
+    const good = new FakeProvider()
+    const bad = new FakeProvider({ kind: 'claude' })
+    Object.defineProperty(bad, 'availability', { get: () => { throw new Error('boom') } })
+    const m = make(good, wsConfig(), undefined, undefined, [bad])
+    const at = Math.max(lunchOf(FORGE).startMs, lunchOf(PM).startMs) + 60000
+    office = at
+    // The bad task is queued by hand: its provider throws on every availability read.
+    const badId = 'task-bad'
+    const base = { title: 'T', description: '', status: 'queued' as const, createdAt: NOW, startedAt: null, completedAt: null, resultSummary: null, errorMessage: null, executionId: null, timeoutMs: 600000, workspaceId: 'sandbox', sessionId: null, endedReason: null, usage: null, pendingApproval: null }
+    const hold = { label: 'On lunch', untilMs: at, blockedBy: null }
+    store.commit({ ...store.state, tasks: [{ ...base, id: badId, agentId: FORGE, runtime: 'claude', hold }], agents: store.state.agents.map((a) => (a.id === FORGE ? { ...a, currentTaskId: badId } : a)) })
+    const goodId = held(m, PM)
+    office = Math.max(lunchOf(FORGE).endMs, lunchOf(PM).endMs)
+    m.releaseHeldTasks()
+    await tick()
+    expect(task(goodId).status).toBe('starting')
+    expect(task(badId)).toMatchObject({ status: 'failed', errorMessage: 'This task could not be started. Start it again.', hold: null })
+    expect(agent().status).toBe('error')
+    expect(pendingTasks()).toHaveLength(0)
+    m.releaseHeldTasks()
+    expect(task(badId).status).toBe('failed')
   })
 })

@@ -449,3 +449,37 @@ describe('loadWorkforce v2 browser data', () => {
     expect(r.state.agents).toHaveLength(6)
   })
 })
+
+describe('task hold', () => {
+  const HOLD = { label: 'On lunch', untilMs: 1_000_000, blockedBy: null }
+  function heldState() {
+    const r = assignTask(createDemoWorkforce(NOW), 'agent-demo-backend', { title: 'T', description: '' }, NOW, { hold: HOLD })
+    if (!r.ok) throw new Error(r.error)
+    return r.state
+  }
+  const raw = () => JSON.parse(serializeWorkforce(heldState()))
+  const lastTask = (o: any) => o.tasks[o.tasks.length - 1]
+  it('a saved task with no hold loads as null', () => {
+    const o = raw()
+    delete lastTask(o).hold
+    expect(parseWorkforce(o)?.tasks.at(-1)?.hold).toBeNull()
+  })
+  it('a valid hold round-trips, with or without blockedBy text', () => {
+    expect(roundTrip(heldState())?.tasks.at(-1)?.hold).toEqual(HOLD)
+    const o = raw()
+    lastTask(o).hold.blockedBy = 'Waiting for a free Claude slot.'
+    expect(parseWorkforce(o)?.tasks.at(-1)?.hold?.blockedBy).toBe('Waiting for a free Claude slot.')
+  })
+  it.each([
+    ['a hold on a task that is not queued', (t: any) => { t.status = 'failed'; t.endedReason = 'failed'; t.completedAt = NOW }],
+    ['a non-finite untilMs', (t: any) => { t.hold.untilMs = 'soon' }],
+    ['an empty label', (t: any) => { t.hold.label = '' }],
+    ['a non-text label', (t: any) => { t.hold.label = 5 }],
+    ['a non-text blockedBy', (t: any) => { t.hold.blockedBy = 5 }],
+    ['a hold that is not an object', (t: any) => { t.hold = 'lunch' }],
+  ])('rejects %s', (_name, mutate) => {
+    const o = raw()
+    mutate(lastTask(o))
+    expect(parseWorkforce(o)).toBeNull()
+  })
+})

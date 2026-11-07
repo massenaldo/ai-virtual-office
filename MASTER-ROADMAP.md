@@ -41,7 +41,7 @@ Statuses below were checked against the repository on 2026-11-06 (merge state, a
 | M3B.4 final blockers | Permission reconciliation, scaling test, workspace picker | Merged in #59; the full rerun on merged `main` is still open (to be done after the step 1 cleanup PR merges) |
 | M3B.5 | Claude Agent SDK runtime integration | **VERIFIED — REAL RUN** (not `COMPLETE`: acceptance items remain open) |
 | M3B.6 + M3C.1 | Agent identity and presence, plus seated characters (one release) | IN PROGRESS (slice 1: agent profile; seated characters built, owner's review pending) |
-| M3C.2 onward | Office daily life, then sandbox and a small M4, then M5–M7 as separate decisions | IN PROGRESS (M3C.2 slices 4 and 5: break areas and the daily routine built, owner's review pending; holding tasks during breaks next) |
+| M3C.2 onward | Office daily life, then sandbox and a small M4, then M5–M7 as separate decisions | IN PROGRESS: all slices built, owner's review pending (break areas, daily routine and holding tasks during breaks) |
 
 ### Important baseline caveat
 
@@ -382,7 +382,7 @@ One stylized character per agent, seated at its desk, whose animation follows th
 
 ### M3C.2 — Office daily life
 
-**Status:** PLANNED; depends on M3C.1.
+**Status:** IN PROGRESS: all slices built, owner's review pending. The owner still has to watch the characters, a day pass and a task wait out a break before this is complete.
 
 #### Objective
 Agents live a daily routine in the office, without any model calls.
@@ -407,10 +407,10 @@ The full design, including choices made while writing it, is in `docs/superpower
 - Walking and navigation/collision handling, moved here from the former M3C. Meeting animations stay with M5.
 
 #### Acceptance criteria
-- [ ] Agents follow the routine by the Jakarta clock without any model or API call.
-- [ ] A task given during a break waits until the break ends, and the break is visible.
-- [ ] Kitchen, dining and prayer areas exist and are editable like other rooms.
-- [ ] Walking and prayer: done, or explicitly deferred to the next update.
+- [x] Agents follow the routine by the Jakarta clock without any model or API call.
+- [x] A task given during a break waits until the break ends, and the break is visible. It also shows why and until when, can be cancelled or started at once with Start now, and fails visibly after a server restart.
+- [x] Kitchen, dining and prayer areas exist and are editable like other rooms.
+- [x] Walking and prayer: walking is done, and prayer is shown as an agent standing on a mat in the prayer room with the status Praying. Full prayer movements are deferred to the next update.
 - [ ] Movement does not break layout editing or object selection.
 
 ---

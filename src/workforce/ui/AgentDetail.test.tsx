@@ -5,10 +5,10 @@ import type { PermissionRuleView, RuntimeStatus } from '../api'
 import type { RuntimeEnvironment, WorkforceController } from '../controller'
 import { createDemoWorkforce } from '../demo'
 import { emptyPermissions, withLists, type PermissionsState } from '../permissions'
-import type { ToolReview } from '../types'
+import type { TaskHold, ToolReview } from '../types'
 import type { Workforce } from '../useWorkforce'
 import { applyRuntimeEvent, assignTask, markStarting, recoverInterruptedTasks } from '../operations'
-import AgentDetail, { TaskForm } from './AgentDetail'
+import AgentDetail, { startHeldNow, TaskForm } from './AgentDetail'
 import { createOfficeClock } from '../../office/officeClock'
 import { OfficeClockContext } from '../officeClockContext'
 
@@ -273,5 +273,46 @@ describe('AgentDetail today', () => {
     const withClock = (iso: string) => renderToStaticMarkup(<OfficeClockContext.Provider value={at(iso)}><AgentDetail workforce={{ state: prayerOn, permissions: null, actions: {} as WorkforceController } as unknown as Workforce} layout={layout} agent={prayerOn.agents.find((a) => a.id === agent.id)!} onBack={() => {}} onEdit={() => {}} onRemove={() => {}} onFocusDesk={() => {}}/></OfficeClockContext.Provider>)
     expect(withClock('2026-11-13T09:00:00+07:00')).toContain('Friday prayer and lunch')
     expect(withClock('2026-11-09T09:00:00+07:00')).not.toContain('Friday prayer and lunch')
+  })
+})
+
+describe('AgentDetail held task', () => {
+  const HOLD: TaskHold = { label: 'On lunch', untilMs: Date.parse('2026-11-09T13:00:00+07:00'), blockedBy: null }
+  const heldState = (hold = HOLD) => {
+    const r = assignTask(demo, agent.id, { title: 'Write notes', description: '' }, NOW, { hold })
+    if (!r.ok) throw new Error(r.error)
+    return r.state
+  }
+
+  it('shows the waiting text in a status region with Start now beside Cancel task', () => {
+    const h = view(heldState(), null)
+    expect(h).toContain('role="status"')
+    expect(h).toContain('On lunch · starts around 13:00')
+    expect(h).toContain('Start now</button>')
+    expect(h).toContain('Cancel task</button>')
+  })
+  it('shows why it still waits when blocked', () => {
+    expect(view(heldState({ ...HOLD, blockedBy: 'Waiting for a free Claude slot. It starts as soon as one finishes.' }), null)).toContain('Waiting for a free Claude slot. It starts as soon as one finishes.')
+  })
+  it('offers Clear error when the agent is in error and its task is only held', () => {
+    const s = heldState()
+    const errored = { ...s, agents: s.agents.map((a) => (a.id === agent.id ? { ...a, status: 'error' as const } : a)) }
+    expect(view(errored, null)).toContain('Clear error</button>')
+    expect(view(heldState(), null)).not.toContain('Clear error</button>')
+  })
+  it('an unheld running task has no Start now', () => {
+    const r = assignTask(demo, agent.id, { title: 'Write notes', description: '' }, NOW)
+    if (!r.ok) throw new Error(r.error)
+    const running = applyRuntimeEvent(markStarting(r.state, r.taskId, NOW), { type: 'started', taskId: r.taskId, executionId: 'e' }, NOW, 'mock')
+    const h = view(running, null)
+    expect(h).not.toContain('Start now')
+    expect(h).toContain('Cancel task</button>')
+  })
+  it('the Start now handler asks for exactly that task and returns the refusal text', async () => {
+    const calls: string[] = []
+    const actions = { startHeldTask: (id: string) => { calls.push(id); return { ok: false as const, error: 'A Claude task is already running, which is the limit. Wait for one to finish.' } } } as unknown as WorkforceController
+    expect(await startHeldNow(actions, 'tk')).toBe('A Claude task is already running, which is the limit. Wait for one to finish.')
+    expect(calls).toEqual(['tk'])
+    expect(await startHeldNow({ startHeldTask: () => ({ ok: true }) } as unknown as WorkforceController, 'tk')).toBeNull()
   })
 })

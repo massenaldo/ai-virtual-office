@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEMO_AGENTS, createDemoWorkforce } from '../src/workforce/demo'
-import { applyRuntimeEvent, assignTask, createAgent, emptyWorkforce, markStarting } from '../src/workforce/operations'
+import { applyRuntimeEvent, assignTask, createAgent, emptyWorkforce, HELD_RESTART_MESSAGE, markStarting } from '../src/workforce/operations'
 import { parseWorkforce, serializeWorkforce } from '../src/workforce/storage'
 import type { WorkforceState } from '../src/workforce/types'
 import { silentLogger } from './log'
@@ -141,6 +141,17 @@ describe('openWorkforceStore: existing data', () => {
     const store = open()
     const task = store.state.tasks[0]
     expect(task).toMatchObject({ status: 'failed', errorMessage: 'Interrupted by a server restart', endedReason: 'failed' })
+    expect(store.load.recovered).toBe(true)
+    expect(onDisk()?.tasks[0].status).toBe('failed')
+  })
+
+  it('reopens a held task as failed with the restart sentence, and the agent shows the error', () => {
+    const r = assignTask(createDemoWorkforce(NOW), 'agent-demo-backend', { title: 'Build API', description: '' }, NOW, { hold: { label: 'On lunch', untilMs: 1_000_000, blockedBy: null } })
+    if (!r.ok) throw new Error(r.error)
+    writeFileSync(file(), serializeWorkforce(r.state))
+    const store = open()
+    expect(store.state.tasks[0]).toMatchObject({ status: 'failed', errorMessage: HELD_RESTART_MESSAGE, hold: null })
+    expect(store.state.agents.find((a) => a.id === 'agent-demo-backend')?.status).toBe('error')
     expect(store.load.recovered).toBe(true)
     expect(onDisk()?.tasks[0].status).toBe('failed')
   })

@@ -38,6 +38,7 @@ const ROUTES: Array<{ action: string; call: (c: RemoteCommands) => unknown; meth
   { action: 'startTask (no workspace chosen)', call: (c) => c.startTask('a1', { title: 'T', description: 'D' }, { workspaceId: null }), method: 'POST', path: '/api/agents/a1/tasks', body: '{"title":"T","description":"D"}' },
   { action: 'clearAgentError', call: (c) => c.clearAgentError('a 1'), method: 'POST', path: '/api/agents/a%201/clear-error' },
   { action: 'cancelTask', call: (c) => c.cancelTask('t1'), method: 'POST', path: '/api/tasks/t1/cancel' },
+  { action: 'startHeldTask', call: (c) => c.startHeldTask('t1'), method: 'POST', path: '/api/tasks/t1/start-now' },
   { action: 'decideApproval', call: (c) => c.decideApproval('t1', 'ap1', 'deny'), method: 'POST', path: '/api/tasks/t1/approval', body: '{"approvalId":"ap1","decision":"deny"}' },
   { action: 'decideApproval (with digest)', call: (c) => c.decideApproval('t1', 'ap1', 'approve', 'ef'.repeat(32)), method: 'POST', path: '/api/tasks/t1/approval', body: `{"approvalId":"ap1","decision":"approve","digest":"${'ef'.repeat(32)}"}` },
   { action: 'decideApproval (scoped)', call: (c) => c.decideApproval('t1', 'ap1', 'allow_task', 'ef'.repeat(32)), method: 'POST', path: '/api/tasks/t1/approval', body: `{"approvalId":"ap1","decision":"allow_task","digest":"${'ef'.repeat(32)}"}` },

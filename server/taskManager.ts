@@ -1,7 +1,8 @@
 import { realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { activeTaskFor, applyRuntimeEvent, assignTask, cancelTask as forceCancel, decideApproval as recordDecision, isActiveTask, markStarting, removeAgent as dropAgent, requestCancel, timeOutTask, validateTaskInput, type TaskInput } from '../src/workforce/operations'
+import { activeTaskFor, applyRuntimeEvent, assignTask, cancelTask as forceCancel, decideApproval as recordDecision, isActiveTask, failHeldTask, markStarting, removeAgent as dropAgent, requestCancel, setTaskHold, timeOutTask, validateTaskInput, type TaskInput } from '../src/workforce/operations'
 import { createId } from '../src/layout/operations'
+import { holdAt } from '../src/office/schedule'
 import type { RuntimeEvent } from '../src/workforce/runtime/types'
 import type { AgentTask, ApprovalDecision, TaskRuntime, WorkforceState } from '../src/workforce/types'
 import type { ServerConfig } from './config'
@@ -23,7 +24,7 @@ export type ApprovalChoice = ApprovalDecision | 'allow_once' | 'allow_task' | 'a
 export type ManagerError = { ok: false; code: 'not_found' | 'invalid' | 'conflict' | 'unavailable' | 'bad_request'; error: string }
 export type ManagerResult<T = Record<never, never>> = ({ ok: true } & T) | ManagerError
 
-export type LifecycleAction = 'task.start' | 'task.cancel' | 'task.force_cancelled' | 'task.timeout' | 'approval.requested' | 'approval.decided' | 'approval.timeout' | 'tool.allowed' | 'tool.denied' | 'tool.asked' | 'tool.stale' | 'workspace.rejected' | 'runtime.note' | 'permission.granted' | 'permission.denied' | 'permission.revoked' | 'permission.expired' | 'permission.used'
+export type LifecycleAction = 'task.start' | 'task.held' | 'task.cancel' | 'task.force_cancelled' | 'task.timeout' | 'approval.requested' | 'approval.decided' | 'approval.timeout' | 'tool.allowed' | 'tool.denied' | 'tool.asked' | 'tool.stale' | 'workspace.rejected' | 'runtime.note' | 'permission.granted' | 'permission.denied' | 'permission.revoked' | 'permission.expired' | 'permission.used'
 
 export type LifecycleActor = 'api' | 'system' | 'runtime'
 
@@ -55,6 +56,8 @@ export type TaskManagerOptions = {
   permissions: PermissionStore
   config: Pick<ServerConfig, 'taskTimeoutMs' | 'cancelGraceMs' | 'approvalTimeoutMs' | 'maxMessageBytes' | 'maxTaskOutputBytes' | 'workspaceRoot' | 'workspaces'> & { dataDir?: string; /** Claude runtime: true only when the owner set ALLOW_BROAD_WRITE_SCOPES=yes. Absent means off. */ allowBroadWriteScopes?: boolean; /** Claude runtime only: how many tasks may run at once. Absent means no limit. */ maxConcurrentTasks?: number }
   now: () => string
+  /** The office clock in ms, which breaks hold tasks by. Absent means no holding. */
+  officeNow?: () => number
   log: Logger
   /** Audit seam: called for each lifecycle step the manager takes. */
   onLifecycle?: (e: LifecycleEvent) => void
@@ -64,6 +67,9 @@ export type TaskManagerOptions = {
 export const MAX_QUEUED_APPROVALS = 8
 
 export const APPROVAL_TIMEOUT_MESSAGE = (ms: number) => `No approval decision within ${Math.round(ms / 1000)} s`
+export const HELD_START_FAILED = 'This task could not be started. Start it again.'
+export const CLAUDE_SLOT_SENTENCE = 'Waiting for a free Claude slot. It starts as soon as one finishes.'
+const claudeLimitMessage = (limit: number) => `${limit === 1 ? 'A Claude task is' : `${limit} Claude tasks are`} already running, which is the limit. Wait for one to finish.`
 export const unavailableMessage = (kind: TaskRuntime, reason: string) => `The ${kind} runtime is not available: ${reason}.`
 
 type Timer = ReturnType<typeof setTimeout>
@@ -88,6 +94,7 @@ export class TaskManager {
   private readonly policy: ToolPolicy
   private readonly permissions: PermissionStore
   private readonly now: () => string
+  private readonly officeNow: (() => number) | undefined
   private readonly log: Logger
   private readonly onLifecycle: TaskManagerOptions['onLifecycle']
   private readonly runs = new Map<string, Run>()
@@ -101,6 +108,7 @@ export class TaskManager {
     this.policy = opts.policy
     this.permissions = opts.permissions
     this.now = opts.now
+    this.officeNow = opts.officeNow
     this.log = opts.log
     this.onLifecycle = opts.onLifecycle
     this.defaultKind = opts.provider.kind
@@ -175,22 +183,90 @@ export class TaskManager {
     }
     if (kind === 'claude' && workspace === null) return { ok: false, code: 'invalid', error: 'The claude runtime needs a workspace.' }
     if (activeTaskFor(this.state, agentId)) return { ok: false, code: 'conflict', error: `${agent.name} already has an active task.` }
-    // Each claude task is a child process and a paid model session, so they are counted; the mock is not.
+    // A task given during lunch or prayer waits: it is queued with its hold, and no run, timer or provider call exists yet.
+    const hold = this.officeNow ? holdAt(agent, this.officeNow()) : null
+    // Each claude task is a child process and a paid model session, so they are counted; the mock is not. A held task uses no slot.
     const limit = this.config.maxConcurrentTasks
-    if (kind === 'claude' && limit !== undefined && this.claudeRuns() >= limit) return { ok: false, code: 'conflict', error: `${limit === 1 ? 'A Claude task is' : `${limit} Claude tasks are`} already running, which is the limit. Wait for one to finish.` }
+    if (!hold && kind === 'claude' && limit !== undefined && this.claudeRuns() >= limit) return { ok: false, code: 'conflict', error: claudeLimitMessage(limit) }
 
-    const assigned = assignTask(this.state, agentId, input, this.now(), { runtime: kind, timeoutMs: this.config.taskTimeoutMs, workspaceId: workspace?.id ?? null })
+    const assigned = assignTask(this.state, agentId, input, this.now(), { runtime: kind, timeoutMs: this.config.taskTimeoutMs, workspaceId: workspace?.id ?? null, hold: hold && { ...hold, blockedBy: null } })
     if (!assigned.ok) return { ok: false, code: 'invalid', error: assigned.error }
     this.store.commit(assigned.state)
-    this.store.commit(markStarting(this.state, assigned.taskId, this.now()))
+    if (hold) {
+      const held = this.task(assigned.taskId)!
+      this.report('task.held', held, { actor: actorFor(opts), requestId: opts.requestId, detail: `until ${new Date(hold.untilMs).toISOString()}` })
+      return { ok: true, task: held }
+    }
+    return { ok: true, task: this.begin(assigned.taskId, provider, workspace, opts) }
+  }
 
+  /** The one way a task starts, held or not: starting, run, timer, report, launch. The timeout counts from here. */
+  private begin(taskId: string, provider: ServerRuntimeProvider, workspace: ResolvedWorkspace | null, opts: CallOptions): AgentTask {
+    this.store.commit(markStarting(this.state, taskId, this.now()))
     const run: Run = { provider, abort: new AbortController(), taskTimer: null, approvalTimer: null, approvalId: null, graceTimer: null, outputBytes: 0, outputClosed: false, launched: false, workspace, toolWaiter: null, toolQueue: [] }
-    this.runs.set(assigned.taskId, run)
-    run.taskTimer = setTimeout(() => this.onTaskTimeout(assigned.taskId), this.config.taskTimeoutMs)
-    const task = this.task(assigned.taskId)!
+    this.runs.set(taskId, run)
+    run.taskTimer = setTimeout(() => this.onTaskTimeout(taskId), this.config.taskTimeoutMs)
+    const task = this.task(taskId)!
     this.report('task.start', task, { actor: actorFor(opts), requestId: opts.requestId })
-    void this.launch(assigned.taskId)
-    return { ok: true, task }
+    void this.launch(taskId)
+    return task
+  }
+
+  /**
+   * Starts a held task if it still can. Things change while it waits, so the runtime and workspace are checked again: a task
+   * that can no longer start fails with a fixed sentence. At the Claude limit it stays held.
+   */
+  private tryStartHeld(task: AgentTask, opts: CallOptions): { kind: 'done' } | { kind: 'blocked'; message: string } {
+    const fail = (message: string) => { this.store.commit(failHeldTask(this.state, task.id, this.now(), message)); return { kind: 'done' as const } }
+    const provider = this.providers.get(task.runtime)
+    if (!provider) return fail(`The "${task.runtime}" runtime is not enabled on this server.`)
+    const availability = provider.availability
+    if (!availability.available) return fail(unavailableMessage(task.runtime, availability.reason))
+    let workspace: ResolvedWorkspace | null = null
+    if (task.workspaceId !== null) {
+      const resolved = resolveWorkspace(this.config, task.workspaceId)
+      if (!resolved.ok) {
+        this.onLifecycle?.({ action: 'workspace.rejected', actor: actorFor(opts), taskId: task.id, agentId: task.agentId, workspaceId: task.workspaceId, reason: resolved.reason, ...(opts.requestId !== undefined ? { requestId: opts.requestId } : {}) })
+        return fail(WORKSPACE_COPY(resolved.reason, task.workspaceId))
+      }
+      workspace = resolved.workspace
+    }
+    const limit = this.config.maxConcurrentTasks
+    if (task.runtime === 'claude' && limit !== undefined && this.claudeRuns() >= limit) return { kind: 'blocked', message: claudeLimitMessage(limit) }
+    this.begin(task.id, provider, workspace, opts)
+    return { kind: 'done' }
+  }
+
+  /** "Start now": ends the hold and starts the task through the normal path. A hard failure is still a result: the failed task. */
+  startHeldTask(taskId: string, opts: CallOptions = {}): ManagerResult<{ task: AgentTask }> {
+    const task = this.task(taskId)
+    if (!task) return { ok: false, code: 'not_found', error: 'Task not found.' }
+    if (task.status !== 'queued' || !task.hold) return { ok: false, code: 'conflict', error: 'That task is not waiting for a break.' }
+    const r = this.tryStartHeld(task, opts)
+    if (r.kind === 'blocked') return { ok: false, code: 'conflict', error: r.message }
+    return { ok: true, task: this.task(taskId) ?? task }
+  }
+
+  /** The periodic check: each held task, oldest first, either keeps waiting (with its current break) or starts. One bad task never stops the rest. */
+  releaseHeldTasks(): void {
+    for (const id of this.state.tasks.filter((t) => t.status === 'queued' && t.hold).map((t) => t.id)) {
+      try {
+        const task = this.task(id)
+        const agent = task && this.state.agents.find((a) => a.id === task.agentId)
+        if (!task || !task.hold || task.status !== 'queued' || !agent) continue
+        const hold = this.officeNow ? holdAt(agent, this.officeNow()) : null
+        if (hold) {
+          this.store.commit(setTaskHold(this.state, id, { ...hold, blockedBy: null }))
+          continue
+        }
+        const r = this.tryStartHeld(task, {})
+        if (r.kind === 'blocked') this.store.commit(setTaskHold(this.state, id, { ...task.hold, blockedBy: CLAUDE_SLOT_SENTENCE }))
+      } catch (error) {
+        this.log.error(`Could not release held task ${id}`, error)
+        // A task must never keep waiting silently because of a repeating error.
+        try { this.store.commit(failHeldTask(this.state, id, this.now(), HELD_START_FAILED)) } catch (again) { this.log.error(`Could not fail held task ${id}`, again) }
+      }
+    }
   }
 
   /** Runs that are on the claude runtime: the only ones the concurrency limit counts. */
@@ -399,7 +475,8 @@ export class TaskManager {
     if (cancelledTaskId) {
       if (activeTask) this.report('task.cancel', activeTask, { actor: actorFor(opts), requestId: opts.requestId, detail: 'agent removed' })
       const run = this.runs.get(cancelledTaskId)
-      if (activeTask) this.providerOf(activeTask)?.cancel(cancelledTaskId)
+      // A held task has no run and nothing in any runtime to cancel.
+      if (activeTask && (run || !activeTask.hold)) this.providerOf(activeTask)?.cancel(cancelledTaskId)
       run?.abort.abort()
       this.finalize(cancelledTaskId)
     }

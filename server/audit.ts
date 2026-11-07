@@ -15,7 +15,7 @@ export const AUDIT_FIELD_MAX = 64
 export const REJECTED_PER_MINUTE = 30
 
 export type AuditAction =
-  | 'config.startup' | 'task.start' | 'task.cancel' | 'task.force_cancelled' | 'task.timeout'
+  | 'config.startup' | 'task.start' | 'task.held' | 'task.cancel' | 'task.force_cancelled' | 'task.timeout'
   | 'approval.requested' | 'approval.decided' | 'approval.timeout'
   | 'tool.allowed' | 'tool.denied' | 'tool.asked' | 'tool.stale' | 'workspace.rejected' | 'request.rejected' | 'runtime.note'
   | 'permission.granted' | 'permission.denied' | 'permission.revoked' | 'permission.expired' | 'permission.used' | 'permission.ended'

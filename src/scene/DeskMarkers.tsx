@@ -48,7 +48,7 @@ export function DeskMarkerTracker({ markers, presence, floorPlan, registry }: { 
       spot.x = p ? p.x : m.x
       spot.z = p ? p.z : m.z
       spot.seated = p ? p.pose === 'sit' : m.seated
-      const text = markerText(m.label, p ? p.label : null, m.phase)
+      const text = markerText(m.label, p ? p.label : null, m.phase, m.held)
       const bubble = !!p?.bubble
       const last = written.current.get(m.id)
       if (!last || last.text !== text || last.bubble !== bubble) {

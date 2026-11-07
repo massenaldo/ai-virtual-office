@@ -1,7 +1,7 @@
 import { isAgentDepartmentId } from '../layout/catalog'
 import { createDemoWorkforce } from './demo'
 import { emptyWorkforce, isActiveTask, MODEL_NAME_PATTERN, recoverInterruptedTasks } from './operations'
-import { ACTIVITY_LIMIT, AGENT_DESCRIPTION_MAX, AGENT_INSTRUCTIONS_MAX, REVIEW_MAX_BYTES, WORKFORCE_SCHEMA_VERSION, type ActivityType, type Agent, type AgentActivity, type AgentStatus, type AgentTask, type PendingApproval, type ToolReview, type TaskEndReason, type TaskRuntime, type TaskStatus, type WorkforceState, validUsage } from './types'
+import { ACTIVITY_LIMIT, AGENT_DESCRIPTION_MAX, AGENT_INSTRUCTIONS_MAX, REVIEW_MAX_BYTES, WORKFORCE_SCHEMA_VERSION, type ActivityType, type Agent, type AgentActivity, type AgentStatus, type AgentTask, type PendingApproval, type ToolReview, type TaskEndReason, type TaskHold, type TaskRuntime, type TaskStatus, type WorkforceState, validUsage } from './types'
 
 // Kept apart from the layout key so agent changes can never overwrite the saved office.
 export const WORKFORCE_STORAGE_KEY = 'ai-virtual-office:workforce:v3'
@@ -33,7 +33,7 @@ export function serializeWorkforce(s: WorkforceState): string {
   return JSON.stringify({
     schemaVersion: s.schemaVersion,
     agents: s.agents.map((a) => ({ id: a.id, name: a.name, role: a.role, department: a.department, deskId: a.deskId, status: a.status, currentTaskId: a.currentTaskId, runtimeMode: a.runtimeMode, demo: a.demo, createdAt: a.createdAt, lastActivityAt: a.lastActivityAt, description: a.description, instructions: a.instructions, model: a.model, takesPrayerBreaks: a.takesPrayerBreaks, sourceFile: a.sourceFile })),
-    tasks: s.tasks.map((t) => ({ id: t.id, agentId: t.agentId, title: t.title, description: t.description, status: t.status, createdAt: t.createdAt, startedAt: t.startedAt, completedAt: t.completedAt, resultSummary: t.resultSummary, errorMessage: t.errorMessage, executionId: t.executionId, timeoutMs: t.timeoutMs, runtime: t.runtime, workspaceId: t.workspaceId, sessionId: t.sessionId, endedReason: t.endedReason, usage: t.usage && { turns: t.usage.turns, costUsd: t.usage.costUsd }, pendingApproval: t.pendingApproval && { id: t.pendingApproval.id, tool: t.pendingApproval.tool, summary: t.pendingApproval.summary, requestedAt: t.pendingApproval.requestedAt, digest: t.pendingApproval.digest, review: t.pendingApproval.review, onceOnly: t.pendingApproval.onceOnly } })),
+    tasks: s.tasks.map((t) => ({ id: t.id, agentId: t.agentId, title: t.title, description: t.description, status: t.status, createdAt: t.createdAt, startedAt: t.startedAt, completedAt: t.completedAt, resultSummary: t.resultSummary, errorMessage: t.errorMessage, executionId: t.executionId, timeoutMs: t.timeoutMs, runtime: t.runtime, workspaceId: t.workspaceId, sessionId: t.sessionId, endedReason: t.endedReason, usage: t.usage && { turns: t.usage.turns, costUsd: t.usage.costUsd }, pendingApproval: t.pendingApproval && { id: t.pendingApproval.id, tool: t.pendingApproval.tool, summary: t.pendingApproval.summary, requestedAt: t.pendingApproval.requestedAt, digest: t.pendingApproval.digest, review: t.pendingApproval.review, onceOnly: t.pendingApproval.onceOnly }, hold: t.hold && { label: t.hold.label, untilMs: t.hold.untilMs, blockedBy: t.hold.blockedBy } })),
     activities: s.activities.slice(-ACTIVITY_LIMIT).map((a) => ({
       id: a.id, agentId: a.agentId, taskId: a.taskId, type: a.type, message: a.message, timestamp: a.timestamp, source: a.source,
       ...(a.type === 'desk-assigned' ? { deskId: a.deskId } : {}),
@@ -80,6 +80,11 @@ function parseApproval(v: unknown): PendingApproval | null {
   return { id: v.id, tool: v.tool, summary: v.summary, requestedAt: v.requestedAt, digest, review, onceOnly: v.onceOnly === true }
 }
 
+function parseHold(v: unknown): TaskHold | null {
+  if (!isObject(v) || !isText(v.label) || typeof v.untilMs !== 'number' || !Number.isFinite(v.untilMs) || !isTextOrNull(v.blockedBy)) return null
+  return { label: v.label, untilMs: v.untilMs, blockedBy: v.blockedBy }
+}
+
 function parseTask(v: unknown): AgentTask | null {
   if (!isObject(v) || !isText(v.id) || !isText(v.agentId) || !isText(v.title) || typeof v.description !== 'string' || !isOneOf(v.status, TASK_STATUSES)) return null
   if (!isTime(v.createdAt) || !isTimeOrNull(v.startedAt) || !isTimeOrNull(v.completedAt) || !isTextOrNull(v.resultSummary) || !isTextOrNull(v.errorMessage) || !isTextOrNull(v.executionId)) return null
@@ -90,6 +95,9 @@ function parseTask(v: unknown): AgentTask | null {
   // Saved before usage existed: no field means none reported. Otherwise exactly the two numbers, in bounds.
   const usage = v.usage === undefined || v.usage === null ? null : validUsage(v.usage)
   if (v.usage !== undefined && v.usage !== null && (usage === null || Object.keys(v.usage as object).length !== 2)) return null
+  // Saved before holds existed: no field means not held. Set only on a queued task.
+  const hold = v.hold === undefined || v.hold === null ? null : parseHold(v.hold)
+  if (v.hold !== undefined && v.hold !== null && (hold === null || v.status !== 'queued')) return null
   const status = v.status
   const active = status === 'queued' || status === 'starting' || status === 'running' || status === 'waiting_for_approval' || status === 'cancelling'
   // An end reason exactly when the task has ended; a pending approval exactly while it waits for one.
@@ -99,7 +107,7 @@ function parseTask(v: unknown): AgentTask | null {
   return {
     id: v.id, agentId: v.agentId, title: v.title, description: v.description, status, createdAt: v.createdAt, startedAt: v.startedAt, completedAt: v.completedAt,
     resultSummary: v.resultSummary, errorMessage: v.errorMessage, executionId: v.executionId, timeoutMs: v.timeoutMs as number | null, runtime: v.runtime, workspaceId, sessionId: v.sessionId,
-    endedReason: v.endedReason as TaskEndReason | null, usage, pendingApproval,
+    endedReason: v.endedReason as TaskEndReason | null, usage, pendingApproval, hold,
   }
 }
 

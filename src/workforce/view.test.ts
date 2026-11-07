@@ -116,7 +116,7 @@ describe('deskMarkers', () => {
   it('lists agents on existing desks', () => {
     const markers = deskMarkers(layout, demo, null)
     expect(markers).toHaveLength(6)
-    expect(markers.find((m) => m.id === 'agent-demo-pm')).toEqual({ id: 'agent-demo-pm', label: 'Atlas', status: 'idle', x: -2.7, z: -4.4, selected: false, phase: null })
+    expect(markers.find((m) => m.id === 'agent-demo-pm')).toEqual({ id: 'agent-demo-pm', label: 'Atlas', status: 'idle', x: -2.7, z: -3.84, seated: true, selected: false, phase: null })
     const selected = deskMarkers(layout, demo, 'agent-demo-pm')
     expect(selected.filter((m) => m.selected).map((m) => m.id)).toEqual(['agent-demo-pm'])
   })

@@ -1,5 +1,6 @@
 import { DEPARTMENTS } from '../layout/catalog'
 import type { OfficeLayout } from '../layout/types'
+import { seatForDesk } from '../layout/seats'
 import type { DeskMarker } from '../scene/labels'
 import type { PermissionRuleView } from './api'
 import type { PermissionsState } from './permissions'
@@ -83,11 +84,14 @@ export function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 }
 
-/** One marker per agent whose desk exists in the layout, in layout order. Missing desks get none (the panel flags them). */
+/** One marker per agent whose desk exists in the layout, in layout order, placed at the seat. Missing desks get none (the panel flags them). */
 export function deskMarkers(layout: OfficeLayout, s: WorkforceState, selectedAgentId: string | null): DeskMarker[] {
   return layout.furniture.flatMap((f) => {
     const agent = f.type === 'desk' ? agentAtDesk(s, f.id) : undefined
-    return agent ? [{ id: agent.id, label: agent.name, status: agent.status, x: f.x, z: f.z, selected: agent.id === selectedAgentId, phase: markerPhase(activeTaskFor(s, agent.id)) }] : []
+    if (!agent) return []
+    // The label sits over the seat, not the desk, so it stays above the character.
+    const seat = seatForDesk(layout, f)
+    return [{ id: agent.id, label: agent.name, status: agent.status, x: seat.x, z: seat.z, seated: seat.seated, selected: agent.id === selectedAgentId, phase: markerPhase(activeTaskFor(s, agent.id)) }]
   })
 }
 

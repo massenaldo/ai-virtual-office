@@ -1,7 +1,7 @@
 import { isAgentDepartmentId } from '../layout/catalog'
 import { createId } from '../layout/operations'
 import type { RuntimeEvent } from './runtime/types'
-import { ACTIVITY_LIMIT, WORKFORCE_SCHEMA_VERSION, type ActivitySource, type Agent, type AgentActivity, type AgentDepartment, type AgentStatus, type AgentTask, type ApprovalDecision, type RuntimeMode, type TaskRuntime, type TaskStatus, type WorkforceState, AGENT_DESCRIPTION_MAX, AGENT_INSTRUCTIONS_MAX, validUsage } from './types'
+import { ACTIVITY_LIMIT, WORKFORCE_SCHEMA_VERSION, type ActivitySource, type Agent, type AgentActivity, type AgentDepartment, type AgentStatus, type AgentTask, type ApprovalDecision, type RuntimeMode, type TaskHold, type TaskRuntime, type TaskStatus, type WorkforceState, AGENT_DESCRIPTION_MAX, AGENT_INSTRUCTIONS_MAX, validUsage } from './types'
 
 // Every operation returns a new state, or the same reference when nothing changed.
 
@@ -20,6 +20,7 @@ const CONTROL_CHARS = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/
 // A name or role is one line of text: no control character at all, not even newline or tab.
 const LINE_CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/
 export const INTERRUPTED_MESSAGE = 'Interrupted by page reload (simulated run)'
+export const HELD_RESTART_MESSAGE = 'The server restarted while this task was waiting. Start it again.'
 export const UNKNOWN_ERROR = 'The runtime reported an error without a message.'
 export const TIMEOUT_MESSAGE = (timeoutMs: number) => `Timed out after ${Math.round(timeoutMs / 1000)} s`
 
@@ -106,7 +107,8 @@ export function updateAgent(s: WorkforceState, id: string, patch: Partial<AgentI
 export function clearAgentError(s: WorkforceState, id: string, now: string): OpResult {
   const prev = s.agents.find((a) => a.id === id)
   if (!prev) return { ok: false, error: 'Agent not found.' }
-  if (prev.status !== 'error' || activeTaskFor(s, id)) return { ok: true, state: s }
+  const active = activeTaskFor(s, id)
+  if (prev.status !== 'error' || (active && !active.hold)) return { ok: true, state: s }
   const state = addActivity(replaceAgent(s, { ...prev, status: 'idle' }), { type: 'agent-updated', agentId: id, taskId: null, message: `Cleared the error on "${prev.name}"`, timestamp: now, source: sourceOf(prev) })
   return { ok: true, state }
 }
@@ -146,16 +148,16 @@ export function activeTaskFor(s: WorkforceState, agentId: string): AgentTask | u
 }
 
 /** Creates a queued task for the agent. One active task per agent; markStarting and the runtime start it separately. */
-export function assignTask(s: WorkforceState, agentId: string, input: TaskInput, now: string, opts: { runtime?: TaskRuntime; timeoutMs?: number | null; workspaceId?: string | null } = {}): OpResult<{ taskId: string }> {
+export function assignTask(s: WorkforceState, agentId: string, input: TaskInput, now: string, opts: { runtime?: TaskRuntime; timeoutMs?: number | null; workspaceId?: string | null; /** Set when the task waits for a break; it stays queued. */ hold?: TaskHold | null } = {}): OpResult<{ taskId: string }> {
   const agent = s.agents.find((a) => a.id === agentId)
   if (!agent) return { ok: false, error: 'Agent not found.' }
   const error = validateTaskInput(input)
   if (error) return { ok: false, error }
   if (activeTaskFor(s, agentId)) return { ok: false, error: `${agent.name} already has an active task.` }
   const taskId = createId('task', new Set(s.tasks.map((t) => t.id)))
-  const task: AgentTask = { id: taskId, agentId, title: input.title.trim(), description: input.description.trim(), status: 'queued', createdAt: now, startedAt: null, completedAt: null, resultSummary: null, errorMessage: null, executionId: null, timeoutMs: opts.timeoutMs ?? null, runtime: opts.runtime ?? 'mock', workspaceId: opts.workspaceId ?? null, sessionId: null, endedReason: null, usage: null, pendingApproval: null }
+  const task: AgentTask = { id: taskId, agentId, title: input.title.trim(), description: input.description.trim(), status: 'queued', createdAt: now, startedAt: null, completedAt: null, resultSummary: null, errorMessage: null, executionId: null, timeoutMs: opts.timeoutMs ?? null, runtime: opts.runtime ?? 'mock', workspaceId: opts.workspaceId ?? null, sessionId: null, endedReason: null, usage: null, pendingApproval: null, hold: opts.hold ?? null }
   const next = replaceAgent({ ...s, tasks: [...s.tasks, task] }, { ...agent, currentTaskId: taskId })
-  const state = addActivity(next, { type: 'task-assigned', agentId, taskId, message: `Assigned "${task.title}"`, timestamp: now, source: sourceOfTask(task) })
+  const state = addActivity(next, { type: 'task-assigned', agentId, taskId, message: task.hold ? `Assigned "${task.title}"; it starts after the break` : `Assigned "${task.title}"`, timestamp: now, source: sourceOfTask(task) })
   return { ok: true, state, taskId }
 }
 
@@ -192,10 +194,10 @@ function transitionFor(event: RuntimeEvent, task: AgentTask, now: string, source
       return { task: { status: 'completed', completedAt: now, resultSummary: event.summary || null, endedReason: 'completed', usage: validUsage(event.usage), pendingApproval: null }, agentStatus: 'idle', activity: { ...base, type: 'task-completed', message: event.summary } }
     case 'failed': {
       const error = event.error || UNKNOWN_ERROR
-      return { task: { status: 'failed', completedAt: now, errorMessage: error, endedReason: 'failed', usage: validUsage(event.usage), pendingApproval: null }, agentStatus: 'error', activity: { ...base, type: 'task-failed', message: error } }
+      return { task: { status: 'failed', completedAt: now, errorMessage: error, endedReason: 'failed', usage: validUsage(event.usage), pendingApproval: null, hold: null }, agentStatus: 'error', activity: { ...base, type: 'task-failed', message: error } }
     }
     case 'cancelled':
-      return { task: { status: 'cancelled', completedAt: now, endedReason: 'cancelled', pendingApproval: null }, agentStatus: 'idle', activity: { ...base, type: 'task-cancelled', message: `Cancelled "${task.title}"` } }
+      return { task: { status: 'cancelled', completedAt: now, endedReason: 'cancelled', pendingApproval: null, hold: null }, agentStatus: 'idle', activity: { ...base, type: 'task-cancelled', message: `Cancelled "${task.title}"` } }
   }
 }
 
@@ -228,9 +230,25 @@ export function applyRuntimeEvent(s: WorkforceState, event: RuntimeEvent, now: s
 export function markStarting(s: WorkforceState, taskId: string, now: string): WorkforceState {
   const found = taskWithAgent(s, taskId)
   if (!found || found.task.status !== 'queued') return s
-  const tasks = s.tasks.map((t) => (t.id === taskId ? { ...t, status: 'starting' as const } : t))
+  // A task that waited for a break starts its clock now, so the walk home is timed from the release.
+  const tasks = s.tasks.map((t) => (t.id === taskId ? { ...t, status: 'starting' as const, hold: null, ...(t.hold ? { startedAt: now } : {}) } : t))
   const agents = s.agents.map((a) => (a.id === found.agent.id ? { ...a, status: 'thinking' as const, lastActivityAt: now } : a))
   return { ...s, tasks, agents }
+}
+
+/** Changes a queued held task's hold, with no activity. Anything else, or an equal hold, returns the same state. */
+export function setTaskHold(s: WorkforceState, taskId: string, hold: TaskHold): WorkforceState {
+  const task = s.tasks.find((t) => t.id === taskId)
+  if (!task || task.status !== 'queued' || !task.hold) return s
+  if (task.hold.label === hold.label && task.hold.untilMs === hold.untilMs && task.hold.blockedBy === hold.blockedBy) return s
+  return { ...s, tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, hold } : t)) }
+}
+
+/** A held task that can no longer start fails visibly through the usual failed transition. */
+export function failHeldTask(s: WorkforceState, taskId: string, now: string, message: string): WorkforceState {
+  const task = s.tasks.find((t) => t.id === taskId)
+  if (!task || task.status !== 'queued' || !task.hold) return s
+  return applyTransition(s, task, transitionFor({ type: 'failed', taskId, error: message }, task, now, sourceOfTask(task)))
 }
 
 /** A queued task has nothing running and ends at once; a started one waits in cancelling for the runtime to confirm. */
@@ -263,7 +281,7 @@ export function timeOutTask(s: WorkforceState, taskId: string, now: string, sour
   const { task } = found
   const error = task.timeoutMs === null ? 'Timed out' : TIMEOUT_MESSAGE(task.timeoutMs)
   return applyTransition(s, task, {
-    task: { status: 'failed', completedAt: now, errorMessage: error, endedReason: 'timeout', pendingApproval: null },
+    task: { status: 'failed', completedAt: now, errorMessage: error, endedReason: 'timeout', pendingApproval: null, hold: null },
     agentStatus: 'error',
     activity: { agentId: task.agentId, taskId, timestamp: now, source, type: 'task-timed-out', message: error },
   })
@@ -275,11 +293,12 @@ export function cancelTask(s: WorkforceState, taskId: string, now: string): Work
   return found ? applyRuntimeEvent(s, { type: 'cancelled', taskId }, now, sourceOfTask(found.task)) : s
 }
 
-/** After a reload or restart no runtime is running any more: started work is marked failed with the given message, a pending cancel completes, and queued tasks stay. */
+/** After a reload or restart no runtime is running any more: started work is marked failed with the given message, a pending cancel completes, a held task fails with HELD_RESTART_MESSAGE, and other queued tasks stay. */
 export function recoverInterruptedTasks(s: WorkforceState, now: string, message: string = INTERRUPTED_MESSAGE): WorkforceState {
   return s.tasks.reduce((state, task) => {
     const source = sourceOfTask(task)
     if (task.status === 'cancelling') return applyTransition(state, task, transitionFor({ type: 'cancelled', taskId: task.id }, task, now, source))
+    if (task.status === 'queued' && task.hold) return applyTransition(state, task, transitionFor({ type: 'failed', taskId: task.id, error: HELD_RESTART_MESSAGE }, task, now, source))
     if (task.status !== 'starting' && task.status !== 'running' && task.status !== 'waiting_for_approval') return state
     return applyTransition(state, task, transitionFor({ type: 'failed', taskId: task.id, error: message }, task, now, source))
   }, s)

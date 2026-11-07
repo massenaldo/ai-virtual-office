@@ -62,7 +62,10 @@ export function validUsage(v: unknown): TaskUsage | null {
   return { turns, costUsd }
 }
 
-export type AgentTask = { id: string; agentId: string; title: string; description: string; status: TaskStatus; createdAt: string; startedAt: string | null; completedAt: string | null; resultSummary: string | null; errorMessage: string | null; executionId: string | null; timeoutMs: number | null; runtime: TaskRuntime; workspaceId: string | null; sessionId: string | null; endedReason: TaskEndReason | null; usage: TaskUsage | null; pendingApproval: PendingApproval | null }
+/** Why a queued task is still waiting for a break to end. `untilMs` is office time; `blockedBy` says why it is still waiting after the break, or null. */
+export type TaskHold = { label: string; /** Office time, ms. */ untilMs: number; /** Why it is still waiting after its break, or null. */ blockedBy: string | null }
+
+export type AgentTask = { id: string; agentId: string; title: string; description: string; status: TaskStatus; createdAt: string; startedAt: string | null; completedAt: string | null; resultSummary: string | null; errorMessage: string | null; executionId: string | null; timeoutMs: number | null; runtime: TaskRuntime; workspaceId: string | null; sessionId: string | null; endedReason: TaskEndReason | null; usage: TaskUsage | null; pendingApproval: PendingApproval | null; /** Set only while the task is queued and waiting for a break to end. */ hold: TaskHold | null }
 
 type ActivityBase = { id: string; agentId: string; taskId: string | null; message: string; timestamp: string; source: ActivitySource }
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { activeTaskFor, clearAgentError, MODEL_NAME_PATTERN, validateAgentInput, addActivity, applyRuntimeEvent, assignDesk, assignTask, cancelTask, createAgent, decideApproval, emptyWorkforce, INTERRUPTED_MESSAGE, markStarting, recoverInterruptedTasks, removeAgent, requestCancel, timeOutTask, TIMEOUT_MESSAGE, updateAgent, type AgentInput } from './operations'
+import { activeTaskFor, clearAgentError, MODEL_NAME_PATTERN, validateAgentInput, addActivity, applyRuntimeEvent, assignDesk, assignTask, cancelTask, createAgent, decideApproval, emptyWorkforce, failHeldTask, HELD_RESTART_MESSAGE, INTERRUPTED_MESSAGE, markStarting, recoverInterruptedTasks, removeAgent, requestCancel, setTaskHold, timeOutTask, TIMEOUT_MESSAGE, updateAgent, type AgentInput } from './operations'
 import { parseWorkforce, serializeWorkforce } from './storage'
-import type { AgentTask, WorkforceState } from './types'
+import type { AgentTask, TaskHold, WorkforceState } from './types'
 
 const NOW = '2026-10-30T09:00:00.000Z'
 const LATER = '2026-10-30T09:05:00.000Z'
@@ -14,7 +14,7 @@ function withAgent(input: AgentInput = NOVA, s: WorkforceState = emptyWorkforce(
 }
 
 function task(agentId: string, patch: Partial<AgentTask> = {}): AgentTask {
-  return { id: 'task-1', agentId, title: 'Draft sprint plan', description: '', status: 'running', createdAt: NOW, startedAt: NOW, completedAt: null, resultSummary: null, errorMessage: null, executionId: 'exec-1', timeoutMs: null, runtime: 'mock', workspaceId: null, sessionId: null, endedReason: null, usage: null, pendingApproval: null, ...patch }
+  return { id: 'task-1', agentId, title: 'Draft sprint plan', description: '', status: 'running', createdAt: NOW, startedAt: NOW, completedAt: null, resultSummary: null, errorMessage: null, executionId: 'exec-1', timeoutMs: null, runtime: 'mock', workspaceId: null, sessionId: null, endedReason: null, usage: null, pendingApproval: null, hold: null, ...patch }
 }
 
 describe('createAgent', () => {
@@ -623,5 +623,92 @@ describe('validateAgentInput name and role safety', () => {
       expect(validateAgentInput({ ...base, role: bad })).toMatch(/role/i)
     }
     expect(validateAgentInput(base)).toBeNull()
+  })
+})
+
+describe('held tasks', () => {
+  const HOLD: TaskHold = { label: 'On lunch', untilMs: 1_000_000, blockedBy: null }
+  function held() {
+    const { state, id } = withAgent()
+    const r = assignTask(state, id, { title: 'Write notes', description: '' }, NOW, { hold: HOLD })
+    if (!r.ok) throw new Error(r.error)
+    return { state: r.state, id, taskId: r.taskId }
+  }
+  it('assignTask stores the hold, stays queued and leaves the agent alone', () => {
+    const { state, taskId } = held()
+    expect(state.tasks[0]).toMatchObject({ id: taskId, status: 'queued', hold: HOLD })
+    expect(state.agents[0].status).toBe('idle')
+    expect(state.activities.at(-1)?.message).toBe('Assigned "Write notes"; it starts after the break')
+  })
+  it('an unheld task has hold null', () => {
+    const { state, id } = withAgent()
+    const r = assignTask(state, id, { title: 'T', description: '' }, NOW)
+    if (!r.ok) throw new Error(r.error)
+    expect(r.state.tasks[0].hold).toBeNull()
+    expect(r.state.activities.at(-1)?.message).toBe('Assigned "T"')
+  })
+  it('markStarting clears the hold and sets startedAt; an unheld task keeps startedAt null', () => {
+    const { state, taskId } = held()
+    expect(markStarting(state, taskId, LATER).tasks[0]).toMatchObject({ status: 'starting', hold: null, startedAt: LATER })
+    const { state: s2, id } = withAgent()
+    const r = assignTask(s2, id, { title: 'T', description: '' }, NOW)
+    if (!r.ok) throw new Error(r.error)
+    expect(markStarting(r.state, r.taskId, LATER).tasks[0]).toMatchObject({ startedAt: null, hold: null })
+  })
+  it('cancelling a held task clears the hold and frees the agent', () => {
+    const { state, taskId } = held()
+    const next = requestCancel(state, taskId, LATER, 'mock')
+    expect(next.tasks[0]).toMatchObject({ status: 'cancelled', hold: null })
+    expect(next.agents[0].status).toBe('idle')
+  })
+  it('failHeldTask fails a held task with the message and the agent shows the error', () => {
+    const { state, taskId } = held()
+    const next = failHeldTask(state, taskId, LATER, 'Nope')
+    expect(next.tasks[0]).toMatchObject({ status: 'failed', errorMessage: 'Nope', hold: null })
+    expect(next.agents[0].status).toBe('error')
+  })
+  it('failHeldTask returns the same state for an unheld or unknown task', () => {
+    const { state, id } = withAgent()
+    const r = assignTask(state, id, { title: 'T', description: '' }, NOW)
+    if (!r.ok) throw new Error(r.error)
+    expect(failHeldTask(r.state, r.taskId, LATER, 'x')).toBe(r.state)
+    expect(failHeldTask(r.state, 'missing', LATER, 'x')).toBe(r.state)
+  })
+  it('setTaskHold changes the hold with no activity, and ignores an equal one', () => {
+    const { state, taskId } = held()
+    expect(setTaskHold(state, taskId, { ...HOLD })).toBe(state)
+    const next = setTaskHold(state, taskId, { label: 'Praying', untilMs: 2_000_000, blockedBy: 'Waiting' })
+    expect(next.tasks[0].hold).toEqual({ label: 'Praying', untilMs: 2_000_000, blockedBy: 'Waiting' })
+    expect(next.activities).toEqual(state.activities)
+    expect(setTaskHold(markStarting(state, taskId, LATER), taskId, HOLD)).toEqual(markStarting(state, taskId, LATER))
+  })
+  it('setTaskHold ignores a task that is not held', () => {
+    const { state, id } = withAgent()
+    const r = assignTask(state, id, { title: 'T', description: '' }, NOW)
+    if (!r.ok) throw new Error(r.error)
+    expect(setTaskHold(r.state, r.taskId, HOLD)).toBe(r.state)
+  })
+  it('recovery fails a held task with the restart sentence and leaves an unheld queued task', () => {
+    expect(HELD_RESTART_MESSAGE).toBe('The server restarted while this task was waiting. Start it again.')
+    const { state, taskId } = held()
+    const next = recoverInterruptedTasks(state, LATER, 'Something else')
+    expect(next.tasks[0]).toMatchObject({ id: taskId, status: 'failed', errorMessage: HELD_RESTART_MESSAGE, hold: null })
+    expect(next.agents[0].status).toBe('error')
+    const { state: s2, id } = withAgent()
+    const r = assignTask(s2, id, { title: 'T', description: '' }, NOW)
+    if (!r.ok) throw new Error(r.error)
+    expect(recoverInterruptedTasks(r.state, LATER)).toBe(r.state)
+  })
+  it('clearAgentError clears an errored agent that has a held task, but not one with another active task', () => {
+    const { state, id } = held()
+    const errored = { ...state, agents: state.agents.map((a) => ({ ...a, status: 'error' as const })) }
+    const r = clearAgentError(errored, id, LATER)
+    if (!r.ok) throw new Error(r.error)
+    expect(r.state.agents[0].status).toBe('idle')
+    const { state: s2, id: id2 } = withAgent()
+    const a = assignTask(s2, id2, { title: 'T', description: '' }, NOW)
+    if (!a.ok) throw new Error(a.error)
+    const busy = { ...markStarting(a.state, a.taskId, NOW), agents: a.state.agents.map((x) => ({ ...x, status: 'error' as const })) }
+    expect(clearAgentError(busy, id2, LATER)).toEqual({ ok: true, state: busy })
   })
 })

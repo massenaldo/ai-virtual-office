@@ -1,5 +1,5 @@
 import { stableHash } from './hash'
-import { dayStartMs, type JakartaDay } from './jakartaClock'
+import { dayStartMs, jakartaDay, type JakartaDay } from './jakartaClock'
 import { prayerTimes, type PrayerName } from './prayerTimes'
 
 export type BreakKind = 'coffee' | 'lunch' | 'prayer' | 'friday'
@@ -61,4 +61,17 @@ export function daySchedule(agent: { id: string; takesPrayerBreaks: boolean }, d
     if (!holding.some((e) => start < e.endMs && end > e.startMs)) events.push({ kind: 'coffee', prayer: null, startMs: start, endMs: end, holds: false, label: 'Coffee' })
   })
   return events.sort((a, b) => a.startMs - b.startMs)
+}
+
+/**
+ * The break that holds a new task at `nowMs`, or null. `untilMs` runs through holding events that start where it ends, so a
+ * task never starts between two back-to-back breaks.
+ */
+export function holdAt(agent: { id: string; takesPrayerBreaks: boolean }, nowMs: number): { label: string; untilMs: number } | null {
+  const holding = daySchedule(agent, jakartaDay(nowMs)).filter((e) => e.holds)
+  const current = holding.find((e) => e.startMs <= nowMs && nowMs < e.endMs)
+  if (!current) return null
+  let untilMs = current.endMs
+  for (const e of holding) if (e.startMs > current.startMs && e.startMs <= untilMs) untilMs = Math.max(untilMs, e.endMs)
+  return { label: current.label, untilMs }
 }

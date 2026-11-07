@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { dayStartMs, jakartaDay, type JakartaDay } from './jakartaClock'
-import { daySchedule } from './schedule'
+import { daySchedule, holdAt } from './schedule'
 
 const DAY_MS = 86400000
 const MON = jakartaDay(Date.parse('2026-11-09T12:00:00+07:00'))
@@ -91,5 +91,45 @@ describe('daySchedule', () => {
   it('takes nothing but the id and the prayer setting', () => {
     const extra = { id: 'agent-1', takesPrayerBreaks: true, name: 'Someone', status: 'working', deskId: 'desk-01' }
     expect(daySchedule(extra, MON)).toEqual(daySchedule(on, MON))
+  })
+})
+
+describe('holdAt', () => {
+  const lunchOf = (agent: { id: string; takesPrayerBreaks: boolean }, day: JakartaDay) => daySchedule(agent, day).find((e) => e.kind === 'lunch')!
+  it('is null during coffee, just before lunch, and at the end of a holding event with nothing after it', () => {
+    const coffee = daySchedule(off, MON).find((e) => e.kind === 'coffee')!
+    expect(holdAt(off, coffee.startMs + 60000)).toBeNull()
+    const lunch = lunchOf(off, MON)
+    expect(holdAt(off, lunch.startMs - 1)).toBeNull()
+    expect(holdAt(off, lunch.endMs)).toBeNull()
+  })
+  it('during lunch gives its label and end', () => {
+    const lunch = lunchOf(off, MON)
+    expect(holdAt(off, lunch.startMs)).toEqual({ label: 'On lunch', untilMs: lunch.endMs })
+    expect(holdAt(off, lunch.endMs - 1)).toEqual({ label: 'On lunch', untilMs: lunch.endMs })
+  })
+  it('runs through a holding event that starts where the first one ends', () => {
+    let found = false
+    for (let d = 0; d < 60 && !found; d++) {
+      const day = dayAfter(MON, d)
+      for (let i = 0; i < 20 && !found; i++) {
+        const agent = { id: `agent-${i}`, takesPrayerBreaks: true }
+        const holding = daySchedule(agent, day).filter((e) => e.holds)
+        const k = holding.findIndex((e, j) => e.kind === 'prayer' && j + 1 < holding.length && holding[j + 1].startMs <= e.endMs)
+        if (k < 0) continue
+        found = true
+        expect(holdAt(agent, holding[k].startMs)).toEqual({ label: 'Praying', untilMs: holding[k + 1].endMs })
+      }
+    }
+    expect(found).toBe(true)
+  })
+  it('is null at prayer time with the setting off', () => {
+    const prayer = daySchedule(on, MON).find((e) => e.kind === 'prayer')!
+    expect(holdAt(on, prayer.startMs)).not.toBeNull()
+    expect(holdAt(off, prayer.startMs)).toBeNull()
+  })
+  it('on a Friday at 12:00 Jakarta waits for 13:00 under the Friday label', () => {
+    const noon = dayStartMs(FRI) + 12 * 3600000
+    expect(holdAt(on, noon)).toEqual({ label: 'Friday prayer and lunch', untilMs: dayStartMs(FRI) + 13 * 3600000 })
   })
 })

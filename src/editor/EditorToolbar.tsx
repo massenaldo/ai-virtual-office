@@ -8,6 +8,8 @@ export type EditorToolbarProps = {
   canUndo: boolean
   canRedo: boolean
   status: SaveStatus
+  /** False while the layout is loading or the server is unreachable: editing and saving are off. */
+  ready: boolean
   onToggleEditing(): void
   onFloorPlan(value: boolean): void
   onToggleSnap(): void
@@ -21,7 +23,7 @@ export type EditorToolbarProps = {
 export default function EditorToolbar(p: EditorToolbarProps) {
   const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl+'
   return <div className="scene-controls">
-    <button className={p.editing ? 'view-button editing' : 'view-button'} onClick={p.onToggleEditing} aria-pressed={p.editing}><PencilRuler size={15}/> {p.editing ? 'Done editing' : 'Edit layout'}</button>
+    <button className={p.editing ? 'view-button editing' : 'view-button'} onClick={p.onToggleEditing} aria-pressed={p.editing} disabled={!p.ready}><PencilRuler size={15}/> {p.editing ? 'Done editing' : 'Edit layout'}</button>
     <span className="toolbar-divider"/>
     <button className={!p.floorPlan ? 'view-button selected' : 'view-button'} onClick={() => p.onFloorPlan(false)}><Boxes size={15}/> 3D view</button>
     <button className={p.floorPlan ? 'view-button selected' : 'view-button'} onClick={() => p.onFloorPlan(true)}><LayoutGrid size={15}/> Floor plan</button>
@@ -34,7 +36,7 @@ export default function EditorToolbar(p: EditorToolbarProps) {
     </>}
     <span className="toolbar-divider"/>
     <span className={`save-chip ${p.status}`} role="status"><span className="save-chip-dot"/>{SAVE_STATUS_LABEL[p.status]}</span>
-    <button className="view-button" onClick={p.onSave} disabled={p.status === 'saved'}><Save size={15}/> Save</button>
+    <button className="view-button" onClick={() => p.onSave()} disabled={p.status === 'saved' || !p.ready}><Save size={15}/> Save</button>
     <button className="square-button" onClick={p.onResetView} title="Reset view" aria-label="Reset view"><LocateFixed size={16}/></button>
   </div>
 }

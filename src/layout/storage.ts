@@ -6,7 +6,8 @@ export const LAYOUT_STORAGE_KEY = 'ai-virtual-office:layout:v1'
 export const LAYOUT_BACKUP_KEY = 'ai-virtual-office:layout:v1:backup'
 
 type KV = Pick<Storage, 'getItem' | 'setItem'>
-export type LoadProblem = 'missing' | 'corrupt' | 'unsupported-version' | 'unavailable'
+/** 'server-unreachable' is set by the editor, never by loadLayout. */
+export type LoadProblem = 'missing' | 'corrupt' | 'unsupported-version' | 'unavailable' | 'server-unreachable'
 export type LoadResult = { layout: OfficeLayout; savedJson: string | null; problem: LoadProblem | null }
 
 const ROTATIONS = [0, 90, 180, 270]

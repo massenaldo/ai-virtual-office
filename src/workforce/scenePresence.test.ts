@@ -31,6 +31,15 @@ describe('createPresenceSource', () => {
     expect(at('coffee')?.label).toBe('x')
   })
 
+  it('a routine that throws leaves everyone at their seat, not a broken 3D view', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const source = createPresenceSource({ presenceAt: () => { throw new Error('boom') } }, clock(1), [character('a')])
+    expect(source('a')).toEqual({ x: 1, z: 2, rotation: 90, pose: 'sit', activity: 'idle', label: null, bubble: false })
+    source('a')
+    expect(warn).toHaveBeenCalledTimes(1)
+    warn.mockRestore()
+  })
+
   it('is null for an agent the routine does not know', () => {
     expect(createPresenceSource({ presenceAt: () => null }, clock(0), [character('a')])('a')).toBeNull()
   })

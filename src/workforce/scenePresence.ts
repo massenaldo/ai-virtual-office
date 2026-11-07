@@ -29,16 +29,26 @@ export function createPresenceSource(
     if (!out) reused.set(id, (out = { x: 0, z: 0, rotation: 0, pose: 'sit', activity: 'idle', label: null, bubble: false }))
     return out
   }
+  const atSeat = (id: string) => {
+    const c = seats.get(id)
+    if (!c) return null
+    const out = slot(id)
+    out.x = c.x; out.z = c.z; out.rotation = c.rotation; out.pose = c.seated ? 'sit' : 'stand'
+    out.activity = 'idle'; out.label = null; out.bubble = false
+    return out
+  }
+  let warned = false
   return (id) => {
-    if (!routine || !clock.routine) {
-      const c = seats.get(id)
-      if (!c) return null
-      const out = slot(id)
-      out.x = c.x; out.z = c.z; out.rotation = c.rotation; out.pose = c.seated ? 'sit' : 'stand'
-      out.activity = 'idle'; out.label = null; out.bubble = false
-      return out
+    if (!routine || !clock.routine) return atSeat(id)
+    let p: Presence | null
+    try {
+      p = routine.presenceAt(id, clock.now())
+    } catch (error) {
+      // This runs inside the render loop, so a bug in the routine must cost the routine, never the 3D view.
+      if (!warned) console.warn('The office routine failed, so agents stay at their desks.', error)
+      warned = true
+      return atSeat(id)
     }
-    const p = routine.presenceAt(id, clock.now())
     if (!p) return null
     const out = slot(id)
     out.x = p.x; out.z = p.z; out.rotation = p.rotation; out.pose = p.pose

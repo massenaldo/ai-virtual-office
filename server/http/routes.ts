@@ -2,6 +2,8 @@ import { errorSentence } from '../errorCodes'
 import type { ServerResponse } from 'node:http'
 import pkg from '../../package.json' with { type: 'json' }
 import type { AgentFilePreview, AgentFilesResponse, AgentImportField, AgentPermissionsRevokedResponse, PermissionResponse, PermissionsResponse, StateResponse, WorkspacesResponse } from '../../src/workforce/api'
+import type { LayoutResponse } from '../../src/layout/api'
+import { parseLayout } from '../../src/layout/storage'
 import { restoreDemoAgents } from '../../src/workforce/demo'
 import { assignDesk, clearAgentError, createAgent, updateAgent } from '../../src/workforce/operations'
 import type { ServerConfig } from '../config'
@@ -13,8 +15,10 @@ import type { PermissionStore } from '../permissions/store'
 import type { GrantError } from '../permissions/types'
 import { toRuleView } from '../permissions/view'
 import type { WorkforceStore } from '../store'
+import type { LayoutStore } from '../layoutStore'
+import { readJsonBody } from './body'
 import type { ManagerError, TaskManager } from '../taskManager'
-import { parseApproval, parseCreateAgent, parseCreatePermission, parseCreateTask, parseDesk, parseImportAgent, parsePatchAgent, parseReimportAgent } from './inputs'
+import { parseApproval, parseCreateAgent, parseCreatePermission, parseCreateTask, parseDesk, parseImportAgent, parsePatchAgent, parsePutLayout, parseReimportAgent } from './inputs'
 import { listAgentFileNames, readAgentFile, readAgentFiles, type AgentFile } from '../agentImport/reader'
 import { suggestedRole } from '../agentImport/parse'
 import { resolveWorkspace, WORKSPACE_ID_RE } from '../workspaces'
@@ -26,6 +30,7 @@ import { eventsRoute } from './sse'
 export type RouteDeps = {
   config: ServerConfig
   store: WorkforceStore
+  layoutStore: LayoutStore
   events: EventLog
   manager: TaskManager
   permissions: PermissionStore
@@ -56,6 +61,9 @@ const GRANT_COPY: Record<GrantError, string> = {
 
 const HISTORY_LIMIT = 200
 
+/** A layout is far larger than the 64 KB default body: rooms and furniture add up. */
+export const MAX_LAYOUT_BODY_BYTES = 524288
+
 const IMPORT_FIELDS: readonly AgentImportField[] = ['description', 'model', 'instructions']
 /** The digest prefix and file name that identify what was imported; never the content. */
 const DIGEST_PREFIX = 12
@@ -72,7 +80,7 @@ function must<T extends { ok: boolean }>(r: T): Extract<T, { ok: true }> {
 }
 
 export function createRoutes(deps: RouteDeps): Route[] {
-  const { config, store, events, manager, permissions, now, startedAt } = deps
+  const { config, store, layoutStore, events, manager, permissions, now, startedAt } = deps
   const agent = (id: string) => store.state.agents.find((a) => a.id === id)
 
   /** The workspace for this request, resolved afresh. One fixed sentence for every reason, so nothing about the server's folders leaks. */
@@ -118,6 +126,26 @@ export function createRoutes(deps: RouteDeps): Route[] {
       handler: () => {
         const body: StateResponse = { state: store.state, lastEventId: events.lastEventId, loadProblem: store.load.problem, preserved: store.load.preserved, saveError: store.saveError === null ? null : errorSentence(store.saveError) }
         return { status: 200, body }
+      },
+    },
+    {
+      method: 'GET',
+      path: '/api/layout',
+      handler: () => {
+        const body: LayoutResponse = { layout: layoutStore.layout, loadProblem: layoutStore.problem }
+        return { status: 200, body }
+      },
+    },
+    {
+      method: 'PUT',
+      path: '/api/layout',
+      // Reads its own body: a layout may be larger than the default limit.
+      handler: async ({ req }) => {
+        const layout = parseLayout(parsePutLayout(await readJsonBody(req, MAX_LAYOUT_BODY_BYTES)))
+        if (!layout) throw new HttpError(422, 'That is not a valid office layout.')
+        const r = layoutStore.save(layout)
+        if (!r.ok) throw new HttpError(500, errorSentence(r.error))
+        return { status: 200, body: { ok: true } }
       },
     },
     {

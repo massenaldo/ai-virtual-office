@@ -117,3 +117,9 @@ export function parseCreatePermission(b: Body): CreatePermissionRequest {
   if (b.scope !== 'global' && b.scope !== 'agent') throw bad('"scope" must be "global" or "agent".')
   return { scope: b.scope, effect: text(b, 'effect') as CreatePermissionRequest['effect'], tool: text(b, 'tool'), agentId: optionalText(b, 'agentId'), pathPattern: optionalText(b, 'pathPattern'), workspaceId: optionalText(b, 'workspaceId'), expiresAt: optionalText(b, 'expiresAt'), reason: optionalText(b, 'reason') }
 }
+
+/** The layout is checked by parseLayout; this only closes the list of fields. */
+export function parsePutLayout(b: Body): unknown {
+  allow(b, ['layout'])
+  return b.layout
+}

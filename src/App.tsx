@@ -21,12 +21,14 @@ const LOAD_PROBLEM_MESSAGE = {
   corrupt: "Your saved layout couldn't be loaded, so the default layout is shown. The saved data is kept and backed up before your next save.",
   'unsupported-version': 'Your saved layout comes from a newer version of the app, so the default layout is shown. The saved data is kept and backed up before your next save.',
   unavailable: 'Browser storage is unavailable, so layout changes cannot be saved in this window.',
+  'server-unreachable': "Can't reach the server, so this may not be the latest saved layout. Editing is off until it reconnects.",
   missing: '',
 }
 
 
 export default function App() {
-  const editor = useLayoutEditor()
+  const workforce = useWorkforce()
+  const editor = useLayoutEditor(workforce?.connection === 'live')
   const { state, dispatch } = editor
   const [floorPlan, setFloorPlan] = useState(false)
   const [showTeams, setShowTeams] = useState(true)
@@ -37,7 +39,6 @@ export default function App() {
   const [agentsOpen, setAgentsOpen] = useState(false)
   const [agentView, setAgentView] = useState<WorkforceView>({ kind: 'list' })
   const [focus, setFocus] = useState<FocusRequest | null>(null)
-  const workforce = useWorkforce()
   const closeAgents = () => { setAgentsOpen(false); setAgentView({ kind: 'list' }) }
   const summary = summarizeLayout(state.layout)
   const issues = useMemo(() => findIssues(state.layout), [state.layout])
@@ -50,6 +51,7 @@ export default function App() {
     message: 'This replaces the current rooms and furniture with the default office. You can undo it until you leave the page.',
     actions: [{ label: 'Reset layout', tone: 'danger', onClick: editor.resetToDefault }],
   })
+  const ready = editor.phase === 'ready'
   const unsaved = hasUnsavedChanges(editor.status)
   // Leaving edit mode never silently drops work: unsaved edits get an explicit save / discard / keep editing choice.
   const requestLeaveEditing = (then: () => void = () => {}) => {
@@ -61,7 +63,7 @@ export default function App() {
       cancelLabel: 'Keep editing',
       actions: [
         { label: 'Discard changes', tone: 'danger', onClick: () => { editor.discardToSaved(); leaveEditing() } },
-        { label: 'Save and exit', tone: 'primary', onClick: () => { if (editor.save()) leaveEditing() } },
+        { label: 'Save and exit', tone: 'primary', onClick: async () => { if (await editor.save()) leaveEditing() } },
       ],
     })
   }
@@ -108,15 +110,15 @@ export default function App() {
     </aside>
     <section className="main-area">
       <header className="topbar"><div className="breadcrumbs">Workspace <span>/</span> <strong>Office Designer</strong></div><div className="top-actions"><span className="save-status"><span className="status-dot"/> Local workspace</span><button className="icon-button" title="Help"><CircleHelp size={18}/></button></div></header>
-      <section className="page-heading"><div><div className="eyebrow">YOUR DIGITAL HEADQUARTERS</div><h1>Office Designer</h1><p>Shape the place where your AI engineering team will work.</p></div><button className="primary-button" onClick={editor.save} disabled={editor.status === 'saved'}><Save size={16}/>{editor.status === 'saved' ? 'Saved' : 'Save layout'}</button></section>
+      <section className="page-heading"><div><div className="eyebrow">YOUR DIGITAL HEADQUARTERS</div><h1>Office Designer</h1><p>Shape the place where your AI engineering team will work.</p></div><button className="primary-button" onClick={() => void editor.save()} disabled={editor.status === 'saved' || !ready}><Save size={16}/>{editor.status === 'saved' ? 'Saved' : 'Save layout'}</button></section>
       <section className={editing ? 'scene-card editing' : agentsOpen ? 'scene-card workforce' : 'scene-card'}><div className="scene-toolbar"><div className="scene-title"><span className="live-dot"/><strong>HQ — Main Office</strong><span className="scene-separator">/</span><span>{floorPlan ? 'Floor plan' : '3D overview'}{editing && ' · Editing'}{agentsOpen && ' · AI agents'}</span></div>
         <EditorToolbar editing={editing} floorPlan={floorPlan} snap={snap} canUndo={canUndo(state)} canRedo={canRedo(state)} status={editor.status}
           onToggleEditing={toggleEditing} onFloorPlan={setFloorPlan} onToggleSnap={() => setSnap(!snap)} onUndo={undo} onRedo={redo}
-          onSave={editor.save} onResetLayout={confirmResetLayout} onResetView={() => setViewKey((k) => k + 1)}/></div>
+          onSave={() => void editor.save()} ready={ready} onResetLayout={confirmResetLayout} onResetView={() => setViewKey((k) => k + 1)}/></div>
         <div className="editor-body">
         {editing && <OutlinerPanel layout={state.layout} selection={state.selection} issues={issues} onSelect={actions.select} onAddRoom={actions.addRoom} onAddFurniture={actions.addFurniture}/>}
-        <div className="canvas-wrap"><OfficeScene layout={state.layout} floorPlan={floorPlan} viewKey={viewKey} editing={editing} selection={state.selection} issues={issues} onSelect={actions.select} onTransformStart={actions.transformStart} onTransform={actions.transform} onTransformEnd={actions.transformEnd}
-          markers={markers} highlightDeskId={highlightDeskId} onDeskClick={onDeskClick} focus={focus}/>
+        <div className="canvas-wrap">{ready || editor.phase === 'offline' ? <OfficeScene layout={state.layout} floorPlan={floorPlan} viewKey={viewKey} editing={editing} selection={state.selection} issues={issues} onSelect={actions.select} onTransformStart={actions.transformStart} onTransform={actions.transform} onTransformEnd={actions.transformEnd}
+          markers={markers} highlightDeskId={highlightDeskId} onDeskClick={onDeskClick} focus={focus}/> : <div className="scene-hint" role="status">Loading office…</div>}
           {editor.loadProblem && <div className="scene-notice" role="alert"><AlertTriangle size={15}/><span>{LOAD_PROBLEM_MESSAGE[editor.loadProblem]}</span><button className="notice-close" onClick={editor.dismissLoadProblem} aria-label="Dismiss"><X size={14}/></button></div>}
           {editor.status === 'save-failed' && <div className="scene-notice error" role="alert"><AlertTriangle size={15}/><span>Save failed: {editor.saveError} Your changes are still here; try saving again.</span></div>}
           {workforce?.loadProblem && <div className="scene-notice" role="alert"><AlertTriangle size={15}/><span>{workforceNotice(workforce.loadProblem, workforce.preserved)}</span><button className="notice-close" onClick={workforce.actions.dismissLoadProblem} aria-label="Dismiss"><X size={14}/></button></div>}

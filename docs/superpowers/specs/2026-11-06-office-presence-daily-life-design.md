@@ -50,7 +50,7 @@ This work has failed, even if it technically functions, if any of these happens:
 - `.claude` is treated as a sensitive folder by `server/execSensitive.ts`, for writes; the agent's gated tools can read that folder today, and this design does not change that.
 - The project builds its 3D in code with no downloaded assets, and there are no character files. `server/noProcessExecution.test.ts` stays in force.
 - `npm run dev:full` runs the backend and the app together, and was confirmed working on 2026-11-06: the page loads, agents can be listed and created through the same-origin proxy, and the backend alone answers 401 without a token. It uses the mock runtime by default, so it costs nothing.
-- The office layout is still saved per browser and per address. `localhost:5173` and `127.0.0.1:5173` keep separate layouts, and `dev:full` prints the `127.0.0.1` address. The old `/vo` link used `localhost`.
+- The office layout is now saved on the server in `data/layout.json` (in `dev:full`), so every address shows the same office. The browser-only demo still uses `localStorage`.
 - Plain `npm run dev`, with no server, stays available as a demo mode, as the roadmap's "mock mode remains useful" asks.
 
 ## 6. Design
@@ -62,7 +62,7 @@ This work has failed, even if it technically functions, if any of these happens:
 - **For now:** run `npm run dev:full` in a terminal and open `http://localhost:5173`. The `localhost` address keeps any layout saved under the old `/vo` link. The server keeps running until the terminal stops it, with no auto-stop on closing the page.
 - **Everything is designed for this server-backed mode.** Browser-only `npm run dev` is a secondary demo: it shows characters and the routine but does not hold tasks.
 - **Retire `/vo` (slice 0):** remove `.claude/commands/vo.md`, `scripts/vo.sh`, `scripts/voAutoExit.ts` and its test and the wiring in `vite.config.ts`, update the README and the message in `scripts/devFull.ts`, and make `dev:full` print the `localhost` URL.
-- **Later, a hosted URL (M7, not this work):** a real address needs the gateway's no-password gap fixed first, plus moving the layout to the server so it isn't per browser, and the sandbox if Claude is enabled there.
+- **Later, a hosted URL (M7, not this work):** the layout has already moved to `data/layout.json`. A real address needs the gateway's no-password gap fixed first, plus the sandbox if Claude is enabled there.
 
 ### 6.1 Identity versus presence
 

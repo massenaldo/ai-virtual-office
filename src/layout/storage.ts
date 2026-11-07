@@ -6,7 +6,8 @@ export const LAYOUT_STORAGE_KEY = 'ai-virtual-office:layout:v1'
 export const LAYOUT_BACKUP_KEY = 'ai-virtual-office:layout:v1:backup'
 
 type KV = Pick<Storage, 'getItem' | 'setItem'>
-export type LoadProblem = 'missing' | 'corrupt' | 'unsupported-version' | 'unavailable'
+/** 'server-unreachable' is set by the editor, never by loadLayout. */
+export type LoadProblem = 'missing' | 'corrupt' | 'unsupported-version' | 'unavailable' | 'server-unreachable'
 export type LoadResult = { layout: OfficeLayout; savedJson: string | null; problem: LoadProblem | null }
 
 const ROTATIONS = [0, 90, 180, 270]
@@ -37,7 +38,7 @@ function parseOffice(v: unknown): OfficeSettings | null {
 }
 
 function parseRoom(v: unknown): Room | null {
-  if (!isObject(v) || !isText(v.id) || typeof v.name !== 'string' || typeof v.department !== 'string' || !(v.department in DEPARTMENTS)) return null
+  if (!isObject(v) || !isText(v.id) || typeof v.name !== 'string' || typeof v.department !== 'string' || !Object.hasOwn(DEPARTMENTS, v.department)) return null
   if (!isFinite(v.x) || !isFinite(v.z) || !isPositive(v.width) || !isPositive(v.depth) || !isPositive(v.wallHeight) || !isText(v.color)) return null
   // Rooms saved before rotation existed have no field and load unturned.
   const rotation = v.rotation === undefined ? 0 : v.rotation
@@ -46,7 +47,7 @@ function parseRoom(v: unknown): Room | null {
 }
 
 function parseFurniture(v: unknown): Furniture | null {
-  if (!isObject(v) || !isText(v.id) || typeof v.type !== 'string' || !(v.type in FURNITURE_SPECS)) return null
+  if (!isObject(v) || !isText(v.id) || typeof v.type !== 'string' || !Object.hasOwn(FURNITURE_SPECS, v.type)) return null
   if (!isFinite(v.x) || !isFinite(v.z) || !ROTATIONS.includes(v.rotation as number) || !(v.roomId === null || isText(v.roomId))) return null
   return { id: v.id, type: v.type as Furniture['type'], x: v.x, z: v.z, rotation: v.rotation as Furniture['rotation'], roomId: v.roomId as string | null }
 }
@@ -114,7 +115,8 @@ export function saveLayout(storage: KV | null, l: OfficeLayout): { ok: true; jso
 
 export function getBrowserStorage(): KV | null {
   try {
-    return window.localStorage
+    // globalThis rather than window, so this file also type-checks in the server build, which imports parseLayout.
+    return (globalThis as { localStorage?: Storage }).localStorage ?? null
   } catch {
     return null
   }

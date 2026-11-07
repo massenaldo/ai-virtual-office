@@ -16,6 +16,7 @@ export type EditorAction =
   | { type: 'select'; selection: Selection }
   | { type: 'saved'; json: string }
   | { type: 'replace'; layout: OfficeLayout }
+  | { type: 'loaded'; layout: OfficeLayout; savedJson: string | null }
 
 export function createEditorState(layout: OfficeLayout, savedJson: string | null): EditorState {
   return { layout, past: [], future: [], dragOrigin: null, savedJson, selection: null }
@@ -64,6 +65,8 @@ export function editorReducer(s: EditorState, a: EditorAction): EditorState {
       return { ...withLayout(s, s.future[0]), past: [...s.past, s.layout], future: s.future.slice(1) }
     case 'select':
       return withLayout(s, s.layout, a.selection)
+    case 'loaded':
+      return createEditorState(a.layout, a.savedJson)
     case 'saved':
       return { ...s, savedJson: a.json }
   }

@@ -46,6 +46,8 @@ export type RouteDeps = {
   apiToken: string
   /** Real time in ms, for the office clock only. Test seam; defaults to Date.now. */
   officeNow?: () => number
+  /** The real time the office clock started at; the app passes it so the manager and /api/state share one clock. */
+  officeBootMs?: number
 }
 
 /** What a refused grant tells the person. The store's own `limit` is a conflict, the rest are 422. */
@@ -110,7 +112,7 @@ export function createRoutes(deps: RouteDeps): Route[] {
     deps.audit.write({ action, actor: 'api', requestId, workspaceId, agentId, detail: `file=${file} digest=${digest.slice(0, DIGEST_PREFIX)}` })
 
   const officeNow = deps.officeNow ?? Date.now
-  const officeBootMs = officeNow()
+  const officeBootMs = deps.officeBootMs ?? officeNow()
 
   const view = (rule: Parameters<typeof toRuleView>[0]) => toRuleView(rule, now())
 
@@ -300,6 +302,12 @@ export function createRoutes(deps: RouteDeps): Route[] {
       path: '/api/tasks/:id/cancel',
       body: 'none',
       handler: ({ params, requestId }) => ({ status: 202, body: { task: must(manager.cancelTask(params.id, { requestId })).task } }),
+    },
+    {
+      method: 'POST',
+      path: '/api/tasks/:id/start-now',
+      body: 'none',
+      handler: ({ params, requestId }) => ({ status: 202, body: { task: must(manager.startHeldTask(params.id, { requestId })).task } }),
     },
     {
       method: 'GET',

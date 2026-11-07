@@ -14,7 +14,7 @@ export function tempDataDir(): string {
 }
 
 export function testConfig(env: Env = {}): ServerConfig {
-  const parsed = parseConfig({ PORT: '0', DATA_DIR: tempDataDir(), API_TOKEN: TEST_TOKEN, ...env })
+  const parsed = parseConfig({ PORT: '0', DATA_DIR: tempDataDir(), API_TOKEN: TEST_TOKEN, /* The office routine holds tasks at wall-clock break times; tests turn it on where they need it. */ OFFICE_ROUTINE: 'off', ...env })
   if (!parsed.ok) throw new Error(parsed.errors.join('; '))
   return parsed.config
 }

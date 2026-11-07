@@ -190,4 +190,35 @@ describe('findRoomSpot', () => {
     const spot = findRoomSpot(l, 2.6, 2.4)
     expect(spot).not.toEqual({ x: -5.45, z: -8.8 })
   })
+
+  it('never opens a new room onto the south wall of the floor', () => {
+    const l: OfficeLayout = { ...smallOffice(), office: { width: 8, depth: 2.4, gridSize: 0.25 }, rooms: [], furniture: [] }
+    expect(findRoomSpot(l, 2.6, 2.4)).toBeNull()
+  })
+
+  it.each([0, 90, 180, 270] as const)('does not build in front of a room turned %i degrees', (rotation) => {
+    const existing = { ...room('room-a', 2, 2, 6, 6), rotation }
+    const l: OfficeLayout = { ...smallOffice(), office: { width: 40, depth: 40, gridSize: 0.25 }, rooms: [existing], furniture: [] }
+    const spot = findRoomSpot(l, 2.6, 2.4)!
+    const open = rotateOffset(0, 1, rotation)
+    const edge = roomRect(existing)
+    const front = {
+      minX: open.dx > 0 ? edge.maxX : open.dx < 0 ? edge.minX - 1 : edge.minX,
+      maxX: open.dx > 0 ? edge.maxX + 1 : open.dx < 0 ? edge.minX : edge.maxX,
+      minZ: open.dz > 0 ? edge.maxZ : open.dz < 0 ? edge.minZ - 1 : edge.minZ,
+      maxZ: open.dz > 0 ? edge.maxZ + 1 : open.dz < 0 ? edge.minZ : edge.maxZ,
+    }
+    expect(rectsOverlap({ minX: spot.x - 1.3, maxX: spot.x + 1.3, minZ: spot.z - 1.2, maxZ: spot.z + 1.2 }, front)).toBe(false)
+  })
+})
+
+describe('the default placement', () => {
+  it('no break room stands in the clear metre in front of another room, including the meeting room', () => {
+    const l = createDefaultLayout()
+    for (const r of l.rooms) {
+      const e = roomRect(r)
+      const front = { minX: e.minX, maxX: e.maxX, minZ: e.maxZ, maxZ: e.maxZ + 1 }
+      expect([r.id, l.rooms.filter((o) => isBreak(o.department) && o.id !== r.id && rectsOverlap(front, roomRect(o))).map((o) => o.id)]).toEqual([r.id, []])
+    }
+  })
 })

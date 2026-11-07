@@ -1,5 +1,5 @@
 import { BREAK_DEPARTMENTS, DEFAULT_WALL_HEIGHT, DEPARTMENTS, type BreakDepartment } from './catalog'
-import { furnitureRect, rectInsideOffice, rectsOverlap, roomRect, type Rect } from './geometry'
+import { furnitureRect, rectInsideOffice, rectsOverlap, roomRect, rotateOffset, type Rect } from './geometry'
 import { LAYOUT_SCHEMA_VERSION, type Furniture, type FurnitureType, type OfficeLayout, type Room, type Rotation } from './types'
 
 // The kitchen, the dining area and the prayer room. This module owns where they go, so the default layout, the
@@ -24,7 +24,7 @@ const piece = (id: string, type: FurnitureType, x: number, z: number, rotation: 
 
 /** The full set at its default placement, for an office the size of the default one. */
 export function breakAreaItems(): BreakSet {
-  const rooms = [makeRoom('prayer', -4.0, 6.2, 3.6, 3.6), makeRoom('kitchen', 0.3, 5.2, 2.6, 3.4), makeRoom('dining', 3.2, 5.8, 2.8, 4.6)]
+  const rooms = [makeRoom('prayer', -4.0, 6.8, 3.6, 3.6), makeRoom('kitchen', 0.3, 5.2, 2.6, 3.4), makeRoom('dining', 3.2, 5.8, 2.8, 4.6)]
   const furniture: Furniture[] = [
     piece('kitchen-counter-01', 'kitchen-counter', 0.3, 3.92, 0, 'kitchen'),
     piece('coffee-machine-01', 'coffee-machine', -0.4, 3.92, 0, 'kitchen'),
@@ -38,7 +38,7 @@ export function breakAreaItems(): BreakSet {
     }
   }
   let mat = 0
-  for (const z of [4.88, 5.54, 6.2, 6.86, 7.52]) {
+  for (const z of [5.48, 6.14, 6.8, 7.46, 8.12]) {
     for (const x of [-5.15, -4.0, -2.85]) furniture.push(piece(`prayer-mat-${pad(++mat)}`, 'prayer-mat', x, z, 90, 'prayer'))
   }
   return { rooms, furniture }
@@ -73,18 +73,31 @@ const MAX_SCAN_CELLS = 100_000
 
 const expand = (r: Rect, by: number): Rect => ({ minX: r.minX - by, maxX: r.maxX + by, minZ: r.minZ - by, maxZ: r.maxZ + by })
 
+/** The strip of floor in front of a room's open side, which faces south until the room is turned. */
+function frontStrip(room: Room): Rect {
+  const r = roomRect(room)
+  const { dx, dz } = rotateOffset(0, 1, room.rotation)
+  if (dx > 0) return { ...r, minX: r.maxX, maxX: r.maxX + STRIP }
+  if (dx < 0) return { ...r, minX: r.minX - STRIP, maxX: r.minX }
+  if (dz > 0) return { ...r, minZ: r.maxZ, maxZ: r.maxZ + STRIP }
+  return { ...r, minZ: r.minZ - STRIP, maxZ: r.minZ }
+}
+
 /**
- * The centre of a room of this size that fits on the floor, 0.25 m clear of everything, with a free 1 m strip on its
- * south side because rooms open to the south. First tries the sides of existing rooms, newest first, then scans the floor.
+ * The centre of a room of this size that fits on the floor, 0.25 m clear of everything, not in front of another room's
+ * open side, and with a free 1 m strip on the floor in front of its own. First tries the sides of existing rooms, newest
+ * first, then scans the floor.
  */
 export function findRoomSpot(layout: OfficeLayout, width: number, depth: number): { x: number; z: number } | null {
   const obstacles = [...layout.rooms.map(roomRect), ...layout.furniture.map(furnitureRect)]
+  const fronts = layout.rooms.map(frontStrip)
   const fits = (x: number, z: number): boolean => {
     const rect: Rect = { minX: x - width / 2, maxX: x + width / 2, minZ: z - depth / 2, maxZ: z + depth / 2 }
     if (!rectInsideOffice(rect, layout.office)) return false
     const padded = expand(rect, GAP)
     const strip: Rect = { minX: rect.minX, maxX: rect.maxX, minZ: rect.maxZ, maxZ: rect.maxZ + STRIP }
-    return !obstacles.some((o) => rectsOverlap(padded, o) || rectsOverlap(strip, o))
+    if (!rectInsideOffice(strip, layout.office)) return false
+    return !obstacles.some((o) => rectsOverlap(padded, o) || rectsOverlap(strip, o)) && !fronts.some((f) => rectsOverlap(rect, f))
   }
 
   for (let i = layout.rooms.length - 1; i >= 0; i--) {

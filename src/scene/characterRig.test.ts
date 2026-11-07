@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
 import { characterLook, type CharacterLook } from './characterLook'
 import {
-  CHARACTER_PARTS, DONE_GESTURE_MS, HAND_POINT, HEAD_TOP_POINT, JOINTS, SOLE_POINT, characterAction, jointMatrices, partColor, partVisible,
+  CHARACTER_PARTS, DONE_GESTURE_MS, HAND_POINT, HEAD_TOP_POINT, JOINTS, SOLE_POINT, characterAction, jointMatrices, partColor, partMatrix, partVisible,
   stepPose, targetPose, type CharacterAction, type CharacterPart, type Joint, type Pose,
 } from './characterRig'
 
@@ -182,6 +182,21 @@ describe('parts', () => {
   it('the badge part is only drawn in the error action', () => {
     for (const a of ACTIONS) expect(partVisible('badge', a)).toBe(a === 'error')
     for (const a of ACTIONS) expect(partVisible('skin', a)).toBe(true)
+  })
+  it('the error badge stays upright and above a slumped head', () => {
+    const head = matrices(seated('error'))[JOINTS.indexOf('head')]
+    const badge = partMatrix('badge', head, new THREE.Matrix4())
+    const up = new THREE.Vector3(0, 1, 0).transformDirection(badge)
+    expect(up.y).toBeCloseTo(1)
+    expect(new THREE.Vector3().setFromMatrixPosition(badge).distanceTo(new THREE.Vector3().setFromMatrixPosition(head))).toBeCloseTo(0)
+    const geometry = CHARACTER_PARTS.find((e) => e.part === 'badge')!.geometry
+    geometry.computeBoundingBox()
+    const lowest = geometry.boundingBox!.min.clone().setX(0).setZ(0).applyMatrix4(badge).y
+    expect(lowest).toBeGreaterThan(at(seated('error'), 'head', HEAD_TOP_POINT).y)
+  })
+  it('every other part follows its joint exactly', () => {
+    const head = matrices(seated('error'))[JOINTS.indexOf('head')]
+    expect(partMatrix('skin', head, new THREE.Matrix4()).equals(head)).toBe(true)
   })
   it('hijab covers more of the head and neck than hair', () => {
     const box = (p: CharacterPart) => new THREE.Box3().setFromObject(new THREE.Mesh(CHARACTER_PARTS.find((e) => e.part === p)!.geometry))

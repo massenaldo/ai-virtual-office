@@ -300,6 +300,13 @@ export function partVisible(part: CharacterPart, action: CharacterAction): boole
   return part === 'badge' ? action === 'error' : true
 }
 
+/** A part's matrix from its joint's, written into `out`. The badge takes only the position, so a slumped head can't tip it over. */
+export function partMatrix(part: CharacterPart, joint: THREE.Matrix4, out: THREE.Matrix4): THREE.Matrix4 {
+  if (part !== 'badge') return out.copy(joint)
+  const e = joint.elements
+  return out.makeTranslation(e[12], e[13], e[14])
+}
+
 // Geometry helpers. Every piece is an ellipsoid or a tube, so the figure stays soft and cheap.
 const sph = (rx_: number, ry: number, rz: number, x: number, y: number, z: number, w = 8, h = 6) =>
   new THREE.SphereGeometry(1, w, h).scale(rx_, ry, rz).translate(x, y, z)
@@ -512,10 +519,10 @@ function geometries() {
   add('shoes', 'shinL', shoeG)
   add('shoes', 'shinR', shoeG)
 
-  // Error badge: a small exclamation mark above the head. Drawn only for the error action, see partVisible.
+  // Error badge: an exclamation mark above the head. Drawn only for the error action (partVisible) and kept upright (partMatrix).
   add('badge', 'head', merge([
-    new THREE.CapsuleGeometry(0.016, 0.04, 1, 5).translate(0, 0.335, 0),
-    sph(0.017, 0.017, 0.017, 0, 0.285, 0, 5, 3),
+    new THREE.CapsuleGeometry(0.026, 0.06, 1, 5).translate(0, 0.365, 0),
+    sph(0.026, 0.026, 0.026, 0, 0.27, 0, 5, 3),
   ]), false)
   return entries
 }

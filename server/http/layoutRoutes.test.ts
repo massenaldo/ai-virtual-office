@@ -66,7 +66,11 @@ describe('/api/layout', () => {
     expect(mid.length).toBeGreaterThan(65536)
     expect(mid.length).toBeLessThan(524288)
     expect((await s.api('PUT', '/api/layout', { layout: big(700) })).status).toBe(200)
-    expect((await s.api('PUT', '/api/layout', { layout: big(4000) })).status).toBe(413)
+    // The server answers and closes while the client may still be sending, so a busy machine can see the reset instead.
+    const refused = await s.api('PUT', '/api/layout', { layout: big(4000) }).then((r) => r.status, (e: { cause?: { code?: string } }) => e.cause?.code)
+    expect([413, 'ECONNRESET', 'EPIPE']).toContain(refused)
+    const kept = (await s.api('GET', '/api/layout')).body as { layout: { rooms: unknown[] } }
+    expect(kept.layout.rooms).toHaveLength(createDefaultLayout().rooms.length + 700)
   })
 
   it('is refused without credentials', async () => {

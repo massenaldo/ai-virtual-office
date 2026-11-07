@@ -35,7 +35,12 @@ describe('screenPosition', () => {
 
 describe('markerAnchor', () => {
   it('floats above a desk in 3D and just above the floor in plan', () => {
-    expect(markerAnchor({ x: 1, z: 2 }, false).toArray()).toEqual([1, 1.45, 2])
-    expect(markerAnchor({ x: 1, z: 2 }, true).toArray()).toEqual([1, 0.35, 2])
+    expect(markerAnchor({ x: 1, z: 2, seated: true }, false).toArray()).toEqual([1, 1.45, 2])
+    expect(markerAnchor({ x: 1, z: 2, seated: true }, true).toArray()).toEqual([1, 0.35, 2])
+  })
+
+  it('floats higher over a character who is standing', () => {
+    expect(markerAnchor({ x: 1, z: 2, seated: false }, false).toArray()).toEqual([1, 1.9, 2])
+    expect(markerAnchor({ x: 1, z: 2, seated: false }, true).toArray()).toEqual([1, 0.35, 2])
   })
 })

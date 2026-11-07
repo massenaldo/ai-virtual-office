@@ -33,7 +33,7 @@ const MEETING_CHAIRS: [x: number, z: number, rotation: 0 | 180][] = [
   [-4.8, 2.98, 0], [-3.9, 2.98, 0], [-3.0, 2.98, 0],
 ]
 
-const CHAIR_OFFSET_Z = 0.56
+export const CHAIR_OFFSET_Z = 0.56
 const MONITOR_OFFSET_Z = -0.18
 
 const pad = (n: number) => String(n).padStart(2, '0')

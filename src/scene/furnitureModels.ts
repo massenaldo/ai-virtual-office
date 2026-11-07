@@ -86,13 +86,18 @@ function shelf(): Pieces {
   }
 }
 
+/** FNV-1a over the text, as an unsigned 32-bit integer. The same text always gives the same number. */
+export function stableHash(text: string): number {
+  let hash = 2166136261
+  for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619)
+  return hash >>> 0
+}
+
 export type PlantVariant = 0 | 1
 
 /** Stable per-id plant size (0 = bushy, 1 = tall), so the office gets variety without storing anything new. */
 export function plantVariant(id: string): PlantVariant {
-  let hash = 2166136261
-  for (let i = 0; i < id.length; i++) hash = Math.imul(hash ^ id.charCodeAt(i), 16777619)
-  return ((hash >>> 0) % 2) as PlantVariant
+  return (stableHash(id) % 2) as PlantVariant
 }
 
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5))

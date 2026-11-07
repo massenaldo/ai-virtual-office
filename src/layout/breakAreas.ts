@@ -172,7 +172,7 @@ export function missingBreakDepartments(layout: OfficeLayout): BreakDepartment[]
   return BREAK_DEPARTMENTS.filter((d) => !layout.rooms.some((r) => r.department === d))
 }
 
-const NOTICE_NAME: Record<BreakDepartment, string> = { kitchen: 'a kitchen', dining: 'a dining area', prayer: 'a prayer room' }
+const NOTICE_NAME: Record<BreakDepartment, string> = { kitchen: 'kitchen', dining: 'dining area', prayer: 'prayer room' }
 
 /** The notice for an office missing some break rooms, or null when it has them all. */
 export function breakAreasNotice(layout: OfficeLayout): string | null {

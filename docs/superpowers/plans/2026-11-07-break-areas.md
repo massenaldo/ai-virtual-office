@@ -209,7 +209,7 @@ Screenshots for the PR: 3D and floor plan, on a temporary data folder that start
 
 Rooms added earlier in the same call count as occupied. A taken ID gets a `-2`, `-3` suffix, chosen deterministically, because this runs inside the reducer. The result must pass `parseLayout`.
 
-Notice copy, exactly: `This office has no {list}, so agents will stay at their desks for those breaks.` The list comes from the missing rooms, in the order `kitchen`, `dining area`, `prayer room`, joined as "a kitchen", "a kitchen or a dining area", or "a kitchen, a dining area or a prayer room".
+Notice copy, exactly: `This office has no {list}, so agents will stay at their desks for those breaks.` The list comes from the missing rooms, in the order `kitchen`, `dining area`, `prayer room`, joined as "kitchen", "kitchen or dining area", or "kitchen, dining area or prayer room".
 
 In `App.tsx`, show it as a `scene-notice` when `editor.phase === 'ready'`, not editing, the notice isn't null and it hasn't been dismissed. It has an "Add break areas" button and the same close button as the other notices. The button enters edit mode the same way "Edit layout" does and calls `actions.addBreakAreas()`, so the result is reviewed and saved by the person. Dismissal is remembered per browser under `ai-virtual-office:break-areas-notice:dismissed`, using `getBrowserStorage()` inside try/catch, and the page must work without storage.
 

@@ -231,10 +231,10 @@ describe('addBreakAreas', () => {
   it('lists what is missing', () => {
     expect(breakAreasNotice(createDefaultLayout())).toBeNull()
     expect(missingBreakDepartments(none())).toEqual(['kitchen', 'dining', 'prayer'])
-    expect(breakAreasNotice(withDept(none(), 'dining', 'prayer'))).toBe('This office has no a kitchen, so agents will stay at their desks for those breaks.')
-    expect(breakAreasNotice(withDept(none(), 'dining'))).toBe('This office has no a kitchen or a prayer room, so agents will stay at their desks for those breaks.')
-    expect(breakAreasNotice(withDept(none(), 'prayer'))).toBe('This office has no a kitchen or a dining area, so agents will stay at their desks for those breaks.')
-    expect(breakAreasNotice(none())).toBe('This office has no a kitchen, a dining area or a prayer room, so agents will stay at their desks for those breaks.')
+    expect(breakAreasNotice(withDept(none(), 'dining', 'prayer'))).toBe('This office has no kitchen, so agents will stay at their desks for those breaks.')
+    expect(breakAreasNotice(withDept(none(), 'dining'))).toBe('This office has no kitchen or prayer room, so agents will stay at their desks for those breaks.')
+    expect(breakAreasNotice(withDept(none(), 'prayer'))).toBe('This office has no kitchen or dining area, so agents will stay at their desks for those breaks.')
+    expect(breakAreasNotice(none())).toBe('This office has no kitchen, dining area or prayer room, so agents will stay at their desks for those breaks.')
   })
 
   it('adds only the missing rooms and moves nothing that exists', () => {

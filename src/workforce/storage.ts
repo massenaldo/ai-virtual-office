@@ -1,4 +1,4 @@
-import { DEPARTMENTS } from '../layout/catalog'
+import { isAgentDepartmentId } from '../layout/catalog'
 import { createDemoWorkforce } from './demo'
 import { emptyWorkforce, isActiveTask, MODEL_NAME_PATTERN, recoverInterruptedTasks } from './operations'
 import { ACTIVITY_LIMIT, AGENT_DESCRIPTION_MAX, AGENT_INSTRUCTIONS_MAX, REVIEW_MAX_BYTES, WORKFORCE_SCHEMA_VERSION, type ActivityType, type Agent, type AgentActivity, type AgentStatus, type AgentTask, type PendingApproval, type ToolReview, type TaskEndReason, type TaskRuntime, type TaskStatus, type WorkforceState, validUsage } from './types'
@@ -52,7 +52,7 @@ const isTimeOrNull = (v: unknown): v is string | null => v === null || isTime(v)
 const isOneOf = <T extends string>(v: unknown, values: readonly T[]): v is T => typeof v === 'string' && (values as readonly string[]).includes(v)
 
 function parseAgent(v: unknown): Agent | null {
-  if (!isObject(v) || !isText(v.id) || !isText(v.name) || !isText(v.role) || typeof v.department !== 'string' || v.department === 'meeting' || !Object.hasOwn(DEPARTMENTS, v.department)) return null
+  if (!isObject(v) || !isText(v.id) || !isText(v.name) || !isText(v.role) || typeof v.department !== 'string' || !isAgentDepartmentId(v.department)) return null
   if (!isTextOrNull(v.deskId) || !isOneOf(v.status, AGENT_STATUSES) || !isTextOrNull(v.currentTaskId) || !isOneOf(v.runtimeMode, MODES) || typeof v.demo !== 'boolean' || !isTime(v.createdAt) || !isTimeOrNull(v.lastActivityAt)) return null
   if (typeof v.description !== 'string' || v.description.length > AGENT_DESCRIPTION_MAX || typeof v.instructions !== 'string' || v.instructions.length > AGENT_INSTRUCTIONS_MAX) return null
   if (!(v.model === null || (typeof v.model === 'string' && MODEL_NAME_PATTERN.test(v.model))) || typeof v.takesPrayerBreaks !== 'boolean' || !(v.sourceFile === null || typeof v.sourceFile === 'string')) return null

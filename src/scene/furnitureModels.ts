@@ -86,6 +86,68 @@ function shelf(): Pieces {
   }
 }
 
+// Counter run with a front of four doors. The top is 0.9 m, the height a coffee machine stands on.
+function kitchenCounter(): Pieces {
+  const seams = [-0.53, 0, 0.53].map((x) => box(0.008, 0.7, 0.004, x, 0.47, 0.271))
+  const handles = [-0.45, -0.08, 0.08, 0.45].map((x) => box(0.012, 0.22, 0.016, x, 0.55, 0.278))
+  return {
+    cabinetWhite: [box(2.12, 0.78, 0.54, 0, 0.47, 0)],
+    oakVeneer: [box(2.2, 0.04, 0.6, 0, 0.88, 0)],
+    plastic: [box(2.08, 0.08, 0.5, 0, 0.04, -0.01), ...seams, ...handles],
+  }
+}
+
+// A small espresso machine, standing on a counter top at y = 0.9. Its group head and spouts face +Z.
+function coffeeMachine(): Pieces {
+  const top = 0.9
+  return {
+    plastic: [
+      box(0.34, 0.03, 0.3, 0, top + 0.015, 0), // base
+      box(0.34, 0.32, 0.22, 0, top + 0.19, -0.04), // body
+    ],
+    chrome: [
+      box(0.26, 0.01, 0.1, 0, top + 0.035, 0.1), // drip tray
+      box(0.3, 0.05, 0.08, 0, top + 0.28, 0.11), // group head
+      cylinder(0.012, 0.012, 0.04, -0.05, top + 0.235, 0.12, 8),
+      cylinder(0.012, 0.012, 0.04, 0.05, top + 0.235, 0.12, 8),
+      box(0.3, 0.012, 0.2, 0, top + 0.356, -0.04), // top plate
+      box(0.1, 0.012, 0.004, 0, top + 0.17, 0.0725), // button strip
+    ],
+  }
+}
+
+function diningTable(): Pieces {
+  const legs = [-0.9, 0.9].flatMap((x) => [-0.37, 0.37].map((z) => box(0.06, 0.7, 0.06, x, 0.35, z)))
+  const rails = [-0.37, 0.37].map((z) => box(1.74, 0.05, 0.03, 0, 0.675, z))
+  const ends = [-0.9, 0.9].map((x) => box(0.03, 0.05, 0.68, x, 0.675, 0))
+  return { oakVeneer: [box(2, 0.04, 0.9, 0, 0.72, 0)], graphite: [...legs, ...rails, ...ends] }
+}
+
+// Backrest at +Z. The seat is low enough to tuck under a dining table.
+function diningChair(): Pieces {
+  const front = [-0.2, 0.2].map((x) => box(0.03, 0.43, 0.03, x, 0.215, -0.19))
+  const rear = [-0.2, 0.2].map((x) => box(0.03, 0.86, 0.03, x, 0.43, 0.2))
+  return {
+    fabric: [box(0.44, 0.05, 0.42, 0, 0.455, 0), box(0.37, 0.3, 0.035, 0, 0.7, 0.2)],
+    graphite: [...front, ...rear, box(0.37, 0.03, 0.03, 0, 0.405, -0.19), box(0.37, 0.03, 0.03, 0, 0.405, 0.2)],
+  }
+}
+
+// A plain flat rectangle with a thin raised edge, in one colour. No symbols, text or pattern.
+// Its top (0.04 m) sits above the room floor surface (0.025 m) and above open floor (0 m).
+function prayerMat(): Pieces {
+  const edge = 0.025
+  return {
+    prayerMat: [
+      box(0.6, 0.04, 1, 0, 0.02, 0),
+      box(0.6, 0.01, edge, 0, 0.045, -0.5 + edge / 2),
+      box(0.6, 0.01, edge, 0, 0.045, 0.5 - edge / 2),
+      box(edge, 0.01, 1 - 2 * edge, -0.3 + edge / 2, 0.045, 0),
+      box(edge, 0.01, 1 - 2 * edge, 0.3 - edge / 2, 0.045, 0),
+    ],
+  }
+}
+
 /** FNV-1a over the text, as an unsigned 32-bit integer. The same text always gives the same number. */
 export function stableHash(text: string): number {
   let hash = 2166136261
@@ -147,11 +209,16 @@ const BUILDERS: Record<FurnitureType, (variant: number) => Pieces> = {
   'meeting-chair': meetingChair,
   'storage-cabinet': storageCabinet,
   shelf,
+  'kitchen-counter': kitchenCounter,
+  'coffee-machine': coffeeMachine,
+  'dining-table': diningTable,
+  'dining-chair': diningChair,
+  'prayer-mat': prayerMat,
 }
 
 // Small details (monitors, keyboards, handles, books, chrome) skip shadow casting to keep the shadow pass cheap.
 const NO_SHADOW = new Set<MaterialKey>(['plastic', 'screen', 'chrome'])
-const SHADOWLESS_TYPES = new Set<FurnitureType>(['monitor'])
+const SHADOWLESS_TYPES = new Set<FurnitureType>(['monitor', 'prayer-mat'])
 
 const cache = new Map<string, ModelPart[]>()
 

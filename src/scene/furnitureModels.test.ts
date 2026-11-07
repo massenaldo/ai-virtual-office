@@ -49,6 +49,13 @@ describe('modelParts', () => {
     ['meeting-table', 'max', 0.73, 0.77],
     ['storage-cabinet', 'max', 1.08, 1.14],
     ['shelf', 'max', 1.78, 1.84],
+    ['kitchen-counter', 'max', 0.89, 0.91],
+    ['coffee-machine', 'min', 0.899, 0.901],
+    ['coffee-machine', 'max', 1.2, 1.3],
+    ['dining-table', 'max', 0.73, 0.75],
+    ['dining-chair', 'max', 0.8, 0.95],
+    // The mat sits above the room floor surface (0.025 m) so it does not flicker against it.
+    ['prayer-mat', 'max', 0.03, 0.06],
   ]
   for (const [type, end, lo, hi] of heights) {
     it(`gives the ${type} a realistic ${end === 'max' ? 'height' : 'base height'}`, () => {

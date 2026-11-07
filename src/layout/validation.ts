@@ -4,8 +4,9 @@ import type { Furniture, FurnitureType, OfficeLayout } from './types'
 
 export type Issue = { code: 'room-overlap' | 'furniture-overlap' | 'out-of-bounds'; otherId?: string; message: string }
 
-// Pairs that are meant to share floor space: monitors sit on desks, chairs tuck under desks and meeting tables.
-const TUCKS_UNDER: [FurnitureType, FurnitureType][] = [['chair', 'desk'], ['meeting-chair', 'meeting-table']]
+// Pairs that are meant to share floor space: monitors sit on desks, chairs tuck under desks, meeting tables and dining tables,
+// and a coffee machine stands on a kitchen counter.
+const TUCKS_UNDER: [FurnitureType, FurnitureType][] = [['chair', 'desk'], ['meeting-chair', 'meeting-table'], ['coffee-machine', 'kitchen-counter'], ['dining-chair', 'dining-table']]
 
 function mayShareSpace(a: Furniture, b: Furniture): boolean {
   if (a.type === 'monitor' || b.type === 'monitor') return true

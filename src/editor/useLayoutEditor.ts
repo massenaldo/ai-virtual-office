@@ -52,6 +52,8 @@ export function useLayoutEditor(connected: boolean = false): LayoutEditor {
 
   const phaseRef = useRef(phase)
   phaseRef.current = phase
+  const connectedRef = useRef(connected)
+  connectedRef.current = connected
   const layoutRef = useRef(state.layout)
   layoutRef.current = state.layout
   const saves = useRef<Promise<unknown>>(Promise.resolve())
@@ -60,6 +62,7 @@ export function useLayoutEditor(connected: boolean = false): LayoutEditor {
   useEffect(() => {
     if (!api) return
     const controller = new AbortController()
+    const startedConnected = connectedRef.current
     void loadFromServer(api, getBrowserStorage(), controller.signal).then((r) => {
       if (controller.signal.aborted) return
       if (r.ok) {
@@ -67,6 +70,11 @@ export function useLayoutEditor(connected: boolean = false): LayoutEditor {
         setSaveError(r.saveError)
         setLoadProblem(r.problem)
         setPhase('ready')
+        return
+      }
+      // The connection came up while this attempt was out, so the retry below has already passed: try once more.
+      if (!startedConnected && connectedRef.current) {
+        setAttempt((n) => n + 1)
         return
       }
       // Show what the browser has, read-only. A 401 is the pairing screen's job, so it gets no notice of its own.

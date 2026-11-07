@@ -43,7 +43,7 @@ export type FurnitureItemProps = {
 }
 
 /** A press that moved further than this many pixels was an orbit or pan, not a click. */
-const CLICK_SLOP = 4
+export const CLICK_SLOP = 4
 
 export default function FurnitureItem({ item, floorPlan, editing, selected, invalid, onSelect, onTransformStart, onTransform, onTransformEnd, agentHighlight = false, onDeskClick }: FurnitureItemProps) {
   const [hovered, setHovered] = useState(false)

@@ -14,7 +14,7 @@ import { useEditorActions, type DialogRequest } from './editor/useEditorActions'
 import { useLayoutEditor } from './editor/useLayoutEditor'
 import type { FocusRequest } from './scene/OfficeScene'
 import WorkforcePanel, { selectedAgentId, type WorkforceView } from './workforce/ui/WorkforcePanel'
-import { deskClickTarget, deskMarkers, deskStatus, workforceNotice } from './workforce/view'
+import { deskCharacters, deskClickTarget, deskMarkers, deskStatus, workforceNotice } from './workforce/view'
 import { useWorkforce } from './workforce/useWorkforce'
 
 const LOAD_PROBLEM_MESSAGE = {
@@ -84,6 +84,7 @@ export default function App() {
   const selectedAgent = agentsOpen && workforce ? workforce.state.agents.find((a) => a.id === selectedAgentId(agentView)) : undefined
   const workforceState = workforce?.state
   const markers = useMemo(() => (workforceState && !editing ? deskMarkers(state.layout, workforceState, selectedAgent?.id ?? null) : undefined), [workforceState, editing, state.layout, selectedAgent?.id])
+  const characters = useMemo(() => (workforceState && !editing ? deskCharacters(state.layout, workforceState) : undefined), [workforceState, editing, state.layout])
   const highlightDeskId = selectedAgent && deskStatus(state.layout, selectedAgent).kind === 'assigned' ? selectedAgent.deskId : null
   const onDeskClick = agentsOpen && workforce ? (deskId: string) => {
     const target = deskClickTarget(workforce.state, deskId)
@@ -118,7 +119,7 @@ export default function App() {
         <div className="editor-body">
         {editing && <OutlinerPanel layout={state.layout} selection={state.selection} issues={issues} onSelect={actions.select} onAddRoom={actions.addRoom} onAddFurniture={actions.addFurniture}/>}
         <div className="canvas-wrap">{ready || editor.phase === 'offline' ? <OfficeScene layout={state.layout} floorPlan={floorPlan} viewKey={viewKey} editing={editing} selection={state.selection} issues={issues} onSelect={actions.select} onTransformStart={actions.transformStart} onTransform={actions.transform} onTransformEnd={actions.transformEnd}
-          markers={markers} highlightDeskId={highlightDeskId} onDeskClick={onDeskClick} focus={focus}/> : <div className="scene-hint" role="status">Loading office…</div>}
+          markers={markers} characters={characters} highlightDeskId={highlightDeskId} onDeskClick={onDeskClick} focus={focus}/> : <div className="scene-hint" role="status">Loading office…</div>}
           {editor.loadProblem && <div className="scene-notice" role="alert"><AlertTriangle size={15}/><span>{LOAD_PROBLEM_MESSAGE[editor.loadProblem]}</span><button className="notice-close" onClick={editor.dismissLoadProblem} aria-label="Dismiss"><X size={14}/></button></div>}
           {editor.status === 'save-failed' && <div className="scene-notice error" role="alert"><AlertTriangle size={15}/><span>Save failed: {editor.saveError} Your changes are still here; try saving again.</span></div>}
           {workforce?.loadProblem && <div className="scene-notice" role="alert"><AlertTriangle size={15}/><span>{workforceNotice(workforce.loadProblem, workforce.preserved)}</span><button className="notice-close" onClick={workforce.actions.dismissLoadProblem} aria-label="Dismiss"><X size={14}/></button></div>}

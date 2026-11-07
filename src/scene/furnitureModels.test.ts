@@ -69,6 +69,11 @@ describe('modelParts', () => {
     expect(modelParts('monitor').every((p) => !p.castShadow)).toBe(true)
     expect(modelParts('desk').some((p) => p.castShadow)).toBe(true)
   })
+
+  it('keeps the many small break room items out of the shadow pass', () => {
+    for (const type of ['prayer-mat', 'dining-chair', 'coffee-machine'] as const) expect(modelParts(type).every((p) => !p.castShadow)).toBe(true)
+    expect(modelParts('dining-table').some((p) => p.castShadow)).toBe(true)
+  })
 })
 
 describe('plants', () => {

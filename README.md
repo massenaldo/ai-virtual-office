@@ -187,6 +187,7 @@ The scene renders a typed, versioned `OfficeLayout` (`src/layout/types.ts`). It 
 - Rooms are 2–12 m wide and 2–12 m deep and stay inside the 25 × 20 m office.
 - Saved data that can't be read (damaged, or from a newer version) is never overwritten silently: the app shows the default layout and copies the old value to a backup before the next save (`ai-virtual-office:layout:v1:backup` in the browser, `data/layout.backup.json` on the server).
 - **Reset layout** restores the default office after a confirmation and can be undone.
+- **Break areas:** the default office has a kitchen, a dining area and a prayer room. A layout saved before they existed gains them when it loads, if all three fit, and nothing already there moves: the full set in a large office with free space at the default spots, otherwise a compact set beside the existing rooms. The saved file only changes on your next save. If they don't fit, or you remove one later, a notice offers **Add break areas**, which adds what's missing for you to review and save. Deleted rooms never return on their own.
 
 ## Agent data
 

@@ -13,7 +13,7 @@ import type { RoutineAgent } from '../office/presence'
 import { daySchedule } from '../office/schedule'
 import { activeTaskFor, agentAtDesk } from './operations'
 import type { Preserved, WorkforceLoadProblem } from './storage'
-import type { Agent, AgentActivity, AgentDepartment, AgentStatus, AgentTask, TaskRuntime, TaskStatus, TaskUsage, WorkforceState } from './types'
+import type { Agent, AgentActivity, AgentDepartment, AgentStatus, AgentTask, TaskHold, TaskRuntime, TaskStatus, TaskUsage, WorkforceState } from './types'
 
 // Pure helpers for the workforce panel, so the components only render.
 
@@ -71,6 +71,7 @@ export function removalPrompt(s: WorkforceState, agentId: string): { title: stri
   if (!agent || !s.tasks.some((t) => t.agentId === agentId)) return null
   const active = activeTaskFor(s, agentId)
   const title = `Remove ${agent.name}?`
+  if (active?.hold) return { title, message: `${agent.name} has "${active.title}" waiting for a break. Removing the agent cancels the task and deletes its history.` }
   return active
     ? { title, message: `${agent.name} is running "${active.title}". Removing the agent cancels the task and deletes its history.` }
     : { title, message: `This deletes ${agent.name} and its task history.` }
@@ -97,7 +98,7 @@ export function deskMarkers(layout: OfficeLayout, s: WorkforceState, selectedAge
     if (!agent) return []
     // The label sits over the seat, not the desk, so it stays above the character.
     const seat = seatForDesk(layout, f)
-    return [{ id: agent.id, label: agent.name, status: agent.status, x: seat.x, z: seat.z, seated: seat.seated, selected: agent.id === selectedAgentId, phase: markerPhase(activeTaskFor(s, agent.id)) }]
+    return [{ id: agent.id, label: agent.name, status: agent.status, x: seat.x, z: seat.z, seated: seat.seated, selected: agent.id === selectedAgentId, phase: markerPhase(activeTaskFor(s, agent.id)), held: heldOf(activeTaskFor(s, agent.id)) }]
   })
 }
 
@@ -147,10 +148,12 @@ export function routineAgents(s: WorkforceState, layout: OfficeLayout, clock: Of
   void layout // the routine finds each desk in the layout itself; the argument keeps the call shape the same as the others
   return s.agents.map((agent) => {
     const active = activeTaskFor(s, agent.id)
-    const startedReal = active ? (timeOf(active.startedAt) ?? timeOf(active.createdAt)) : null
+    // A held task is waiting, not working: the agent keeps living its break until the task really starts.
+    const startedReal = active && !active.hold ? (timeOf(active.startedAt) ?? timeOf(active.createdAt)) : null
     let endedReal: number | null = null
     for (const t of s.tasks) {
-      if (t.agentId !== agent.id || t === active) continue
+      // A task that never started (a held one that was cancelled) leaves the agent where it was.
+      if (t.agentId !== agent.id || t === active || t.startedAt === null) continue
       const at = timeOf(t.completedAt)
       if (at !== null && (endedReal === null || at > endedReal)) endedReal = at
     }
@@ -236,11 +239,21 @@ export type MarkerPhase = 'queued' | 'starting' | 'waiting_for_approval' | 'canc
 
 /** The lifecycle phases that get their own desk-marker look; running and ended tasks are already shown by the agent status colour. */
 export function markerPhase(task: AgentTask | undefined): MarkerPhase | null {
-  return task && (task.status === 'queued' || task.status === 'starting' || task.status === 'waiting_for_approval' || task.status === 'cancelling') ? task.status : null
+  return task && !task.hold && (task.status === 'queued' || task.status === 'starting' || task.status === 'waiting_for_approval' || task.status === 'cancelling') ? task.status : null
 }
 
+/** `On lunch · starts around 13:00` in Jakarta time, or the reason it still waits after its break. */
+export function heldTaskText(hold: TaskHold): string {
+  return hold.blockedBy ?? `${hold.label} · starts around ${clockText(jakartaDay(hold.untilMs), hold.untilMs)}`
+}
+
+const heldOf = (task: AgentTask | undefined): string | null => (task?.hold ? heldTaskText(task.hold) : null)
+
 export function agentStatusText(s: WorkforceState, agent: Agent): string {
-  const phase = markerPhase(activeTaskFor(s, agent.id))
+  const task = activeTaskFor(s, agent.id)
+  const held = heldOf(task)
+  if (held) return held
+  const phase = markerPhase(task)
   return phase ? TASK_STATUS_LABEL[phase] : AGENT_STATUS_LABEL[agent.status]
 }
 

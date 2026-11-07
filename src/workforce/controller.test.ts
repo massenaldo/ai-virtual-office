@@ -136,6 +136,12 @@ describe('createWorkforceController', () => {
     expect(c.cancelTask(id)).toEqual({ ok: true })
   })
 
+  it('a browser-only task is never held, and Start now says only the server holds', () => {
+    c.startTask('agent-demo-qa', { title: 'Run tests', description: '' })
+    expect(task('agent-demo-qa')).toMatchObject({ status: expect.stringMatching(/^(starting|running)$/), hold: null })
+    expect(c.startHeldTask(task('agent-demo-qa')!.id)).toEqual({ ok: false, error: 'Only the server holds tasks during breaks.' })
+  })
+
   it('has no permission commands locally', () => {
     expect([c.createPermission, c.revokePermission, c.revokeAgentPermissions]).toEqual([undefined, undefined, undefined])
   })

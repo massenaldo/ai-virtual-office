@@ -23,7 +23,7 @@ export function screenPosition(point: THREE.Vector3, camera: THREE.Camera, size:
 }
 
 /** A status marker over a desk. Scene-side shape, so the scene never imports workforce types. */
-export type DeskMarker = { id: string; label: string; status: string; x: number; z: number; seated: boolean; selected: boolean; phase: string | null }
+export type DeskMarker = { id: string; label: string; status: string; x: number; z: number; seated: boolean; selected: boolean; phase: string | null; /** A task waiting for a break, as text, or null. */ held: string | null }
 
 export const MARKER_HEIGHT = 1.45
 /** Clears the head of a character who is standing, which is taller than one sitting. */
@@ -35,7 +35,8 @@ export function markerAnchor(m: Pick<DeskMarker, 'x' | 'z' | 'seated'>, floorPla
   return out.set(m.x, floorPlan ? PLAN_MARKER_HEIGHT : m.seated ? MARKER_HEIGHT : STANDING_MARKER_HEIGHT, m.z)
 }
 
-/** The marker's text: the agent's name, then what it is doing away from the desk. A task phase wins and leaves the name alone. */
-export function markerText(name: string, presenceLabel: string | null, phase: string | null): string {
+/** The marker's text: the agent's name, then what it is doing away from the desk. A waiting task's text comes next; a task phase wins and leaves the name alone. */
+export function markerText(name: string, presenceLabel: string | null, phase: string | null, held: string | null = null): string {
+  if (held && !phase) return `${name} · ${held}`
   return presenceLabel && !phase ? `${name} · ${presenceLabel}` : name
 }

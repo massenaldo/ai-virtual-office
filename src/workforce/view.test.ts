@@ -5,10 +5,11 @@ import type { OfficeLayout } from '../layout/types'
 import { DEPARTMENTS } from '../layout/catalog'
 import { createDemoWorkforce } from './demo'
 import type { PermissionRuleView } from './api'
-import { addActivity, assignTask, cancelTask } from './operations'
+import { addActivity, assignTask, cancelTask, markStarting } from './operations'
+import type { TaskHold } from './types'
 import type { RuntimeEnvironment } from './controller'
 import { createOfficeClock } from '../office/officeClock'
-import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskCharacters, deskClickTarget, deskMarkers, shortDigest, environmentBadge, environmentNote, connectionLabel, agentStatusText, workforceNotice, TASK_RUNTIME_LABEL, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, allowedScopes, permissionStateText, rulesForTab, scopeSentence, choiceFor, agentPermissionChip, revokePrompt, revokeAgentPrompt, waitingApprovals, removalPrompt, TASK_STATUS_LABEL, formatUsage, sourceFileName, todaySchedule, routineAgents } from './view'
+import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskCharacters, deskClickTarget, deskMarkers, shortDigest, environmentBadge, environmentNote, connectionLabel, agentStatusText, workforceNotice, TASK_RUNTIME_LABEL, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, allowedScopes, permissionStateText, rulesForTab, scopeSentence, choiceFor, agentPermissionChip, revokePrompt, revokeAgentPrompt, waitingApprovals, removalPrompt, TASK_STATUS_LABEL, formatUsage, sourceFileName, todaySchedule, routineAgents, heldTaskText } from './view'
 
 const NOW = '2026-10-30T09:00:00.000Z'
 const layout = createDefaultLayout()
@@ -118,7 +119,7 @@ describe('deskMarkers', () => {
   it('lists agents on existing desks', () => {
     const markers = deskMarkers(layout, demo, null)
     expect(markers).toHaveLength(6)
-    expect(markers.find((m) => m.id === 'agent-demo-pm')).toEqual({ id: 'agent-demo-pm', label: 'Atlas', status: 'idle', x: -2.7, z: -3.84, seated: true, selected: false, phase: null })
+    expect(markers.find((m) => m.id === 'agent-demo-pm')).toEqual({ id: 'agent-demo-pm', label: 'Atlas', status: 'idle', x: -2.7, z: -3.84, seated: true, selected: false, phase: null, held: null })
     const selected = deskMarkers(layout, demo, 'agent-demo-pm')
     expect(selected.filter((m) => m.selected).map((m) => m.id)).toEqual(['agent-demo-pm'])
   })
@@ -495,12 +496,77 @@ describe('routineAgents', () => {
     const broken = { ...state, tasks: state.tasks.map((t) => (t.id === taskId ? { ...t, status: 'failed' as const, completedAt: 'not a date' } : t)) }
     expect(ofAgent(broken, 'agent-demo-pm').busyUntil).toBeNull()
     const base = state.tasks.find((t) => t.id === taskId)!
-    const two = { ...state, tasks: [{ ...base, status: 'completed' as const, completedAt: iso(REAL - 90_000) }, { ...base, id: 'task-b', status: 'cancelled' as const, completedAt: iso(REAL - 10_000) }] }
+    const began = { startedAt: iso(REAL - 120_000) }
+    const two = { ...state, tasks: [{ ...base, ...began, status: 'completed' as const, completedAt: iso(REAL - 90_000) }, { ...base, ...began, id: 'task-b', status: 'cancelled' as const, completedAt: iso(REAL - 10_000) }] }
     expect(ofAgent(two, 'agent-demo-pm').busyUntil).toBe(SERVER - 10_000)
   })
 
   it('a missing desk becomes a null desk', () => {
     const s = { ...demo, agents: demo.agents.map((a) => (a.id === 'agent-demo-qa' ? { ...a, deskId: null } : a)) }
     expect(ofAgent(s, 'agent-demo-qa').deskId).toBeNull()
+  })
+})
+
+describe('held tasks', () => {
+  const LUNCH_END = Date.parse('2026-11-09T13:00:00+07:00')
+  const HOLD: TaskHold = { label: 'On lunch', untilMs: LUNCH_END, blockedBy: null }
+  function held(agentId = 'agent-demo-pm') {
+    const r = assignTask(demo, agentId, { title: 'Draft sprint plan', description: '' }, NOW, { hold: HOLD })
+    if (!r.ok) throw new Error(r.error)
+    return { state: r.state, taskId: r.taskId }
+  }
+
+  it('heldTaskText names the break and the Jakarta time it ends', () => {
+    expect(heldTaskText(HOLD)).toBe('On lunch · starts around 13:00')
+    expect(heldTaskText({ label: 'Praying', untilMs: Date.parse('2026-11-09T15:20:00+07:00'), blockedBy: null })).toBe('Praying · starts around 15:20')
+  })
+  it('heldTaskText stays Jakarta time whatever the viewer zone is', () => {
+    const was = process.env.TZ
+    try {
+      for (const tz of ['America/Los_Angeles', 'Asia/Tokyo', 'UTC']) {
+        process.env.TZ = tz
+        expect(heldTaskText(HOLD)).toBe('On lunch · starts around 13:00')
+      }
+    } finally {
+      if (was === undefined) delete process.env.TZ
+      else process.env.TZ = was
+    }
+  })
+  it('heldTaskText gives blockedBy when set', () => {
+    expect(heldTaskText({ ...HOLD, blockedBy: 'Waiting for a free Claude slot. It starts as soon as one finishes.' })).toBe('Waiting for a free Claude slot. It starts as soon as one finishes.')
+  })
+  it('agentStatusText and deskMarkers use it, and the marker has no task phase', () => {
+    const { state } = held()
+    const pm = state.agents.find((a) => a.id === 'agent-demo-pm')!
+    expect(agentStatusText(state, pm)).toBe('On lunch · starts around 13:00')
+    const marker = deskMarkers(layout, state, null).find((m) => m.id === 'agent-demo-pm')!
+    expect(marker).toMatchObject({ phase: null, held: 'On lunch · starts around 13:00' })
+    expect(deskMarkers(layout, demo, null).every((m) => m.held === null)).toBe(true)
+  })
+  it('removalPrompt says the task is waiting for a break', () => {
+    expect(removalPrompt(held().state, 'agent-demo-pm')).toEqual({ title: 'Remove Atlas?', message: 'Atlas has "Draft sprint plan" waiting for a break. Removing the agent cancels the task and deletes its history.' })
+  })
+
+  describe('routineAgents', () => {
+    const SERVER = Date.parse('2026-11-07T05:00:00.000Z')
+    const REAL = Date.parse('2026-11-07T04:00:00.000Z')
+    const clock = createOfficeClock({ nowMs: SERVER, speed: 1, routine: true }, () => REAL)
+    const ofPm = (s: typeof demo) => routineAgents(s, layout, clock).find((r) => r.id === 'agent-demo-pm')!
+
+    it('a held task is not active, so the agent keeps living its break', () => {
+      expect(ofPm(held().state)).toMatchObject({ activeSince: null, busyUntil: null })
+    })
+    it('a held task that was released counts from the release', () => {
+      const { state, taskId } = held()
+      const releasedAt = new Date(REAL - 30_000).toISOString()
+      const started = markStarting(state, taskId, releasedAt)
+      expect(ofPm(started).activeSince).toBe(clock.fromReal(REAL - 30_000))
+    })
+    it('cancelling a held task leaves busyUntil unchanged', () => {
+      const { state, taskId } = held()
+      const before = ofPm(state)
+      const cancelled = cancelTask(state, taskId, new Date(REAL - 10_000).toISOString())
+      expect(ofPm(cancelled)).toEqual(before)
+    })
   })
 })

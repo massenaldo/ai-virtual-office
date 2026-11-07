@@ -49,5 +49,7 @@ describe('markerText', () => {
   it('is the name alone with no presence label', () => expect(markerText('Atlas', null, null)).toBe('Atlas'))
   it('adds the presence label after a dot', () => expect(markerText('Atlas', 'On lunch', null)).toBe('Atlas · On lunch'))
   it('keeps the praying label exact', () => expect(markerText('Atlas', 'Praying', null)).toBe('Atlas · Praying'))
+  it('a held task text replaces the presence label', () => expect(markerText('Massen', 'On lunch', null, 'On lunch · starts around 13:00')).toBe('Massen · On lunch · starts around 13:00'))
+  it('a held task text shows without a presence label', () => expect(markerText('Massen', null, null, 'Waiting for a free Claude slot. It starts as soon as one finishes.')).toBe('Massen · Waiting for a free Claude slot. It starts as soon as one finishes.'))
   it('a task phase wins over the presence label', () => expect(markerText('Atlas', 'On lunch', 'starting')).toBe('Atlas'))
 })

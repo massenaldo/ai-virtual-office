@@ -56,6 +56,8 @@ export type WorkforceController = {
   /** workspaceId: backend mode only; the server accepts only a workspace it registered and refuses anything else. */
   startTask(agentId: string, input: TaskInput, opts?: { workspaceId?: string | null; runtime?: 'mock' | 'claude' }): Awaitable<ActionResult>
   cancelTask(taskId: string): Awaitable<ActionResult>
+  /** Ends a waiting task's hold so it starts now. Only the server holds tasks, so the browser-only controller always refuses. */
+  startHeldTask(taskId: string): Awaitable<ActionResult>
   /** digest: the pending approval's action digest, sent back so the server can check it is the same action. */
   decideApproval(taskId: string, approvalId: string, decision: ApprovalChoice, digest?: string | null): Awaitable<ActionResult>
   requestApproval(taskId: string): void
@@ -152,6 +154,7 @@ export function createWorkforceController(opts: { storage: KV | null; now?: () =
       if (!started.ok) commit(ops.applyRuntimeEvent(current, { type: 'failed', taskId: task.id, error: started.error }, now(), runtime.mode))
       return { ok: true }
     },
+    startHeldTask: () => ({ ok: false, error: 'Only the server holds tasks during breaks.' }),
     // cancelling → the runtime confirms with a cancelled event; a runtime that doesn't answer gets the task force-ended.
     cancelTask(taskId) {
       commit(ops.requestCancel(current, taskId, now(), runtime.mode))

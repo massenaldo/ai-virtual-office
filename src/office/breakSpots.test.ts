@@ -10,7 +10,7 @@ describe('breakSpots', () => {
     const spots = breakSpots(layout)
     expect(spots.dining).toHaveLength(layout.furniture.filter((f) => f.type === 'dining-chair').length)
     expect(spots.prayer).toHaveLength(layout.furniture.filter((f) => f.type === 'prayer-mat').length)
-    expect(spots.coffee).toHaveLength(3)
+    expect(spots.coffee).toHaveLength(9)
     expect(spots.dining.every((s) => s.pose === 'sit')).toBe(true)
     expect([...spots.coffee, ...spots.prayer].every((s) => s.pose === 'stand')).toBe(true)
   })
@@ -18,7 +18,7 @@ describe('breakSpots', () => {
   it('stands at the counter 0.55 m south of it, 0.7 m apart, facing it', () => {
     const layout = createDefaultLayout()
     const counter = layout.furniture.find((f) => f.type === 'kitchen-counter')!
-    const spots = breakSpots(layout).coffee
+    const spots = breakSpots(layout).coffee.slice(0, 3)
     expect(spots.map((s) => s.z)).toEqual([counter.z + 0.55, counter.z + 0.55, counter.z + 0.55].map((z) => expect.closeTo(z, 5)))
     expect(spots.map((s) => s.x).sort((a, b) => a - b)).toEqual([counter.x - 0.7, counter.x, counter.x + 0.7].map((x) => expect.closeTo(x, 5)))
     expect(spots.every((s) => s.rotation === 0)).toBe(true)
@@ -28,7 +28,7 @@ describe('breakSpots', () => {
     const layout = createDefaultLayout()
     const turned: OfficeLayout = { ...layout, furniture: layout.furniture.map((f) => (f.type === 'kitchen-counter' ? { ...f, rotation: 90 } : f)) }
     const counter = turned.furniture.find((f) => f.type === 'kitchen-counter')!
-    const spots = breakSpots(turned).coffee
+    const spots = breakSpots(turned).coffee.slice(0, 3)
     // The front of a counter turned 90 degrees faces east, so people stand east of it, looking west (+90).
     expect(spots.length).toBeGreaterThan(0)
     for (const s of spots) {

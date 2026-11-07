@@ -4,9 +4,9 @@ import { createDefaultLayout } from '../layout/defaultLayout'
 import { seatForDesk } from '../layout/seats'
 import type { Furniture, OfficeLayout } from '../layout/types'
 import { breakSpots } from './breakSpots'
-import { dayStartMs, jakartaDay } from './jakartaClock'
+import { dayStartMs, jakartaDay, type JakartaDay } from './jakartaClock'
 import { ownerOffice } from './layoutFixtures'
-import { CHAT_MS, createRoutine, WALK_SPEED, type Presence, type RoutineAgent } from './presence'
+import { CHAT_MS, createRoutine, WALK_SPEED, walkMapFor, type Presence, type RoutineAgent } from './presence'
 import { daySchedule, type BreakEvent } from './schedule'
 import { createWalkMap, routeLength } from './walkMap'
 
@@ -177,12 +177,43 @@ describe('presenceAt', () => {
     const routine = createRoutine(agents, layout)
     const spots = breakSpots(layout)
     expect(spots.coffee.length).toBeLessThan(14)
-    const id = agents[spots.coffee.length].id
-    const coffee = daySchedule({ id, takesPrayerBreaks: false }, MONDAY).find((e) => e.kind === 'coffee')!
-    const seat = seatOf(layout, agents[spots.coffee.length].deskId!)
-    expect(routine.presenceAt(id, (coffee.startMs + coffee.endMs) / 2)).toMatchObject({ state: 'coffee', label: 'Coffee', x: seat.x, z: seat.z, pose: 'sit', bubble: false })
-    const first = daySchedule({ id: agents[0].id, takesPrayerBreaks: false }, MONDAY).find((e) => e.kind === 'coffee')!
-    expect(routine.presenceAt(agents[0].id, (first.startMs + first.endMs) / 2)).toMatchObject({ state: 'coffee', label: 'Coffee', pose: 'stand' })
+    const during = agents.map((a) => {
+      const coffee = daySchedule({ id: a.id, takesPrayerBreaks: false }, MONDAY).find((e) => e.kind === 'coffee')!
+      return routine.presenceAt(a.id, (coffee.startMs + coffee.endMs) / 2)!
+    })
+    expect(during.every((p) => p.state === 'coffee' && p.label === 'Coffee' && !p.bubble)).toBe(true)
+    expect(during.filter((p) => p.pose === 'stand')).toHaveLength(spots.coffee.length)
+    expect(during.filter((p) => p.pose === 'sit')).toHaveLength(14 - spots.coffee.length)
+    const places = during.filter((p) => p.pose === 'stand').map((p) => `${p.x},${p.z}`)
+    expect(new Set(places).size).toBe(places.length)
+    during.forEach((p, i) => {
+      if (p.pose !== 'sit') return
+      const seat = seatOf(layout, agents[i].deskId!)
+      expect([p.x, p.z]).toEqual([seat.x, seat.z])
+    })
+  })
+
+  it('who stays at their desk for coffee changes from day to day', () => {
+    const agents = agentsFor(14, { takesPrayerBreaks: false })
+    const routine = createRoutine(agents, layout)
+    const atDesk = (day: JakartaDay) => agents.filter((a) => {
+      const coffee = daySchedule({ id: a.id, takesPrayerBreaks: false }, day).find((e) => e.kind === 'coffee')!
+      return routine.presenceAt(a.id, (coffee.startMs + coffee.endMs) / 2)!.pose === 'sit'
+    }).map((a) => a.id).join()
+    const days = Array.from({ length: 10 }, (_, i) => jakartaDay(dayStartMs(MONDAY) + i * 86_400_000))
+    expect(new Set(days.map(atDesk)).size).toBeGreaterThan(1)
+  })
+
+  it('the same pairs do not chat every day', () => {
+    const routine = createRoutine(agentsFor(14, { takesPrayerBreaks: false }), layout)
+    const days = Array.from({ length: 10 }, (_, i) => jakartaDay(dayStartMs(MONDAY) + i * 86_400_000))
+    const pairs = new Set(days.flatMap((d) => routine.chatsOn(d).map((c) => `${c.a}+${c.b}`)))
+    expect(pairs.size).toBeGreaterThan(routine.chatsOn(MONDAY).length)
+  })
+
+  it('a rebuilt routine shares the layout walk map, so a task starting costs no route search', () => {
+    expect(walkMapFor(layout)).toBe(walkMapFor(layout))
+    expect(walkMapFor({ ...layout })).not.toBe(walkMapFor(layout))
   })
 
   it('a deleted room or a missing route keeps the agent at its desk with the label', () => {
@@ -249,9 +280,8 @@ describe('presenceAt', () => {
     ]
     const routine = createRoutine(agents, owner)
     const map = createWalkMap(owner)
-    // The two chairs on the far side of the compact dining table can't be walked to, so the agents take the two others.
     const spots = Object.fromEntries(Object.entries(breakSpots(owner)).map(([k, list]) => [k, list.filter((s) => map.route(seatOf(owner, 'desk-01'), s) !== null)])) as ReturnType<typeof breakSpots>
-    expect(spots.dining).toHaveLength(2)
+    expect(spots.dining).toHaveLength(4)
     agents.forEach((agent, index) => {
       const seat = seatOf(owner, agent.deskId!)
       for (const [kind, state, list] of [['coffee', 'coffee', spots.coffee], ['lunch', 'lunch', spots.dining], ['prayer', 'praying', spots.prayer]] as const) {

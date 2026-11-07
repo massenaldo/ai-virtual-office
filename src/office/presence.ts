@@ -65,8 +65,16 @@ const remember = <K, V>(cache: Map<K, V>, key: K, value: V): V => {
 
 const STATE_OF: Record<BreakEvent['kind'], PresenceState> = { coffee: 'coffee', lunch: 'lunch', friday: 'lunch', prayer: 'praying' }
 
+const walkMaps = new WeakMap<OfficeLayout, WalkMap>()
+/** One map per layout object, with its routes, because the routine is rebuilt whenever a task starts or ends and the layout hasn't changed. */
+export function walkMapFor(layout: OfficeLayout): WalkMap {
+  let map = walkMaps.get(layout)
+  if (!map) walkMaps.set(layout, (map = createWalkMap(layout)))
+  return map
+}
+
 export function createRoutine(agents: RoutineAgent[], layout: OfficeLayout): { presenceAt(agentId: string, nowMs: number): Presence | null; chatsOn(day: JakartaDay): Chat[] } {
-  const map: WalkMap = createWalkMap(layout)
+  const map = walkMapFor(layout)
   const sorted = [...agents].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   const desks = new Map(layout.furniture.filter((f) => f.type === 'desk').map((f) => [f.id, f]))
   const records = new Map<string, AgentRecord>()
@@ -93,10 +101,13 @@ export function createRoutine(agents: RoutineAgent[], layout: OfficeLayout): { p
     })
     return (spotLists = { coffee: reachable(all.coffee), dining: reachable(all.dining), prayer: reachable(all.prayer) })
   }
-  const spotFor = (record: AgentRecord, kind: BreakEvent['kind']): Stance | null => {
+  const spotFor = (record: AgentRecord, kind: BreakEvent['kind'], day: JakartaDay): Stance | null => {
     const lists = spots()
-    const list = kind === 'coffee' ? lists.coffee : kind === 'prayer' ? lists.prayer : lists.dining
-    return list[record.index] ?? null
+    if (kind === 'coffee') {
+      // The kitchen holds fewer than a full office, so who stays at their desk changes from day to day.
+      return lists.coffee[(record.index + stableHash(`coffee:${day.key}`)) % sorted.length] ?? null
+    }
+    return (kind === 'prayer' ? lists.prayer : lists.dining)[record.index] ?? null
   }
 
   let lastDay: Day | null = null
@@ -164,7 +175,9 @@ export function createRoutine(agents: RoutineAgent[], layout: OfficeLayout): { p
           .map((o) => ({ o, d: Math.hypot(o.home.x - r.home.x, o.home.z - r.home.z) }))
           .sort((p, q) => p.d - q.d || (p.o.agent.id < q.o.agent.id ? -1 : 1))
           .slice(0, CHAT_TRIES)
-        for (const { o } of options) {
+        // Which of the nearest colleagues comes first changes by day and slot, so the same pairs don't always talk.
+        const first = options.length === 0 ? 0 : stableHash(`chat:${day.day.key}:${n}:${r.agent.id}`) % options.length
+        for (const { o } of [...options.slice(first), ...options.slice(0, first)]) {
           const spot = meeting(r, o)
           if (!spot) continue
           paired.add(r.agent.id)
@@ -188,7 +201,7 @@ export function createRoutine(agents: RoutineAgent[], layout: OfficeLayout): { p
   // ---- itineraries ----
 
   function plansFor(record: AgentRecord, day: Day): Plan[] {
-    const plans: Plan[] = scheduleOf(record, day).map((e) => ({ startMs: e.startMs, endMs: e.endMs, state: STATE_OF[e.kind], label: e.label, spot: spotFor(record, e.kind), bubble: false }))
+    const plans: Plan[] = scheduleOf(record, day).map((e) => ({ startMs: e.startMs, endMs: e.endMs, state: STATE_OF[e.kind], label: e.label, spot: spotFor(record, e.kind, day.day), bubble: false }))
     for (const c of chatsFor(day).plans) {
       if (c.a !== record.agent.id && c.b !== record.agent.id) continue
       plans.push({ startMs: c.startMs, endMs: c.endMs, state: 'chatting', label: 'Chatting', spot: c.a === record.agent.id ? c.stanceA : c.stanceB, bubble: true })

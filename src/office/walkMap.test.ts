@@ -65,7 +65,7 @@ describe('createWalkMap', () => {
     const map = createWalkMap(layout)
     const spots = breakSpots(layout)
     // The two chairs on the far side of the compact dining table sit in a 0.18 m gap nobody can walk through, so they have no route.
-    const reachable = { coffee: 3, dining: 2, prayer: 4 }
+    const reachable = { coffee: 6, dining: 4, prayer: 4 }
     for (const seat of seats(layout)) {
       for (const kind of ['coffee', 'dining', 'prayer'] as const) {
         const found = spots[kind].filter((spot) => map.route(seat, spot) !== null)

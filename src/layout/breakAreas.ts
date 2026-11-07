@@ -52,11 +52,12 @@ export function compactBreakArea(department: BreakDepartment): { room: Room; fur
     furniture.push(piece('kitchen-counter-01', 'kitchen-counter', 0, -0.78, 0, department), piece('coffee-machine-01', 'coffee-machine', -0.7, -0.78, 0, department))
   } else if (department === 'dining') {
     furniture.push(
-      piece('dining-table-01', 'dining-table', 0, 0, 0, department),
-      piece('dining-chair-01', 'dining-chair', -0.5, -0.62, 180, department),
-      piece('dining-chair-02', 'dining-chair', 0.5, -0.62, 180, department),
-      piece('dining-chair-03', 'dining-chair', -0.5, 0.62, 0, department),
-      piece('dining-chair-04', 'dining-chair', 0.5, 0.62, 0, department),
+      // The table runs from the back wall toward the open side, so both rows of chairs can be walked to.
+      piece('dining-table-01', 'dining-table', 0, 0, 90, department),
+      piece('dining-chair-01', 'dining-chair', -0.62, -0.5, 270, department),
+      piece('dining-chair-02', 'dining-chair', -0.62, 0.5, 270, department),
+      piece('dining-chair-03', 'dining-chair', 0.62, -0.5, 90, department),
+      piece('dining-chair-04', 'dining-chair', 0.62, 0.5, 90, department),
     )
   } else {
     let mat = 0

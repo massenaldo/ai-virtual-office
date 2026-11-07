@@ -204,6 +204,17 @@ describe('presenceAt', () => {
     expect(new Set(days.map(atDesk)).size).toBeGreaterThan(1)
   })
 
+  it('people drift off to chat in ones and twos, never the whole office at once', () => {
+    const routine = createRoutine(agentsFor(14, { takesPrayerBreaks: false }), layout)
+    for (let i = 0; i < 10; i++) {
+      const chats = routine.chatsOn(jakartaDay(dayStartMs(MONDAY) + i * 86_400_000))
+      for (const c of chats) {
+        const together = chats.filter((o) => o.startMs < c.startMs + CHAT_MS && o.startMs + CHAT_MS > c.startMs).length
+        expect(together).toBeLessThanOrEqual(4)
+      }
+    }
+  })
+
   it('the same pairs do not chat every day', () => {
     const routine = createRoutine(agentsFor(14, { takesPrayerBreaks: false }), layout)
     const days = Array.from({ length: 10 }, (_, i) => jakartaDay(dayStartMs(MONDAY) + i * 86_400_000))

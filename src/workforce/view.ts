@@ -8,6 +8,8 @@ import type { PermissionRuleView } from './api'
 import type { PermissionsState } from './permissions'
 import type { ConnectionStatus, RuntimeEnvironment, WorkforceSnapshot } from './controller'
 import { dayStartMs, jakartaDay } from '../office/jakartaClock'
+import type { OfficeClock } from '../office/officeClock'
+import type { RoutineAgent } from '../office/presence'
 import { daySchedule } from '../office/schedule'
 import { activeTaskFor, agentAtDesk } from './operations'
 import type { Preserved, WorkforceLoadProblem } from './storage'
@@ -128,6 +130,37 @@ export function deskCharacters(layout: OfficeLayout, s: WorkforceState): SceneCh
       doneAt: finishedAt(s, agent),
       accent: DEPARTMENTS[agent.department]?.color ?? DEPARTMENTS.executive.color,
     }]
+  })
+}
+
+const timeOf = (iso: string | null): number | null => {
+  if (iso === null) return null
+  const ms = Date.parse(iso)
+  return Number.isFinite(ms) ? ms : null
+}
+
+/**
+ * What the routine needs to know about each agent, in office time (`clock.fromReal` turns the real task times into it). An active
+ * task gives `activeSince`; the latest finished task gives `busyUntil`. An unreadable time counts as missing.
+ */
+export function routineAgents(s: WorkforceState, layout: OfficeLayout, clock: OfficeClock): RoutineAgent[] {
+  void layout // the routine finds each desk in the layout itself; the argument keeps the call shape the same as the others
+  return s.agents.map((agent) => {
+    const active = activeTaskFor(s, agent.id)
+    const startedReal = active ? (timeOf(active.startedAt) ?? timeOf(active.createdAt)) : null
+    let endedReal: number | null = null
+    for (const t of s.tasks) {
+      if (t.agentId !== agent.id || t === active) continue
+      const at = timeOf(t.completedAt)
+      if (at !== null && (endedReal === null || at > endedReal)) endedReal = at
+    }
+    return {
+      id: agent.id,
+      deskId: agent.deskId,
+      takesPrayerBreaks: agent.takesPrayerBreaks,
+      activeSince: startedReal === null ? null : clock.fromReal(startedReal),
+      busyUntil: endedReal === null ? null : clock.fromReal(endedReal),
+    }
   })
 }
 

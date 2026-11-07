@@ -15,6 +15,7 @@ import FurnitureItem from './FurnitureItem'
 import { sharedMaterials } from './materials'
 import ResizeHandles from './ResizeHandles'
 import type { DeskMarker } from './labels'
+import type { PresenceSource } from './presenceTypes'
 import { RoomLabelLayer, RoomLabelTracker, type LabelRegistry } from './RoomLabels'
 import RoomMesh from './RoomMesh'
 import { RenderStatsPanel, RenderStatsProbe } from './StatsOverlay'
@@ -34,8 +35,10 @@ export type OfficeSceneProps = {
   onTransformEnd(): void
   /** Agent status markers over desks; hidden in edit mode. */
   markers?: DeskMarker[]
-  /** Seated characters at their desks; hidden in edit mode. Clicks reuse onDeskClick. */
+  /** One character per agent with a desk; hidden in edit mode. Clicks reuse onDeskClick. */
   characters?: SceneCharacter[]
+  /** Where each character is, read every frame. Without it everyone stays at their desk. */
+  presence?: PresenceSource
   /** Desk outlined for the selected agent; ignored in edit mode. */
   highlightDeskId?: string | null
   /** Workforce mode desk clicks; never attached in edit mode. */
@@ -43,6 +46,8 @@ export type OfficeSceneProps = {
   /** Move the camera to a floor point whenever key changes. */
   focus?: FocusRequest | null
 }
+
+const AT_DESK: PresenceSource = () => null
 
 export type FocusRequest = { x: number; z: number; key: number }
 
@@ -143,7 +148,7 @@ function ViewCameras({ layout, floorPlan, viewKey, focus }: { layout: OfficeLayo
     : <OrbitControls key={`3d-${viewKey}`} camera={camera} makeDefault target={overview.target} minDistance={7} maxDistance={Math.max(32, overview.distance * 1.4)} maxPolarAngle={Math.PI / 2.08} />
 }
 
-function OfficeContents({ layout, floorPlan, viewKey, editing, selection, issues, labels, markerRegistry, markers, characters, highlightDeskId, onDeskClick, focus, onSelect, onTransformStart, onTransform, onTransformEnd }: OfficeSceneProps & { labels: LabelRegistry; markerRegistry: MarkerRegistry }) {
+function OfficeContents({ layout, floorPlan, viewKey, editing, selection, issues, labels, markerRegistry, markers, characters, presence = AT_DESK, highlightDeskId, onDeskClick, focus, onSelect, onTransformStart, onTransform, onTransformEnd }: OfficeSceneProps & { labels: LabelRegistry; markerRegistry: MarkerRegistry }) {
   const isSelected = (kind: 'room' | 'furniture', id: string) => selection?.kind === kind && selection.id === id
   const transform = { onTransformStart, onTransform, onTransformEnd }
   // Soft floor shadows render twice per key. Outside editing a view or layout change makes a new key, so they refresh.
@@ -159,7 +164,7 @@ function OfficeContents({ layout, floorPlan, viewKey, editing, selection, issues
     {layout.rooms.map((room) => <RoomMesh key={room.id} room={room} floorPlan={floorPlan} editing={editing} selected={isSelected('room', room.id)} invalid={issues.has(room.id)} onSelect={() => onSelect({ kind: 'room', id: room.id })} {...transform} />)}
     {layout.furniture.map((item) => <FurnitureItem key={item.id} item={item} floorPlan={floorPlan} editing={editing} selected={isSelected('furniture', item.id)} invalid={issues.has(item.id)} onSelect={() => onSelect({ kind: 'furniture', id: item.id })} {...transform}
       agentHighlight={!editing && item.id === highlightDeskId} onDeskClick={!editing && onDeskClick && item.type === 'desk' ? () => onDeskClick(item.id) : undefined} />)}
-    {!editing && characters && <Characters characters={characters} floorPlan={floorPlan} onDeskClick={onDeskClick} />}
+    {!editing && characters && <Characters characters={characters} presence={presence} floorPlan={floorPlan} onDeskClick={onDeskClick} />}
     {editing && floorPlan && <Grid position={[0, 0.045, 0]} args={[layout.office.width, layout.office.depth]} cellSize={layout.office.gridSize} cellThickness={0.6} cellColor="#9aa6b0" sectionSize={1} sectionThickness={1} sectionColor="#6f7d89" fadeDistance={200} raycast={() => null} />}
     {editing && floorPlan && selectedRoom && <ResizeHandles room={selectedRoom} {...transform} />}
     {!editing && characters && <DrawScheduler characters={characters.length} editing={editing} floorPlan={floorPlan} />}
@@ -167,7 +172,7 @@ function OfficeContents({ layout, floorPlan, viewKey, editing, selection, issues
     <StudioEnvironment floorPlan={floorPlan} />
     <ViewCameras layout={layout} floorPlan={floorPlan} viewKey={viewKey} focus={focus} />
     <RoomLabelTracker rooms={layout.rooms} floorPlan={floorPlan} registry={labels} />
-    {!editing && markers && <DeskMarkerTracker markers={markers} floorPlan={floorPlan} registry={markerRegistry} />}
+    {!editing && markers && <DeskMarkerTracker markers={markers} presence={presence} floorPlan={floorPlan} registry={markerRegistry} />}
   </>
 }
 

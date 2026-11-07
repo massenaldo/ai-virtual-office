@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
-import { labelAnchor, markerAnchor, screenPosition } from './labels'
+import { labelAnchor, markerAnchor, markerText, screenPosition } from './labels'
 
 const room = { x: 2, z: -3, wallHeight: 2.5 }
 
@@ -43,4 +43,11 @@ describe('markerAnchor', () => {
     expect(markerAnchor({ x: 1, z: 2, seated: false }, false).toArray()).toEqual([1, 1.9, 2])
     expect(markerAnchor({ x: 1, z: 2, seated: false }, true).toArray()).toEqual([1, 0.35, 2])
   })
+})
+
+describe('markerText', () => {
+  it('is the name alone with no presence label', () => expect(markerText('Atlas', null, null)).toBe('Atlas'))
+  it('adds the presence label after a dot', () => expect(markerText('Atlas', 'On lunch', null)).toBe('Atlas · On lunch'))
+  it('keeps the praying label exact', () => expect(markerText('Atlas', 'Praying', null)).toBe('Atlas · Praying'))
+  it('a task phase wins over the presence label', () => expect(markerText('Atlas', 'On lunch', 'starting')).toBe('Atlas'))
 })

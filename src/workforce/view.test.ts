@@ -7,7 +7,8 @@ import { createDemoWorkforce } from './demo'
 import type { PermissionRuleView } from './api'
 import { addActivity, assignTask, cancelTask } from './operations'
 import type { RuntimeEnvironment } from './controller'
-import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskCharacters, deskClickTarget, deskMarkers, shortDigest, environmentBadge, environmentNote, connectionLabel, agentStatusText, workforceNotice, TASK_RUNTIME_LABEL, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, allowedScopes, permissionStateText, rulesForTab, scopeSentence, choiceFor, agentPermissionChip, revokePrompt, revokeAgentPrompt, waitingApprovals, removalPrompt, TASK_STATUS_LABEL, formatUsage, sourceFileName, todaySchedule } from './view'
+import { createOfficeClock } from '../office/officeClock'
+import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskCharacters, deskClickTarget, deskMarkers, shortDigest, environmentBadge, environmentNote, connectionLabel, agentStatusText, workforceNotice, TASK_RUNTIME_LABEL, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, allowedScopes, permissionStateText, rulesForTab, scopeSentence, choiceFor, agentPermissionChip, revokePrompt, revokeAgentPrompt, waitingApprovals, removalPrompt, TASK_STATUS_LABEL, formatUsage, sourceFileName, todaySchedule, routineAgents } from './view'
 
 const NOW = '2026-10-30T09:00:00.000Z'
 const layout = createDefaultLayout()
@@ -453,5 +454,53 @@ describe('todaySchedule', () => {
     const rows = todaySchedule({ ...agentOn, takesPrayerBreaks: false }, FRIDAY_NOON)
     expect(rows.some((r) => r.label === 'Praying' || r.label === 'Friday prayer and lunch')).toBe(false)
     expect(rows.some((r) => r.label === 'On lunch')).toBe(true)
+  })
+})
+
+describe('routineAgents', () => {
+  const SERVER = Date.parse('2026-11-07T05:00:00.000Z')
+  const REAL = Date.parse('2026-11-07T04:00:00.000Z')
+  // The office is an hour ahead of the real clock, at normal speed.
+  const clock = createOfficeClock({ nowMs: SERVER, speed: 1, routine: true }, () => REAL)
+  const iso = (ms: number) => new Date(ms).toISOString()
+  const ofAgent = (s: typeof demo, id: string) => routineAgents(s, layout, clock).find((r) => r.id === id)!
+
+  it('gives one entry per agent with its desk and prayer setting', () => {
+    const list = routineAgents(demo, layout, clock)
+    expect(list).toHaveLength(demo.agents.length)
+    const pm = list.find((r) => r.id === 'agent-demo-pm')!
+    expect(pm).toEqual({ id: 'agent-demo-pm', deskId: 'desk-03', takesPrayerBreaks: agent('agent-demo-pm').takesPrayerBreaks, activeSince: null, busyUntil: null })
+  })
+
+  it('gives activeSince for an active task and busyUntil for a finished one, in office time', () => {
+    const { state, taskId } = withTask('agent-demo-pm')
+    const startedReal = REAL - 60_000
+    const running = { ...state, tasks: state.tasks.map((t) => (t.id === taskId ? { ...t, status: 'running' as const, startedAt: iso(startedReal) } : t)) }
+    expect(ofAgent(running, 'agent-demo-pm').activeSince).toBe(clock.fromReal(startedReal))
+    expect(ofAgent(running, 'agent-demo-pm').activeSince).toBe(SERVER - 60_000)
+    const endedReal = REAL - 30_000
+    const done = { ...state, tasks: state.tasks.map((t) => (t.id === taskId ? { ...t, status: 'completed' as const, startedAt: iso(startedReal), completedAt: iso(endedReal) } : t)) }
+    const r = ofAgent(done, 'agent-demo-pm')
+    expect(r.activeSince).toBeNull()
+    expect(r.busyUntil).toBe(SERVER - 30_000)
+  })
+
+  it('a queued task that has not started counts from when it was made', () => {
+    const { state } = withTask('agent-demo-pm')
+    expect(ofAgent(state, 'agent-demo-pm').activeSince).toBe(clock.fromReal(Date.parse(NOW)))
+  })
+
+  it('ignores an unreadable time, and uses the latest of several finished tasks', () => {
+    const { state, taskId } = withTask('agent-demo-pm')
+    const broken = { ...state, tasks: state.tasks.map((t) => (t.id === taskId ? { ...t, status: 'failed' as const, completedAt: 'not a date' } : t)) }
+    expect(ofAgent(broken, 'agent-demo-pm').busyUntil).toBeNull()
+    const base = state.tasks.find((t) => t.id === taskId)!
+    const two = { ...state, tasks: [{ ...base, status: 'completed' as const, completedAt: iso(REAL - 90_000) }, { ...base, id: 'task-b', status: 'cancelled' as const, completedAt: iso(REAL - 10_000) }] }
+    expect(ofAgent(two, 'agent-demo-pm').busyUntil).toBe(SERVER - 10_000)
+  })
+
+  it('a missing desk becomes a null desk', () => {
+    const s = { ...demo, agents: demo.agents.map((a) => (a.id === 'agent-demo-qa' ? { ...a, deskId: null } : a)) }
+    expect(ofAgent(s, 'agent-demo-qa').deskId).toBeNull()
   })
 })

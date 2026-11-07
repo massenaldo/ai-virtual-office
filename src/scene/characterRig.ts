@@ -5,7 +5,7 @@ import type { CharacterLook } from './characterLook'
 // A character is built in metres, standing on y = 0 at its origin and facing -Z. Its right hand is on +X. Seated, the origin is the
 // seat point (the middle of the chair seat), so the desk is in front, at about z = -0.56. All angles are in radians.
 
-export type CharacterAction = 'idle' | 'typing' | 'thinking' | 'waiting' | 'error' | 'done'
+export type CharacterAction = 'idle' | 'typing' | 'thinking' | 'waiting' | 'error' | 'done' | 'walk' | 'coffee' | 'eat' | 'chat' | 'pray'
 export type CharacterStatus = 'idle' | 'working' | 'thinking' | 'waiting' | 'error'
 
 /** How long the done gesture plays after a task finishes. */
@@ -27,6 +27,48 @@ export function characterAction(status: CharacterStatus, doneAt: number | null, 
   if (doneAt === null || !Number.isFinite(doneAt) || !Number.isFinite(nowMs)) return 'idle'
   const age = nowMs - doneAt
   return age >= 0 && age < DONE_GESTURE_MS ? 'done' : 'idle'
+}
+
+/** What a character does away from its desk, as the office's presence says. */
+export type CharacterActivity = 'idle' | 'coffee' | 'eat' | 'chat' | 'pray'
+export type CharacterPose = 'sit' | 'stand' | 'walk'
+
+/**
+ * The action for one character, first match wins: a task status (only while it is at its desk), walking, the activity, the done
+ * gesture, idle. `atDesk` is true when it stands or sits at its own seat and is not on its way anywhere. A character walking home
+ * to a task walks; it works once it is back. `doneAt` and `nowMs` are real time, as task times are.
+ */
+export function chooseAction(c: { status: CharacterStatus; doneAt: number | null; nowMs: number; pose: CharacterPose; activity: CharacterActivity; atDesk: boolean }): CharacterAction {
+  if (c.status !== 'idle' && c.atDesk && c.pose !== 'walk') return characterAction(c.status, c.doneAt, c.nowMs)
+  if (c.pose === 'walk') return 'walk'
+  if (c.activity !== 'idle') return c.activity
+  return characterAction('idle', c.doneAt, c.nowMs)
+}
+
+const WRAP = Math.PI * 2
+/** Metres for one full walking cycle, both legs. Slow and natural at 1.2 m/s. */
+export const WALK_STRIDE = 1.3
+
+/** The walking cycle phase after moving `distance` metres, kept in [0, 2*PI). Distance, not time, so feet don't slide. */
+export function gaitAfter(gait: number, distance: number): number {
+  const g = Number.isFinite(gait) ? gait : 0
+  const d = Number.isFinite(distance) ? Math.max(0, distance) : 0
+  const next = (g + (d / WALK_STRIDE) * WRAP) % WRAP
+  return next < 0 ? next + WRAP : next
+}
+
+const TURN_RATE = 10 // per second
+const TURN_SNAP_S = 0.5
+
+/** Eases a facing, in degrees, toward its target the short way round. A gap of half a second or more, such as a hidden tab, lands on it. */
+export function easeRotation(current: number, target: number, dtS: number): number {
+  if (!Number.isFinite(target)) return Number.isFinite(current) ? current : 0
+  if (!Number.isFinite(current)) return target
+  if (!Number.isFinite(dtS)) return current
+  if (dtS >= TURN_SNAP_S) return target
+  const delta = ((((target - current) % 360) + 540) % 360) - 180
+  if (Math.abs(delta) < 0.05) return target
+  return current + delta * (1 - Math.exp(-TURN_RATE * Math.max(0, dtS)))
 }
 
 // ---------------------------------------------------------------- body dimensions
@@ -161,13 +203,74 @@ function standingArms(action: CharacterAction, t: number, p: number): Arms {
   }
 }
 
+const RELAXED_ARMS: Arms = { armL: 0.06, armLOut: 0.12, elbowL: 0.2, armR: 0.06, armROut: 0.12, elbowR: 0.2 }
+const STAND_LEGS = { thighL: 0.01, thighR: -0.01, kneeL: 0.02, kneeR: 0.02 }
+
+/** Away from the desk. Breathing is the only movement in prayer: the arms and legs are fixed, the head a little lowered. */
+function awayPose(action: CharacterAction, t: number, p: number): (Upper & Arms) | null {
+  const breath = wave(t, p, 0.27) * 0.012
+  switch (action) {
+    case 'pray':
+      return { spine: 0.02 + breath, spineRoll: 0, headPitch: 0.2, headYaw: 0, headRoll: 0, ...RELAXED_ARMS }
+    case 'coffee':
+      // One forearm raised in front as if holding a cup; the other hand low.
+      return { spine: 0.03 + breath, spineRoll: 0, headPitch: 0.02, headYaw: wave(t, p, 0.12) * 0.1, headRoll: 0, ...RELAXED_ARMS, armR: 0.45, armROut: -0.12, elbowR: 1.75 + wave(t, p, 0.15) * 0.03 }
+    case 'chat': {
+      // Slow, small gestures with one hand; a little nod.
+      const g = wave(t, p, 0.35)
+      return {
+        spine: 0.03 + breath, spineRoll: 0, headPitch: 0.04 + wave(t, p + 0.3, 0.3) * 0.04, headYaw: wave(t, p, 0.17) * 0.12, headRoll: 0,
+        armL: 0.06, armLOut: 0.12, elbowL: 0.2, armR: 0.5 + g * 0.18, armROut: -0.1, elbowR: 1.2 + g * 0.2,
+      }
+    }
+    default:
+      return null
+  }
+}
+
+/** Opposite arm and leg, a slow swing. The hips stay at one height; the swinging knee bends so the foot clears the floor. */
+function walkPose(gait: number): Pose {
+  const s = Math.sin(gait)
+  const c = Math.cos(gait)
+  return {
+    hipsY: STAND_HIPS_Y - 0.025,
+    hipsZ: 0,
+    spine: 0.04,
+    spineRoll: 0,
+    headPitch: 0,
+    headYaw: 0,
+    headRoll: 0,
+    armL: -0.32 * s,
+    armLOut: 0.1,
+    elbowL: 0.3 + 0.2 * Math.max(0, -s),
+    armR: 0.32 * s,
+    armROut: 0.1,
+    elbowR: 0.3 + 0.2 * Math.max(0, s),
+    thighL: 0.38 * s,
+    thighR: -0.38 * s,
+    kneeL: 0.04 + 0.55 * Math.max(0, c),
+    kneeR: 0.04 + 0.55 * Math.max(0, -c),
+  }
+}
+
 /**
  * The pose a character is heading for. `timeS` moves breathing, typing and waving, and `phase` (any number, the same for a given
  * character) keeps characters out of step. It is a target: `stepPose` eases the real pose toward it.
  */
-export function targetPose(action: CharacterAction, seated: boolean, timeS: number, phase: number): Pose {
+export function targetPose(action: CharacterAction, seated: boolean, timeS: number, phase: number, gait = 0): Pose {
   const t = Number.isFinite(timeS) ? timeS : 0
   const p = Number.isFinite(phase) ? phase : 0
+  if (action === 'walk') return walkPose(Number.isFinite(gait) ? gait : 0)
+  if (seated && action === 'eat') {
+    // Both hands on the table, a touch lower and slower than typing, leaning in a little.
+    const w = wave(t, p, 0.4) * 0.03
+    return { hipsY: SEAT_HIPS_Y, hipsZ: SEAT_HIPS_Z, spine: 0.1 + wave(t, p, 0.27) * 0.012, spineRoll: 0, headPitch: 0.12 + w, headYaw: 0, headRoll: 0,
+      armL: 0.42, armLOut: -0.2, elbowL: 1.3 + w, armR: 0.42, armROut: -0.2, elbowR: 1.3 - w, ...SEATED_LEGS }
+  }
+  const away = awayPose(action, t, p)
+  if (away && !seated) return { hipsY: STAND_HIPS_Y, hipsZ: 0, ...away, ...STAND_LEGS }
+  if (away) return targetPose('idle', true, t, p)
+  if (action === 'eat') return targetPose('idle', false, t, p)
   const upper = seatedUpper(action, t, p)
   if (seated) {
     return { hipsY: SEAT_HIPS_Y, hipsZ: SEAT_HIPS_Z, ...upper, ...seatedArms(action, t, p), ...SEATED_LEGS }
@@ -295,9 +398,9 @@ export function partColor(part: CharacterPart, look: CharacterLook, accent: stri
   }
 }
 
-/** Parts that are drawn only for some actions. Today that is the error badge. */
-export function partVisible(part: CharacterPart, action: CharacterAction): boolean {
-  return part === 'badge' ? action === 'error' : true
+/** Parts that are drawn only for some actions. Today that is the error badge, which also shows in any action while the status is error. */
+export function partVisible(part: CharacterPart, action: CharacterAction, status?: CharacterStatus): boolean {
+  return part === 'badge' ? action === 'error' || status === 'error' : true
 }
 
 /** A part's matrix from its joint's, written into `out`. The badge takes only the position, so a slumped head can't tip it over. */

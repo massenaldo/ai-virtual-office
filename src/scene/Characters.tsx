@@ -3,7 +3,7 @@ import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import { buildPartInstances, type SceneCharacter } from './characterInstances'
 import { characterLook } from './characterLook'
-import { JOINTS, characterAction, jointMatrices, partVisible, stepPose, targetPose, type CharacterAction, type Pose } from './characterRig'
+import { JOINTS, characterAction, jointMatrices, partMatrix, partVisible, stepPose, targetPose, type CharacterAction, type Pose } from './characterRig'
 import { CLICK_SLOP } from './FurnitureItem'
 import { stableHash } from './furnitureModels'
 
@@ -65,7 +65,7 @@ export default function Characters({ characters, floorPlan, onDeskClick }: Chara
   const state = useRef(new Map<string, Motion>())
   const lastMs = useRef<number | null>(null)
   const jointCache = useRef<THREE.Matrix4[][]>([])
-  const tmp = useRef({ root: new THREE.Matrix4(), m: new THREE.Matrix4() }).current
+  const tmp = useRef({ root: new THREE.Matrix4(), m: new THREE.Matrix4(), part: new THREE.Matrix4() }).current
   const pointer = usePointer(onDeskClick, (instanceId, mesh) => {
     if (instanceId === undefined) return undefined
     const index = floorPlan ? instanceId : groups[mesh]?.instances[instanceId]?.characterIndex
@@ -155,7 +155,7 @@ export default function Characters({ characters, floorPlan, onDeskClick }: Chara
         if (!partVisible(inst.entry.part, actions[ci])) return void mesh.setMatrixAt(i, ZERO)
         const c = characters[ci]
         tmp.root.makeRotationY((c.rotation * Math.PI) / 180).setPosition(c.x, 0, c.z)
-        mesh.setMatrixAt(i, tmp.m.multiplyMatrices(tmp.root, joints[ci][JOINTS.indexOf(inst.entry.joint)]))
+        mesh.setMatrixAt(i, tmp.m.multiplyMatrices(tmp.root, partMatrix(inst.entry.part, joints[ci][JOINTS.indexOf(inst.entry.joint)], tmp.part)))
       })
       mesh.instanceMatrix.needsUpdate = true
       // Three caches the sphere it raycasts against; refresh it after the instances moved.

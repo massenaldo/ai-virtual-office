@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- "A person's layout is never moved around automatically." Migration only ever adds, and adds all three rooms or none.
+- "A person's layout is never moved around automatically." Migration only ever adds, and adds all three rooms or none. Task 2 records the owner's compact set decision.
 - `kitchen`, `dining` and `prayer` are room departments, excluded from the departments an agent can belong to, like `meeting`.
 - 3D is built in code with no downloaded assets (`src/scene/noRemoteAssets.test.ts` stays in force).
 - Prayer must never be shown disrespectfully: the mat is plain, with no symbols, text or decoration, and notice text is plain.
@@ -23,7 +23,7 @@
 
 ## Review Focus
 
-1. A saved layout with anything on the new rooms' spot: it loads exactly as saved, with no rooms added, and the notice offers "Add break areas".
+1. A saved layout with no space for all three rooms: it loads exactly as saved, with no rooms added, and the notice offers "Add break areas".
 2. A schema 1 file on the server: the office shows the upgraded layout and "Saved", the file's bytes don't change until the person saves, and a restart gives the same result.
 3. A person deletes the kitchen after upgrading: it never comes back on reload, and a dismissed notice stays dismissed in that browser.
 4. An office floor too small for the new rooms, or an existing item already using a new ID: nothing throws, migration adds nothing, and "Add break areas" still produces a valid layout that passes `parseLayout`.
@@ -102,9 +102,11 @@ Screenshot for the PR: the five new items placed through the editor's palette, o
 **Interfaces:**
 - Consumes: Task 1's types and `BREAK_DEPARTMENTS`
 - Produces: `LAYOUT_SCHEMA_VERSION = 2`
-- Produces in `breakAreas.ts`: `breakAreaItems(): { rooms: Room[]; furniture: Furniture[] }` (fresh objects, default placement) and `withBreakAreasIfTheyFit(layout: OfficeLayout): OfficeLayout` (the same reference when they don't fit)
+- Produces in `breakAreas.ts`: `breakAreaItems(): { rooms: Room[]; furniture: Furniture[] }` (fresh objects, the full set at default placement), `compactBreakArea(department: BreakDepartment): { room: Room; furniture: Furniture[] }` (fresh objects, centred on the origin, to be moved by offset), `findRoomSpot(layout: OfficeLayout, width: number, depth: number): { x: number; z: number } | null`, and `withBreakAreasIfTheyFit(layout: OfficeLayout): OfficeLayout` (the same reference when nothing is added)
 
-Default placement. Rooms use `DEFAULT_WALL_HEIGHT`, rotation 0, and the department's colour. These clear plant-11 at (1.2, 7.5), so an unedited older office fits without moving it.
+**Owner's decision (2026-11-07):** this overrides the spec's single placement. The full set is for an office the size of the default one. A small office gets a compact set beside its existing rooms, because 16 chairs and 15 mats 17 m away make no sense for a two-agent company.
+
+Full set, default placement. Rooms use `DEFAULT_WALL_HEIGHT`, rotation 0, and the department's colour. These clear plant-11 at (1.2, 7.5), so an unedited older office fits without moving it.
 
 | Room ID | Name | Department | Centre | Width × depth |
 |---|---|---|---|---|
@@ -120,11 +122,26 @@ Default placement. Rooms use `DEFAULT_WALL_HEIGHT`, rotation 0, and the departme
 | `dining-chair-01` to `-16` | For each table, z = table z + −0.75, −0.25, 0.25, 0.75. West side x 2.58, rotation 270. East side x 3.82, rotation 90. So 16 seats for 14 desks |
 | `prayer-mat-01` to `-15` | x in −5.15, −4.0, −2.85; z in 4.88, 5.54, 6.2, 6.86, 7.52; rotation 90. Rotation 90 faces west, the nearest quarter turn to the qibla at about 295° |
 
-`withBreakAreasIfTheyFit` adds everything only if all of these hold, otherwise it returns its argument:
-- No existing room has a break department.
-- No new ID is already used.
-- Every new room is inside the office floor.
-- No new room's rectangle overlaps any existing room's or any existing furniture's rectangle, using `rectsOverlap`.
+Compact set, positions relative to the room centre. Room IDs, names and departments are the same as the full set, and furniture IDs follow the same pattern.
+
+| Room | Width × depth | Furniture |
+|---|---|---|
+| `kitchen` | 2.6 × 2.4 | Counter at (0, −0.78), rotation 0. Coffee machine at (−0.7, −0.78), rotation 0 |
+| `dining` | 2.6 × 2.4 | Table at (0, 0), rotation 0. Chairs at x ±0.5: z −0.62 with rotation 180, and z 0.62 with rotation 0. So 4 seats |
+| `prayer` | 2.6 × 2.4 | Mats at x ±0.6 and z ±0.4, rotation 90. So 4 mats |
+
+`findRoomSpot` returns the first candidate that is inside the office floor, 0.25 m clear of every room and every piece of furniture, and has a clear 1 m strip along its south side, since rooms open to the south. Candidates, in order:
+1. For each existing room, newest first: directly east of it with a 0.25 m gap and the same north edge, then directly west, then directly south with a 1.25 m gap and the same west edge.
+2. A 0.5 m scan of the whole floor, north to south and then west to east.
+
+So rooms added one after another form a row.
+
+`withBreakAreasIfTheyFit` returns its argument if any existing room has a break department, or if any new ID is already used. Otherwise:
+1. If the office has 6 or more desks and every full-set room is inside the floor and overlaps no existing room or furniture (using `rectsOverlap`), add the full set.
+2. Otherwise add the compact rooms in the order kitchen, dining, prayer, each using `findRoomSpot` on the layout so far.
+3. If any of the three has no spot, return the argument unchanged, because it's all three or none.
+
+The owner's office must give this exact result: one room `room-ceo-office` at (−9.75, −8.2), 5.5 × 3.6, on the 25 × 20 floor, gives kitchen centre x −5.45, dining x −2.6, prayer x 0.25, all at z −8.8, north edge −10.
 
 `migrateLayout(raw)`: if `raw` is an object with `schemaVersion === 1`, parse it with the version replaced by 2. If that parses, return `withBreakAreasIfTheyFit` of it. If not, return `raw` unchanged, so it reads as corrupt as it does today. Everything else passes through. Do not write the upgraded layout anywhere on load.
 
@@ -140,8 +157,11 @@ it('chairs face their table, west chairs rotation 270 and east chairs 90', ...) 
 it('the default layout has no placement warnings', ...)                           // findIssues(createDefaultLayout()) is empty
 it('every room keeps its open south side clear of other rooms and furniture', ...) // a 1 m strip south of each room
 it('there are at least as many dining chairs and prayer mats as default desks', ...)
-it('adds nothing and returns the same object if anything overlaps', ...)          // it.each: a plant on the kitchen, a room over the dining area, a desk in the prayer room
-it('adds nothing on a floor too small', ...)                                      // office 20 × 12
+it('an office with 6 or more desks and free default spots gets the full set', ...)
+it('a two-desk office gets the compact set in a row beside its room', ...)        // the exact numbers above
+it('a large office with something on a default spot gets the compact set, and nothing moves', ...)
+it('compact furniture stays inside its room with no placement warnings, and chairs face the table', ...)
+it('adds nothing and returns the same object when there is no room for all three', ...)  // a floor filled with rooms; a floor too small: office 6 × 6 with a 5 × 5 room
 it('adds nothing if an ID is taken, or a break room already exists', ...)
 // storage.test.ts
 it('an unedited schema 1 office gains all three rooms and moves nothing', ...)    // every old room and item deep-equal
@@ -183,10 +203,9 @@ Screenshots for the PR: 3D and floor plan, on a temporary data folder that start
 - Produces in `breakAreas.ts`: `missingBreakDepartments(layout: OfficeLayout): BreakDepartment[]`, `breakAreasNotice(layout: OfficeLayout): string | null`, and `addBreakAreas(layout: OfficeLayout): OfficeLayout`
 - Produces in `useEditorActions`: `addBreakAreas(): void`, one undo step that selects the first room added
 
-`addBreakAreas` adds only the missing rooms, and returns the same reference if none are missing. Each room's furniture moves with it by the same offset. Each room goes to:
-1. Its default spot, if that is free and inside the floor.
-2. Otherwise the first free spot on a 0.5 m scan, south to north and then west to east, keeping 0.25 m clear of other rooms and of furniture.
-3. Otherwise its default spot clamped to the floor with `clampRoom`, where the editor's normal overlap warnings show and the person can move it.
+`addBreakAreas` adds only the missing rooms, and returns the same reference if none are missing. It uses the compact set, because an office reaching this path didn't fit the full set or removed a room on purpose. Each room's furniture moves with it by the same offset, and `furniture.roomId` is the new room's ID. Each room goes to:
+1. The spot from `findRoomSpot`.
+2. If that is null, the office centre clamped to the floor with `clampRoom`, where the editor's normal overlap warnings show and the person can move it.
 
 Rooms added earlier in the same call count as occupied. A taken ID gets a `-2`, `-3` suffix, chosen deterministically, because this runs inside the reducer. The result must pass `parseLayout`.
 
@@ -199,8 +218,7 @@ In `App.tsx`, show it as a `scene-notice` when `editor.phase === 'ready'`, not e
 ```ts
 it('lists what is missing', ...)                                     // none, one, two and all three, exact copy
 it('adds only the missing rooms and moves nothing that exists', ...)
-it('uses the default spot when it is free', ...)
-it('finds a free spot when the default is taken, furniture moving with its room', ...)
+it('uses the compact set beside the existing rooms, furniture moving with its room', ...)
 it('rooms added in one call do not overlap each other', ...)
 it('on a floor with no free spot it still gives a valid layout inside the floor', ...)  // parseLayout succeeds
 it('a taken ID gets a suffix', ...)
@@ -222,14 +240,15 @@ Expected: PASS.
 
 - [ ] **Step 5: Commit** as `feat(editor): offer to add break areas when an office has none`
 
-Screenshots for the PR: the notice, then the editor after clicking it, on a layout where the default spot is taken.
+Screenshots for the PR: the notice, then the editor after clicking it, on a layout that has no break rooms at schema 2.
 
 ### Task 4: Check in a real browser (done by the controller, not an implementer)
 
 Run on a temporary `DATA_DIR` with the mock runtime, never the real `data/`.
 
-- [ ] **Upgrade that fits:** start from a real schema 1 `layout.json` written from `main` before this slice. Rooms appear and nothing moves. The status says Saved, and the file's bytes are unchanged until a save.
-- [ ] **Upgrade that doesn't fit:** a schema 1 file with something on the spot. It loads exactly as saved and the notice shows. "Add break areas" works, can be undone, and saves. Dismissing the notice lasts across a reload.
+- [ ] **Upgrade of the default office:** a real schema 1 `layout.json` written from `main` before this slice gets the full set. Nothing moves. The status says Saved, and the file's bytes are unchanged until a save.
+- [ ] **Upgrade of a two-desk office:** a schema 1 file with one corner office and mock agents gets the compact row beside it. Use mock agent names, never the owner's real `data/`.
+- [ ] **Upgrade with no room:** a schema 1 file with a floor too full for all three. It loads exactly as saved and the notice shows. "Add break areas" works, can be undone, and saves. Dismissing the notice lasts across a reload.
 - [ ] **Delete and reload:** delete the kitchen, save and reload. It stays gone.
 - [ ] **The rooms:** open sides face a clear floor, walls don't cut through furniture, and the labels are readable in 3D and floor plan. Characters still sit at all 14 desks.
 - [ ] **Editing:** add each new furniture type, and select, drag and save. A dragged room carries its furniture.

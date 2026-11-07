@@ -83,7 +83,8 @@ export default function Characters({ characters, floorPlan, onDeskClick }: Chara
       g.instances.forEach((inst, i) => mesh.setColorAt(i, color.set(inst.color)))
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
     })
-  }, [groups])
+    // floorPlan too: returning from floor plan builds new meshes from the same groups, and they start with no colours.
+  }, [groups, floorPlan])
 
   useLayoutEffect(() => {
     const mesh = dotMesh.current

@@ -16,7 +16,7 @@ npm run dev:full
 
 Open http://localhost:5173.
 
-`dev:full` runs the backend and the app together on the mock runtime, with no API key and no cost. Agents are saved on the server, and it keeps running until you stop it with Ctrl+C. Use `localhost` rather than the `127.0.0.1` address Vite prints, because the layout is saved per address.
+`dev:full` runs the backend and the app together on the mock runtime, with no API key and no cost. Agents and the office layout are saved on the server (`data/workforce.json`, `data/layout.json`), so every address shows the same office, and it keeps running until you stop it with Ctrl+C. The first time you open it, a layout already saved in your browser is copied to the server once.
 
 ### All the ways to run it
 
@@ -81,7 +81,7 @@ The backend keeps listening on `127.0.0.1:8787` (`HOST`/`PORT`); only the gatewa
   - Rotate a room in 90° steps: its walls, glass, details and furniture turn with it around the room's centre
   - Overlapping or out-of-bounds placement is outlined in red and listed in the properties panel (a warning, not a block)
   - Undo/redo (⌘/Ctrl+Z, ⌘/Ctrl+Shift+Z), Delete/Backspace, and Esc to clear the selection or cancel a drag
-- **Saving:** the complete layout (rooms, furniture, office settings) is stored in the browser's `localStorage` under `ai-virtual-office:layout:v1` and restored on the next start. The status shows Saved, Unsaved changes, or Save failed. You're asked before leaving edit mode or closing the tab with unsaved changes
+- **Saving:** the complete layout (rooms, furniture, office settings) is restored on the next start. With `npm run dev:full` it is saved on the server in `data/layout.json`; in the browser-only demo (`npm run dev`) it is stored in the browser's `localStorage` under `ai-virtual-office:layout:v1`. If the server can't be reached, the layout is shown read-only until it reconnects. The status shows Saved, Unsaved changes, or Save failed. You're asked before leaving edit mode or closing the tab with unsaved changes
 - **AI agent workforce** (click **AI Agents** in the sidebar). **Tasks are simulated in the browser: nothing calls Claude or any other AI, makes network requests or runs processes.** The panel shows a **Mock mode** badge, demo agents are labelled **Demo**, and simulated task events are labelled **Simulated**.
   - Six demo agents (Project Management, Tech Lead, Backend, Frontend, QA, DevOps) seated at default desks, added once on first start; **Restore demo agents** brings back any you removed
   - Filter agents by department and status; create, edit and remove agents (removing one with task history asks first)
@@ -157,7 +157,7 @@ A small Node server (`server/`, no framework; the only runtime dependencies are 
 
 **Sandbox.** There is none yet: [`docs/sandbox-architecture.md`](docs/sandbox-architecture.md) is a design only (Docker, one workspace mounted, no network, resource limits) with its blockers. No isolation is active.
 
-**Persistence.** `data/workforce.json` (atomic writes, mode 0600). An unreadable file is backed up before a fresh start. When an older schema is migrated, `workforce.v2-backup.json` keeps an untouched copy of the data from before the migration. A task running at shutdown is marked failed with "Interrupted by a server restart". The event buffer is in memory, so a restart makes every old event id a `state.reset`.
+**Persistence.** `data/workforce.json` and `data/layout.json` (atomic writes, mode 0600; `data/` is ignored by git, so back it up separately). A damaged or newer `layout.json` is copied to `layout.backup.json` (then `.1`, `.2`, ...) and the default layout is shown until the next save. An unreadable file is backed up before a fresh start. When an older schema is migrated, `workforce.v2-backup.json` keeps an untouched copy of the data from before the migration. A task running at shutdown is marked failed with "Interrupted by a server restart". The event buffer is in memory, so a restart makes every old event id a `state.reset`.
 
 ## Import agents from role files
 
@@ -185,7 +185,7 @@ The scene renders a typed, versioned `OfficeLayout` (`src/layout/types.ts`). It 
 
 - World units are metres. A room or furniture item's `x`/`z` is the **centre of its footprint** on the floor plane; `width` runs along X and `depth` along Z. Vertical values (`wallHeight`, model heights) are kept separate.
 - Rooms are 2–12 m wide and 2–12 m deep and stay inside the 25 × 20 m office.
-- Saved data that can't be read (damaged, or from a newer version) is never overwritten silently: the app shows the default layout and copies the old value to `ai-virtual-office:layout:v1:backup` before the next save.
+- Saved data that can't be read (damaged, or from a newer version) is never overwritten silently: the app shows the default layout and copies the old value to a backup before the next save (`ai-virtual-office:layout:v1:backup` in the browser, `data/layout.backup.json` on the server).
 - **Reset layout** restores the default office after a confirmation and can be undone.
 
 ## Agent data
@@ -219,7 +219,7 @@ Add `?stats` to the URL (for example http://localhost:5173/?stats) to show a sma
 
 - A desk, its chair and its monitor are separate items, so they move independently.
 - Resize handles are available in floor plan only; in 3D, resize rooms from the properties panel.
-- Layouts are stored per browser and per origin (for example `localhost:5173`); there is no export or sync yet.
+- In the browser-only demo the layout is stored per browser and per origin (for example `localhost:5173`). Under `npm run dev:full` it is in `data/layout.json`. `data/` is ignored by git, so back it up separately. There is no live sync between tabs: the last save wins.
 - Rooms have no doors and no ceilings, by design: the cutaway keeps every room visible and editable from above.
 - Furniture is not instanced: each item draws one mesh per material, so very large layouts (hundreds of items) cost more draw calls. Room shells are merged into one mesh per material.
 - Lighting has no real-time ambient occlusion or post-processing; soft contact shadows stand in for it.

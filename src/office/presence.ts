@@ -36,6 +36,9 @@ const CHAT_LAST_MINUTE = 22 * 60
 const CHAT_GAP = 0.45
 /** How many nearest colleagues an agent tries before it gives up on a chat in a slot. */
 const CHAT_TRIES = 4
+const CHAT_SPREAD_MINUTES = 90
+const CHAT_SHIFTS = 6
+const CHAT_SHIFT_MINUTES = 15
 const MAX_DAYS_KEPT = 4
 
 type Stance = { x: number; z: number; rotation: number; pose: 'sit' | 'stand' }
@@ -158,13 +161,23 @@ export function createRoutine(agents: RoutineAgent[], layout: OfficeLayout): { p
     const people = sorted.map((a) => records.get(a.id)).filter((r): r is AgentRecord => r !== undefined)
     if (people.length < 2) return chats
     const room = CHAT_LAST_MINUTE - CHAT_FIRST_MINUTE - CHAT_MS / MINUTE
+    // One slot in each part of the day, so slots can't pile up on each other.
+    const part = Math.floor(room / CHAT_SLOTS)
     for (let n = 0; n < CHAT_SLOTS; n++) {
-      const startMs = day.start + (CHAT_FIRST_MINUTE + (stableHash(`chat:${day.day.key}:${n}`) % (room + 1))) * MINUTE
-      const endMs = startMs + CHAT_MS
-      const free = people.filter((r) =>
-        !busyAt(r, startMs) &&
-        !scheduleOf(r, day).some((e) => e.startMs < endMs && e.endMs > startMs) &&
-        !chats.some((c) => (c.a === r.agent.id || c.b === r.agent.id) && c.startMs < endMs && c.endMs > startMs))
+      const slotMinute = CHAT_FIRST_MINUTE + n * part + (stableHash(`chat:${day.day.key}:${n}`) % Math.max(1, part - CHAT_SPREAD_MINUTES))
+      // Each pair gets its own time within the slot, so people drift off in ones and twos, not all at once. A clash moves it along.
+      const pairStarts = (a: AgentRecord, b: AgentRecord) => {
+        const [x, y] = a.agent.id < b.agent.id ? [a.agent.id, b.agent.id] : [b.agent.id, a.agent.id]
+        const offset = stableHash(`chat:${day.day.key}:${n}:${x}+${y}`)
+        return Array.from({ length: CHAT_SHIFTS }, (_, k) => day.start + (slotMinute + (offset + k * CHAT_SHIFT_MINUTES) % CHAT_SPREAD_MINUTES) * MINUTE)
+      }
+      const freeAt = (r: AgentRecord, startMs: number) => {
+        const endMs = startMs + CHAT_MS
+        return !busyAt(r, startMs) &&
+          !scheduleOf(r, day).some((e) => e.startMs < endMs && e.endMs > startMs) &&
+          !chats.some((c) => (c.a === r.agent.id || c.b === r.agent.id) && c.startMs < endMs && c.endMs > startMs)
+      }
+      const free = people.filter((r) => !busyAt(r, day.start + slotMinute * MINUTE))
       // With an odd number free, a different one sits each slot out, so nobody is always left over.
       if (free.length % 2 === 1 && free.length >= 3) free.splice(n % free.length, 1)
       const paired = new Set<string>()
@@ -178,8 +191,11 @@ export function createRoutine(agents: RoutineAgent[], layout: OfficeLayout): { p
         // Which of the nearest colleagues comes first changes by day and slot, so the same pairs don't always talk.
         const first = options.length === 0 ? 0 : stableHash(`chat:${day.day.key}:${n}:${r.agent.id}`) % options.length
         for (const { o } of [...options.slice(first), ...options.slice(0, first)]) {
+          const startMs = pairStarts(r, o).find((s) => freeAt(r, s) && freeAt(o, s))
+          if (startMs === undefined) continue
           const spot = meeting(r, o)
           if (!spot) continue
+          const endMs = startMs + CHAT_MS
           paired.add(r.agent.id)
           paired.add(o.agent.id)
           chats.push({ startMs, endMs, a: r.agent.id, b: o.agent.id, x: spot.x, z: spot.z, stanceA: spot.stanceA, stanceB: spot.stanceB })

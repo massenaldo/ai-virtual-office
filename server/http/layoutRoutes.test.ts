@@ -34,7 +34,7 @@ describe('/api/layout', () => {
   it.each([
     ['missing layout', {}],
     ['not a layout', { layout: { nope: true } }],
-    ['wrong schema version', { layout: { ...JSON.parse(serializeLayout(createDefaultLayout())), schemaVersion: 2 } }],
+    ['wrong schema version', { layout: { ...JSON.parse(serializeLayout(createDefaultLayout())), schemaVersion: 3 } }],
   ])('PUT %s is 422', async (_name, body) => {
     s = await startTestServer()
     const r = await s.api('PUT', '/api/layout', body)

@@ -111,7 +111,7 @@ describe('addRoom', () => {
   it('adds a room from a template with a unique id', () => {
     const l = fresh()
     const { layout, id } = addRoom(l, 'meeting-room')
-    expect(layout.rooms).toHaveLength(11)
+    expect(layout.rooms).toHaveLength(14)
     expect(l.rooms.some((r) => r.id === id)).toBe(false)
     expect(room(layout, id)).toMatchObject({ width: 4.6, depth: 3.6, department: 'meeting', wallHeight: 2.5 })
   })

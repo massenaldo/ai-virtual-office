@@ -110,7 +110,7 @@ Full set, default placement. Rooms use `DEFAULT_WALL_HEIGHT`, rotation 0, and th
 
 | Room ID | Name | Department | Centre | Width × depth |
 |---|---|---|---|---|
-| `room-prayer` | PRAYER ROOM | `prayer` | (−4.0, 6.2) | 3.6 × 3.6 |
+| `room-prayer` | PRAYER ROOM | `prayer` | (−4.0, 6.8) | 3.6 × 3.6 |
 | `room-kitchen` | KITCHEN | `kitchen` | (0.3, 5.2) | 2.6 × 3.4 |
 | `room-dining` | DINING AREA | `dining` | (3.2, 5.8) | 2.8 × 4.6 |
 
@@ -120,7 +120,7 @@ Full set, default placement. Rooms use `DEFAULT_WALL_HEIGHT`, rotation 0, and th
 | `coffee-machine-01` | (−0.4, 3.92), rotation 0 |
 | `dining-table-01`, `-02` | (3.2, 4.75) and (3.2, 6.95), rotation 90 |
 | `dining-chair-01` to `-16` | For each table, z = table z + −0.75, −0.25, 0.25, 0.75. West side x 2.58, rotation 270. East side x 3.82, rotation 90. So 16 seats for 14 desks |
-| `prayer-mat-01` to `-15` | x in −5.15, −4.0, −2.85; z in 4.88, 5.54, 6.2, 6.86, 7.52; rotation 90. Rotation 90 faces west, the nearest quarter turn to the qibla at about 295° |
+| `prayer-mat-01` to `-15` | x in −5.15, −4.0, −2.85; z in 5.48, 6.14, 6.8, 7.46, 8.12; rotation 90. Rotation 90 faces west, the nearest quarter turn to the qibla at about 295° |
 
 Compact set, positions relative to the room centre. Room IDs, names and departments are the same as the full set, and furniture IDs follow the same pattern.
 
@@ -130,7 +130,7 @@ Compact set, positions relative to the room centre. Room IDs, names and departme
 | `dining` | 2.6 × 2.4 | Table at (0, 0), rotation 0. Chairs at x ±0.5: z −0.62 with rotation 180, and z 0.62 with rotation 0. So 4 seats |
 | `prayer` | 2.6 × 2.4 | Mats at x ±0.6 and z ±0.4, rotation 90. So 4 mats |
 
-`findRoomSpot` returns the first candidate that is inside the office floor, 0.25 m clear of every room and every piece of furniture, and has a clear 1 m strip along its south side, since rooms open to the south. Candidates, in order:
+`findRoomSpot` returns the first candidate that is inside the office floor, 0.25 m clear of every room and every piece of furniture, not within 1 m of another room's open side, and has a clear 1 m strip inside the floor along its own south side, since rooms open to the south. Candidates, in order:
 1. For each existing room, newest first: directly east of it with a 0.25 m gap and the same north edge, then directly west, then directly south with a 1.25 m gap and the same west edge.
 2. A 0.5 m scan of the whole floor, north to south and then west to east.
 

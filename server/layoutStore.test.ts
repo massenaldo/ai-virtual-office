@@ -3,8 +3,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createDefaultLayout } from '../src/layout/defaultLayout'
-import { updateFurniture } from '../src/layout/operations'
+import { deleteRoom, updateFurniture } from '../src/layout/operations'
 import { serializeLayout } from '../src/layout/storage'
+import type { OfficeLayout } from '../src/layout/types'
 import { LAYOUT_BACKUP_FILE, LAYOUT_FILE, openLayoutStore } from './layoutStore'
 import { recordingLogger, silentLogger } from './log'
 
@@ -132,5 +133,38 @@ describe('openLayoutStore', () => {
   it('an unreadable file other than missing throws', () => {
     mkdirSync(file())
     expect(() => open()).toThrow(/EISDIR/)
+  })
+})
+
+describe('a schema 1 file', () => {
+  /** The default office as saved before break areas existed. */
+  const v1Text = () => {
+    const l = createDefaultLayout()
+    const breakIds = new Set(l.rooms.filter((r) => ['kitchen', 'dining', 'prayer'].includes(r.department)).map((r) => r.id))
+    const old: OfficeLayout = { ...l, rooms: l.rooms.filter((r) => !breakIds.has(r.id)), furniture: l.furniture.filter((f) => !f.roomId || !breakIds.has(f.roomId)) }
+    return serializeLayout(old).replace('"schemaVersion":2', '"schemaVersion":1')
+  }
+
+  it('loads upgraded, and its bytes stay the same until a save', () => {
+    const text = v1Text()
+    expect(text).toContain('"schemaVersion":1')
+    writeFileSync(file(), text)
+    const store = open()
+    expect(store.problem).toBeNull()
+    expect(store.layout).toEqual(createDefaultLayout())
+    expect(readFileSync(file(), 'utf8')).toBe(text)
+    expect(files()).toEqual([LAYOUT_FILE])
+    expect(open().layout).toEqual(store.layout)
+    expect(readFileSync(file(), 'utf8')).toBe(text)
+  })
+
+  it('after a save the file is schema 2, and reopening does not add a deleted room back', () => {
+    writeFileSync(file(), v1Text())
+    const store = open()
+    const without = deleteRoom(store.layout!, 'room-kitchen')
+    expect(store.save(without).ok).toBe(true)
+    expect(JSON.parse(readFileSync(file(), 'utf8')).schemaVersion).toBe(2)
+    expect(open().layout?.rooms.map((r) => r.id)).not.toContain('room-kitchen')
+    expect(open().layout).toEqual(without)
   })
 })

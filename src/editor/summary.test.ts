@@ -6,7 +6,7 @@ import { summarizeLayout } from './summary'
 describe('summarizeLayout', () => {
   it('counts rooms and all desks', () => {
     const s = summarizeLayout(createDefaultLayout())
-    expect(s.roomCount).toBe(10)
+    expect(s.roomCount).toBe(13)
     expect(s.deskCount).toBe(14)
   })
 
@@ -18,9 +18,17 @@ describe('summarizeLayout', () => {
     expect(s.departments).toHaveLength(10)
   })
 
+  it('counts break rooms as rooms but leaves them out of the departments', () => {
+    const s = summarizeLayout(createDefaultLayout())
+    expect(s.roomCount).toBe(13)
+    expect(s.departments.map((d) => d.id)).not.toContain('kitchen')
+    expect(s.departments.map((d) => d.id)).not.toContain('dining')
+    expect(s.departments.map((d) => d.id)).not.toContain('prayer')
+  })
+
   it('follows layout changes', () => {
     const s = summarizeLayout(deleteRoom(createDefaultLayout(), 'room-ceo-office'))
-    expect(s.roomCount).toBe(9)
+    expect(s.roomCount).toBe(12)
     expect(s.deskCount).toBe(12)
     expect(s.departments.some((d) => d.id === 'executive')).toBe(false)
   })

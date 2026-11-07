@@ -6,9 +6,9 @@ import type { FurnitureType } from './types'
 describe('createDefaultLayout', () => {
   it('converts the existing scene into versioned layout data', () => {
     const l = createDefaultLayout()
-    expect(l.schemaVersion).toBe(1)
+    expect(l.schemaVersion).toBe(2)
     expect(l.office).toEqual({ width: 25, depth: 20, gridSize: 0.25 })
-    expect(l.rooms).toHaveLength(10)
+    expect(l.rooms).toHaveLength(13)
   })
 
   it('splits each desk into desk, chair and monitor and keeps plants and the meeting table', () => {

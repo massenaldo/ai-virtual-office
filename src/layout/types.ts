@@ -1,4 +1,4 @@
-export const LAYOUT_SCHEMA_VERSION = 1
+export const LAYOUT_SCHEMA_VERSION = 2
 
 /** Quarter turns around the vertical axis, in degrees. */
 export type Rotation = 0 | 90 | 180 | 270

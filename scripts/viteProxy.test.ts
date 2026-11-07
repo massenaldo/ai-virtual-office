@@ -44,7 +44,7 @@ const JSON_SAME = { ...SAME, 'content-type': 'application/json' }
 
 beforeAll(async () => {
   dataDir = tempDataDir()
-  const parsed = parseConfig({ PORT: '0', DATA_DIR: dataDir })
+  const parsed = parseConfig({ PORT: '0', DATA_DIR: dataDir, OFFICE_ROUTINE: 'off' })
   if (!parsed.ok) throw new Error(parsed.errors.join('; '))
   backend = await startServer(parsed.config, { log: silentLogger, heartbeatMs: 100, mockTimings: { thinkingMs: 50, workingMs: 60000 } })
   token = readFileSync(join(dataDir, TOKEN_FILE), 'utf8').trim()

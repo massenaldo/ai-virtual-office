@@ -183,7 +183,7 @@ function transitionFor(event: RuntimeEvent, task: AgentTask, now: string, source
   const base = { agentId: task.agentId, taskId: task.id, timestamp: now, source }
   switch (event.type) {
     case 'started':
-      return { task: { status: 'running', startedAt: now, executionId: event.executionId || null, sessionId: event.sessionId || null }, agentStatus: 'thinking', activity: { ...base, type: 'task-started', message: `Started "${task.title}"` } }
+      return { task: { status: 'running', startedAt: task.startedAt ?? now, executionId: event.executionId || null, sessionId: event.sessionId || null }, agentStatus: 'thinking', activity: { ...base, type: 'task-started', message: `Started "${task.title}"` } }
     case 'progress':
       return { task: {}, agentStatus: event.step, activity: { ...base, type: 'task-progress', step: event.step, message: event.message } }
     case 'message':
@@ -197,7 +197,8 @@ function transitionFor(event: RuntimeEvent, task: AgentTask, now: string, source
       return { task: { status: 'failed', completedAt: now, errorMessage: error, endedReason: 'failed', usage: validUsage(event.usage), pendingApproval: null, hold: null }, agentStatus: 'error', activity: { ...base, type: 'task-failed', message: error } }
     }
     case 'cancelled':
-      return { task: { status: 'cancelled', completedAt: now, endedReason: 'cancelled', pendingApproval: null, hold: null }, agentStatus: 'idle', activity: { ...base, type: 'task-cancelled', message: `Cancelled "${task.title}"` } }
+      // A held task never changed the agent, so cancelling it leaves the agent's status (an earlier error stays) as it was.
+      return { task: { status: 'cancelled', completedAt: now, endedReason: 'cancelled', pendingApproval: null, hold: null }, agentStatus: task.hold ? undefined : 'idle', activity: { ...base, type: 'task-cancelled', message: `Cancelled "${task.title}"` } }
   }
 }
 
@@ -230,8 +231,8 @@ export function applyRuntimeEvent(s: WorkforceState, event: RuntimeEvent, now: s
 export function markStarting(s: WorkforceState, taskId: string, now: string): WorkforceState {
   const found = taskWithAgent(s, taskId)
   if (!found || found.task.status !== 'queued') return s
-  // A task that waited for a break starts its clock now, so the walk home is timed from the release.
-  const tasks = s.tasks.map((t) => (t.id === taskId ? { ...t, status: 'starting' as const, hold: null, ...(t.hold ? { startedAt: now } : {}) } : t))
+  // startedAt is set here, not at `started`: the walk home is timed from the release, and a task that fails while starting still counts as work done.
+  const tasks = s.tasks.map((t) => (t.id === taskId ? { ...t, status: 'starting' as const, hold: null, startedAt: now } : t))
   const agents = s.agents.map((a) => (a.id === found.agent.id ? { ...a, status: 'thinking' as const, lastActivityAt: now } : a))
   return { ...s, tasks, agents }
 }

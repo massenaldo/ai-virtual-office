@@ -11,7 +11,7 @@ import { useOfficeClock } from '../officeClockContext'
 import { DESCRIPTION_MAX, TITLE_MAX, isActiveTask, type TaskInput } from '../operations'
 import type { RuntimeStatus } from '../api'
 import type { Agent } from '../types'
-import { heldTaskText, TASK_RUNTIME_LABEL, TASK_STATUS_LABEL, agentStatusText, agentTimeline, agentPermissionChip, todaySchedule, approveEnabled, choiceFor, shortDigest, deskOptions, deskStatus, formatTime, formatUsage, sourceFileName } from '../view'
+import { heldStartError, heldTaskText, TASK_RUNTIME_LABEL, TASK_STATUS_LABEL, agentStatusText, agentTimeline, agentPermissionChip, todaySchedule, approveEnabled, choiceFor, shortDigest, deskOptions, deskStatus, formatTime, formatUsage, sourceFileName } from '../view'
 import { StatusDot } from './AgentList'
 
 export type AgentDetailProps = { workforce: Workforce; layout: OfficeLayout; agent: Agent; onBack(): void; onEdit(): void; onRemove(): void; onFocusDesk(): void }
@@ -92,6 +92,7 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
   const [reviewOpenFor, setReviewOpenFor] = useState<string | null>(null)
   const cancel = useBusy()
   const startNow = useBusy()
+  const [startRefusal, setStartRefusal] = useState<{ taskId: string; error: string } | null>(null)
   const clearing = useBusy()
   // With a backend the person also chooses how far an allow reaches; the browser demo keeps Approve and Deny.
   const remote = workforce.permissions !== null
@@ -115,7 +116,7 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
   const startHeld = async () => {
     if (!task) return
     const error = await startNow.run(() => startHeldNow(actions, task.id))
-    if (error !== undefined) setActionError(error)
+    if (error !== undefined) setStartRefusal(error === null ? null : { taskId: task.id, error })
   }
   const clearError = async () => {
     const r = await clearing.run(() => actions.clearAgentError(agent.id))
@@ -140,7 +141,7 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
     <div className="field-static"><span>Model</span><strong>{agent.model ?? 'Server default'}</strong></div>
     {sourceFileName(agent.sourceFile) && <p className="panel-hint">Imported from {sourceFileName(agent.sourceFile)}</p>}
     <div className="panel-actions">
-      {agent.status === 'error' && !active && <button className="panel-button" disabled={clearing.busy} onClick={clearError}>Clear error</button>}
+      {agent.status === 'error' && (!active || task?.hold) && <button className="panel-button" disabled={clearing.busy} onClick={clearError}>Clear error</button>}
       <button className="panel-button" onClick={onEdit}><Pencil size={13}/> Edit</button>
       <button className="panel-button danger" onClick={onRemove}><Trash2 size={13}/> Remove</button>
     </div>
@@ -196,6 +197,7 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
         {task.hold && <button className="panel-button primary" disabled={startNow.busy} onClick={startHeld}><Play size={13}/> Start now</button>}
         <button className="panel-button" disabled={cancel.busy} onClick={cancelTask}><Square size={13}/> Cancel task</button>
       </div>}
+      {heldStartError(startRefusal, task) && <p className="form-error" role="alert">{heldStartError(startRefusal, task)}</p>}
       {actionError && task.status !== 'waiting_for_approval' && <p className="form-error" role="alert">{actionError}</p>}
       {task.status === 'running' && task.runtime === 'mock' && demoServed && <>
         <div className="field-group-label">Demo controls</div>

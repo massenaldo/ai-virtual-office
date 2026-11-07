@@ -25,7 +25,7 @@ const streams: SseStream[] = []
 beforeAll(async () => {
   ws = makeWorkspaceRoot(['sandbox'])
   dataDir = tempDataDir()
-  const parsed = parseConfig({ PORT: '0', DATA_DIR: dataDir, ...ws.env })
+  const parsed = parseConfig({ PORT: '0', DATA_DIR: dataDir, OFFICE_ROUTINE: 'off', ...ws.env })
   if (!parsed.ok) throw new Error(parsed.errors.join('; '))
   server = await startServer(parsed.config, { log: silentLogger, mockTimings: { thinkingMs: 50, workingMs: 1500 } })
   // A client learns the generated token the way the dev proxy does: from the file the server wrote.

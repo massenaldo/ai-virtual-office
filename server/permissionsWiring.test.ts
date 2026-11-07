@@ -174,7 +174,7 @@ describe('permissions across a backend restart', () => {
   it('ends the task and once rules of an interrupted task, keeps agent rules and the audit history, and refuses to reuse them', async () => {
     ws = makeWorkspaceRoot(['sandbox'])
     const dir = tempDataDir()
-    const config = () => { const p = parseConfig({ PORT: '0', DATA_DIR: dir, ...ws!.env }); if (!p.ok) throw new Error(p.errors.join('; ')); return p.config }
+    const config = () => { const p = parseConfig({ PORT: '0', DATA_DIR: dir, OFFICE_ROUTINE: 'off', ...ws!.env }); if (!p.ok) throw new Error(p.errors.join('; ')); return p.config }
     const first = await startServer(config(), { log: silentLogger, mockTimings: TIMINGS })
     const api = async (srv: typeof first, method: string, path: string, body?: unknown) => {
       const res = await fetch(`${srv.url}${path}`, { method, headers: { authorization: `Bearer ${srv.app.apiToken.value}`, ...(method === 'GET' ? {} : { 'content-type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body) })

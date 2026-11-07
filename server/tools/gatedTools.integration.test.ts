@@ -37,7 +37,7 @@ let config: ServerConfig
 
 function build(opts: { allowedTools?: string; dataInsideWorkspace?: boolean } = {}): void {
   const dir = opts.dataInsideWorkspace ? join(ws.path('sandbox'), 'vo-data') : dataDir
-  const parsed = parseConfig({ PORT: '0', DATA_DIR: dataDir, API_TOKEN: 'test-token-0123456789-abcdefghijklmnopqrstuvwxyz', ...ws.env, ...(opts.allowedTools ? { ALLOWED_TOOLS: opts.allowedTools } : {}) })
+  const parsed = parseConfig({ PORT: '0', DATA_DIR: dataDir, OFFICE_ROUTINE: 'off', API_TOKEN: 'test-token-0123456789-abcdefghijklmnopqrstuvwxyz', ...ws.env, ...(opts.allowedTools ? { ALLOWED_TOOLS: opts.allowedTools } : {}) })
   if (!parsed.ok) throw new Error(parsed.errors.join('; '))
   // The config parser refuses a data dir inside a workspace, so that variant swaps it in afterwards.
   config = { ...parsed.config, dataDir: dir }

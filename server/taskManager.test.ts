@@ -1205,7 +1205,7 @@ describe('holding tasks during breaks', () => {
     expect(r.ok && r.task).toMatchObject({ status: 'failed', errorMessage: 'The "claude" runtime is not enabled on this server.' })
   })
 
-  it('one bad task does not stop the others in a check', async () => {
+  it('one bad task does not stop the others in a check, and it fails visibly instead of waiting silently', async () => {
     const good = new FakeProvider()
     const bad = new FakeProvider({ kind: 'claude' })
     Object.defineProperty(bad, 'availability', { get: () => { throw new Error('boom') } })
@@ -1222,7 +1222,10 @@ describe('holding tasks during breaks', () => {
     m.releaseHeldTasks()
     await tick()
     expect(task(goodId).status).toBe('starting')
-    expect(task(badId).status).toBe('queued')
-    expect(pendingTasks()).toHaveLength(1)
+    expect(task(badId)).toMatchObject({ status: 'failed', errorMessage: 'This task could not be started. Start it again.', hold: null })
+    expect(agent().status).toBe('error')
+    expect(pendingTasks()).toHaveLength(0)
+    m.releaseHeldTasks()
+    expect(task(badId).status).toBe('failed')
   })
 })

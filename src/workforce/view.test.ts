@@ -5,11 +5,11 @@ import type { OfficeLayout } from '../layout/types'
 import { DEPARTMENTS } from '../layout/catalog'
 import { createDemoWorkforce } from './demo'
 import type { PermissionRuleView } from './api'
-import { addActivity, assignTask, cancelTask, markStarting } from './operations'
+import { addActivity, applyRuntimeEvent, assignTask, cancelTask, markStarting } from './operations'
 import type { TaskHold } from './types'
 import type { RuntimeEnvironment } from './controller'
 import { createOfficeClock } from '../office/officeClock'
-import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskCharacters, deskClickTarget, deskMarkers, shortDigest, environmentBadge, environmentNote, connectionLabel, agentStatusText, workforceNotice, TASK_RUNTIME_LABEL, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, allowedScopes, permissionStateText, rulesForTab, scopeSentence, choiceFor, agentPermissionChip, revokePrompt, revokeAgentPrompt, waitingApprovals, removalPrompt, TASK_STATUS_LABEL, formatUsage, sourceFileName, todaySchedule, routineAgents, heldTaskText } from './view'
+import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskCharacters, deskClickTarget, deskMarkers, shortDigest, environmentBadge, environmentNote, connectionLabel, agentStatusText, workforceNotice, TASK_RUNTIME_LABEL, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, allowedScopes, permissionStateText, rulesForTab, scopeSentence, choiceFor, agentPermissionChip, revokePrompt, revokeAgentPrompt, waitingApprovals, removalPrompt, TASK_STATUS_LABEL, formatUsage, sourceFileName, todaySchedule, routineAgents, heldTaskText, heldStartError } from './view'
 
 const NOW = '2026-10-30T09:00:00.000Z'
 const layout = createDefaultLayout()
@@ -501,6 +501,14 @@ describe('routineAgents', () => {
     expect(ofAgent(two, 'agent-demo-pm').busyUntil).toBe(SERVER - 10_000)
   })
 
+  it('an ordinary task that failed while starting still counts towards busyUntil', () => {
+    const { state, taskId } = withTask('agent-demo-pm')
+    const starting = markStarting(state, taskId, iso(REAL - 20_000))
+    const failed = applyRuntimeEvent(starting, { type: 'failed', taskId, error: 'refused' }, iso(REAL - 10_000), 'mock')
+    expect(failed.tasks.find((t) => t.id === taskId)).toMatchObject({ status: 'failed', startedAt: iso(REAL - 20_000) })
+    expect(ofAgent(failed, 'agent-demo-pm').busyUntil).toBe(SERVER - 10_000)
+  })
+
   it('a missing desk becomes a null desk', () => {
     const s = { ...demo, agents: demo.agents.map((a) => (a.id === 'agent-demo-qa' ? { ...a, deskId: null } : a)) }
     expect(ofAgent(s, 'agent-demo-qa').deskId).toBeNull()
@@ -545,6 +553,17 @@ describe('held tasks', () => {
   })
   it('removalPrompt says the task is waiting for a break', () => {
     expect(removalPrompt(held().state, 'agent-demo-pm')).toEqual({ title: 'Remove Atlas?', message: 'Atlas has "Draft sprint plan" waiting for a break. Removing the agent cancels the task and deletes its history.' })
+  })
+
+  it('a refused Start now shows only while the task is still held, and only for that task', () => {
+    const { state, taskId } = held()
+    const task = state.tasks.find((t) => t.id === taskId)!
+    const refusal = { taskId, error: 'A Claude task is already running, which is the limit. Wait for one to finish.' }
+    expect(heldStartError(refusal, task)).toBe(refusal.error)
+    expect(heldStartError(refusal, markStarting(state, taskId, NOW).tasks[0])).toBeNull()
+    expect(heldStartError({ ...refusal, taskId: 'other' }, task)).toBeNull()
+    expect(heldStartError(null, task)).toBeNull()
+    expect(heldStartError(refusal, undefined)).toBeNull()
   })
 
   describe('routineAgents', () => {

@@ -67,6 +67,7 @@ export type TaskManagerOptions = {
 export const MAX_QUEUED_APPROVALS = 8
 
 export const APPROVAL_TIMEOUT_MESSAGE = (ms: number) => `No approval decision within ${Math.round(ms / 1000)} s`
+export const HELD_START_FAILED = 'This task could not be started. Start it again.'
 export const CLAUDE_SLOT_SENTENCE = 'Waiting for a free Claude slot. It starts as soon as one finishes.'
 const claudeLimitMessage = (limit: number) => `${limit === 1 ? 'A Claude task is' : `${limit} Claude tasks are`} already running, which is the limit. Wait for one to finish.`
 export const unavailableMessage = (kind: TaskRuntime, reason: string) => `The ${kind} runtime is not available: ${reason}.`
@@ -262,6 +263,8 @@ export class TaskManager {
         if (r.kind === 'blocked') this.store.commit(setTaskHold(this.state, id, { ...task.hold, blockedBy: CLAUDE_SLOT_SENTENCE }))
       } catch (error) {
         this.log.error(`Could not release held task ${id}`, error)
+        // A task must never keep waiting silently because of a repeating error.
+        try { this.store.commit(failHeldTask(this.state, id, this.now(), HELD_START_FAILED)) } catch (again) { this.log.error(`Could not fail held task ${id}`, again) }
       }
     }
   }

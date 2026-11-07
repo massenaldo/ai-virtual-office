@@ -247,6 +247,11 @@ export function heldTaskText(hold: TaskHold): string {
   return hold.blockedBy ?? `${hold.label} · starts around ${clockText(jakartaDay(hold.untilMs), hold.untilMs)}`
 }
 
+/** A refused Start now, shown only while that task is still held; once it starts (or ends) the refusal no longer applies. */
+export function heldStartError(refusal: { taskId: string; error: string } | null, task: AgentTask | undefined): string | null {
+  return refusal && task && task.hold && refusal.taskId === task.id ? refusal.error : null
+}
+
 const heldOf = (task: AgentTask | undefined): string | null => (task?.hold ? heldTaskText(task.hold) : null)
 
 export function agentStatusText(s: WorkforceState, agent: Agent): string {

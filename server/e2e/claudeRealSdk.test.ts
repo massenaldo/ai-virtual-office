@@ -31,7 +31,7 @@ async function run(script: ScriptedTurn[], env: Record<string, string> = {}) {
   writeFileSync(join(root, '.env'), 'API_TOKEN=should-never-be-read\n')
   const dir = tempDataDir()
   const full = { ...ws.env, DATA_DIR: dir, RUNTIME: 'claude', ANTHROPIC_API_KEY: KEY, ...env }
-  const cfg = parseConfig({ ...full, PORT: '0' })
+  const cfg = parseConfig({ ...full, PORT: '0', OFFICE_ROUTINE: 'off' })
   if (!cfg.ok) throw new Error(cfg.errors.join('; '))
   const log = recordingLogger()
   const provider = new ClaudeAgentRuntimeProvider({ apiKey: new Secret(KEY), dataDir: dir, log, protectedRoots: toolPolicyFrom(cfg.config).protectedRoots, toolTimeoutMs: cfg.config.approvalTimeoutMs + 60000, apiBaseUrl: api.url, settings: { model: null, maxTurns: 6, maxBudgetUsd: 1 } })

@@ -200,7 +200,7 @@ describe('applyRuntimeEvent', () => {
   it('walks starting → started → progress → approval → approve → completed', () => {
     const { state, agentId, taskId } = withTask()
     const started = applyRuntimeEvent(markStarting(state, taskId, NOW), { type: 'started', taskId, executionId: 'exec-9', sessionId: 'sess-1' }, LATER, 'mock')
-    expect(started.tasks[0]).toMatchObject({ status: 'running', startedAt: LATER, executionId: 'exec-9', sessionId: 'sess-1' })
+    expect(started.tasks[0]).toMatchObject({ status: 'running', startedAt: NOW, executionId: 'exec-9', sessionId: 'sess-1' })
     expect(started.agents[0].status).toBe('thinking')
     expect(started.activities.at(-1)).toMatchObject({ type: 'task-started', taskId, agentId, source: 'mock', message: 'Started "Draft sprint plan"' })
 
@@ -647,13 +647,28 @@ describe('held tasks', () => {
     expect(r.state.tasks[0].hold).toBeNull()
     expect(r.state.activities.at(-1)?.message).toBe('Assigned "T"')
   })
-  it('markStarting clears the hold and sets startedAt; an unheld task keeps startedAt null', () => {
+  it('markStarting clears the hold and sets startedAt for a held and an unheld task', () => {
     const { state, taskId } = held()
     expect(markStarting(state, taskId, LATER).tasks[0]).toMatchObject({ status: 'starting', hold: null, startedAt: LATER })
     const { state: s2, id } = withAgent()
     const r = assignTask(s2, id, { title: 'T', description: '' }, NOW)
     if (!r.ok) throw new Error(r.error)
-    expect(markStarting(r.state, r.taskId, LATER).tasks[0]).toMatchObject({ startedAt: null, hold: null })
+    expect(markStarting(r.state, r.taskId, LATER).tasks[0]).toMatchObject({ startedAt: LATER, hold: null })
+  })
+  it('an unheld task that never left queued has startedAt null, and started keeps the earlier startedAt', () => {
+    const { state, id } = withAgent()
+    const r = assignTask(state, id, { title: 'T', description: '' }, NOW)
+    if (!r.ok) throw new Error(r.error)
+    expect(r.state.tasks[0].startedAt).toBeNull()
+    const starting = markStarting(r.state, r.taskId, NOW)
+    const running = applyRuntimeEvent(starting, { type: 'started', taskId: r.taskId, executionId: 'e' }, LATER, 'mock')
+    expect(running.tasks[0]).toMatchObject({ status: 'running', startedAt: NOW })
+  })
+  it('cancelling a held task leaves an errored agent in error and an idle one idle', () => {
+    const { state, taskId } = held()
+    const errored = { ...state, agents: state.agents.map((a) => ({ ...a, status: 'error' as const })) }
+    expect(requestCancel(errored, taskId, LATER, 'mock').agents[0].status).toBe('error')
+    expect(requestCancel(state, taskId, LATER, 'mock').agents[0].status).toBe('idle')
   })
   it('cancelling a held task clears the hold and frees the agent', () => {
     const { state, taskId } = held()

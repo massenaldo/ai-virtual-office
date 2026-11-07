@@ -294,6 +294,12 @@ describe('AgentDetail held task', () => {
   it('shows why it still waits when blocked', () => {
     expect(view(heldState({ ...HOLD, blockedBy: 'Waiting for a free Claude slot. It starts as soon as one finishes.' }), null)).toContain('Waiting for a free Claude slot. It starts as soon as one finishes.')
   })
+  it('offers Clear error when the agent is in error and its task is only held', () => {
+    const s = heldState()
+    const errored = { ...s, agents: s.agents.map((a) => (a.id === agent.id ? { ...a, status: 'error' as const } : a)) }
+    expect(view(errored, null)).toContain('Clear error</button>')
+    expect(view(heldState(), null)).not.toContain('Clear error</button>')
+  })
   it('an unheld running task has no Start now', () => {
     const r = assignTask(demo, agent.id, { title: 'Write notes', description: '' }, NOW)
     if (!r.ok) throw new Error(r.error)

@@ -122,7 +122,7 @@ describe('withBreakAreasIfTheyFit', () => {
       }
     }
     for (const c of compactBreakArea('dining').furniture.filter((f) => f.type === 'dining-chair')) {
-      expect(rotateOffset(0, -1, c.rotation).dz).toBe(Math.sign(0 - c.z))
+      expect(rotateOffset(0, -1, c.rotation).dx).toBe(Math.sign(0 - c.x))
     }
     const after = withBreakAreasIfTheyFit(smallOffice())
     expect([...findIssues(after)]).toEqual([])

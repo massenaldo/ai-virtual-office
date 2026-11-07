@@ -1,8 +1,12 @@
 import type { StateResponse, HealthResponse, WorkforceEvent } from '../api'
+import type { OfficeClockInfo } from '../../office/officeClock'
 
 // Test doubles for fetch and EventSource. Never imported by the app.
 
 export type FakeCall = { method: string; url: string; headers: Record<string, string>; body: string | undefined; credentials: RequestCredentials | undefined }
+
+/** An office clock for test states: Monday 9 November 2026, 11:40 in Jakarta, real speed, routine on. */
+export const FAKE_OFFICE: OfficeClockInfo = { nowMs: Date.parse('2026-11-09T11:40:00+07:00'), speed: 1, routine: true }
 
 const DEFAULT_HEALTH: HealthResponse = { ok: true, version: 'test', runtime: 'mock', available: true, reason: null, credentialsConfigured: false, startedAt: '2026-10-31T09:00:00.000Z' }
 

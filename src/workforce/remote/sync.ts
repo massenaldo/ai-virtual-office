@@ -3,6 +3,7 @@ import type { WorkforceSnapshot } from '../controller'
 import { emptyWorkforce } from '../operations'
 import { applyPermissionEvent, emptyPermissions, parsePermissionLists, withLists, type PermissionsState } from '../permissions'
 import type { Agent } from '../types'
+import { parseOfficeClockInfo } from '../../office/officeClock'
 import type { ApiClient } from './client'
 
 /** Only a well-formed list counts; anything else is treated as an older server with one runtime. */
@@ -21,7 +22,7 @@ export type EventSourceLike = {
   addEventListener(type: string, listener: (event: { data?: string }) => void): void
   close(): void
 }
-export type SyncSnapshot = Pick<WorkforceSnapshot, 'state' | 'loadProblem' | 'preserved' | 'saveError' | 'environment' | 'connection' | 'lastSyncedAt' | 'connectionError' | 'needsPairing' | 'pairingNote'> & { permissions: PermissionsState; workspaces: string[] | null }
+export type SyncSnapshot = Pick<WorkforceSnapshot, 'state' | 'loadProblem' | 'preserved' | 'saveError' | 'environment' | 'connection' | 'lastSyncedAt' | 'connectionError' | 'needsPairing' | 'pairingNote' | 'office'> & { permissions: PermissionsState; workspaces: string[] | null }
 /** How the snapshot answered a (re)connect: ok (or superseded), 401, or any other failure. */
 export type ReconnectOutcome = 'ok' | 'unauthorized' | 'failed'
 export type RemoteSync = {
@@ -47,7 +48,7 @@ export function createRemoteSync(opts: { client: ApiClient; createEventSource: (
   const { client } = opts
   const now = opts.now ?? (() => new Date().toISOString())
   const listeners = new Set<() => void>()
-  let snap: SyncSnapshot = { state: emptyWorkforce(), loadProblem: null, preserved: null, saveError: null, environment: { kind: 'backend', runtime: null, available: null, reason: null }, connection: 'connecting', lastSyncedAt: null, connectionError: null, needsPairing: false, pairingNote: null, permissions: emptyPermissions(), workspaces: null }
+  let snap: SyncSnapshot = { state: emptyWorkforce(), loadProblem: null, preserved: null, saveError: null, environment: { kind: 'backend', runtime: null, available: null, reason: null }, connection: 'connecting', lastSyncedAt: null, connectionError: null, needsPairing: false, pairingNote: null, office: null, permissions: emptyPermissions(), workspaces: null }
   let generation = 0
   let cursor: { boot: string; seq: number } | null = null
   let stream: EventSourceLike | null = null
@@ -167,7 +168,7 @@ export function createRemoteSync(opts: { client: ApiClient; createEventSource: (
     if (!r.ok) { goOffline(r.error); return 'failed' }
     if (!parsed) { goOffline('The backend sent an invalid event id.'); return 'failed' }
     cursor = parsed
-    publish({ needsPairing: false, pairingNote: null, state: r.body.state, loadProblem: r.body.loadProblem, preserved: r.body.preserved, saveError: r.body.saveError, lastSyncedAt: now() })
+    publish({ needsPairing: false, pairingNote: null, state: r.body.state, loadProblem: r.body.loadProblem, preserved: r.body.preserved, saveError: r.body.saveError, office: parseOfficeClockInfo(r.body.office), lastSyncedAt: now() })
 
     const source = opts.createEventSource(`${client.baseUrl}/api/events?lastEventId=${encodeURIComponent(r.body.lastEventId)}`, { withCredentials: true })
     stream = source

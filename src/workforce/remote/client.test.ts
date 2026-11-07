@@ -2,10 +2,10 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { createDemoWorkforce } from '../demo'
 import type { StateResponse } from '../api'
 import { createApiClient, NOT_AUTHORIZED, PAIR_REJECTED, type ApiClient } from './client'
-import { createFakeBackend } from './fakes'
+import { createFakeBackend, FAKE_OFFICE } from './fakes'
 
 const BASE = 'http://127.0.0.1:8787'
-const fakeState: StateResponse = { state: createDemoWorkforce('2026-10-31T09:00:00.000Z'), lastEventId: 'b1:5', loadProblem: null, preserved: null, saveError: null }
+const fakeState: StateResponse = { state: createDemoWorkforce('2026-10-31T09:00:00.000Z'), lastEventId: 'b1:5', loadProblem: null, preserved: null, saveError: null, office: FAKE_OFFICE }
 
 let backend: ReturnType<typeof createFakeBackend>
 let client: ApiClient

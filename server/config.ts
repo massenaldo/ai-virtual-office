@@ -7,6 +7,7 @@ import { parseEnv } from 'node:util'
 import { findSecretInConfig } from './redact'
 import { DEFAULT_ALLOWED_TOOLS, TOOL_CATALOGUE } from './toolPolicy'
 import { parseWorkspaces, type WorkspaceEntry } from './workspaces'
+import { parseDevClock, type DevClock } from './officeClock'
 
 export type RuntimeKind = 'mock' | 'claude'
 
@@ -15,14 +16,14 @@ export type ClaudeSettings = { model: string | null; maxTurns: number; maxBudget
 /** True when the Claude provider is registered: RUNTIME=claude, or ENABLE_CLAUDE_RUNTIME=yes next to the mock. The one place this is decided. */
 export const claudeEnabled = (config: Pick<ServerConfig, 'runtime' | 'enableClaudeRuntime'>): boolean => config.runtime === 'claude' || config.enableClaudeRuntime
 
-export type ServerConfig = { host: string; port: number; dataDir: string; runtime: RuntimeKind; taskTimeoutMs: number; cancelGraceMs: number; approvalTimeoutMs: number; maxMessageBytes: number; maxTaskOutputBytes: number; eventBufferSize: number; auditLogMaxBytes: number; workspaceRoot: string | null; workspaces: WorkspaceEntry[]; allowedTools: string[]; allowedOrigins: string[]; credentialsConfigured: boolean; /** The Anthropic API key, wrapped so it cannot print; null when none is set. Server only, read by the Claude provider and nowhere else. */ anthropicApiKey: Secret | null; /** Limits and model for the claude runtime. */ claude: ClaudeSettings; /** Most tasks running at once on the claude runtime (each is a child process and a paid model session). The mock runtime is not limited. */ maxConcurrentTasks: number; /** Claude runtime: when false (the default) a Write or Edit can only be approved once. Only the exact value `yes` turns it on. */ allowBroadWriteScopes: boolean; /** True when ENABLE_CLAUDE_RUNTIME=yes: the Claude runtime is registered next to the mock, and a task can choose it, even though RUNTIME is not claude. */ enableClaudeRuntime: boolean; /** Server-only secret, wrapped so it cannot print; null means one is generated at start. */ apiToken: Secret | null }
+export type ServerConfig = { host: string; port: number; dataDir: string; runtime: RuntimeKind; taskTimeoutMs: number; cancelGraceMs: number; approvalTimeoutMs: number; maxMessageBytes: number; maxTaskOutputBytes: number; eventBufferSize: number; auditLogMaxBytes: number; workspaceRoot: string | null; workspaces: WorkspaceEntry[]; allowedTools: string[]; allowedOrigins: string[]; credentialsConfigured: boolean; /** The Anthropic API key, wrapped so it cannot print; null when none is set. Server only, read by the Claude provider and nowhere else. */ anthropicApiKey: Secret | null; /** Limits and model for the claude runtime. */ claude: ClaudeSettings; /** Most tasks running at once on the claude runtime (each is a child process and a paid model session). The mock runtime is not limited. */ maxConcurrentTasks: number; /** Claude runtime: when false (the default) a Write or Edit can only be approved once. Only the exact value `yes` turns it on. */ allowBroadWriteScopes: boolean; /** True when ENABLE_CLAUDE_RUNTIME=yes: the Claude runtime is registered next to the mock, and a task can choose it, even though RUNTIME is not claude. */ enableClaudeRuntime: boolean; /** OFFICE_ROUTINE: false (`off`) keeps agents at their desks all day. Display only; changes no task. */ officeRoutine: boolean; /** VO_DEV_CLOCK: start time and speed of the office clock, for development only. Never combined with Claude. It sets only the clock /api/state reports. */ devClock: DevClock | null; /** Server-only secret, wrapped so it cannot print; null means one is generated at start. */ apiToken: Secret | null }
 
 export type Env = Record<string, string | undefined>
 
 type Parsed = { ok: true; config: ServerConfig } | { ok: false; errors: string[] }
 
 /** Every environment variable parseConfig reads, in .env.example order. */
-export const CONFIG_VARIABLES: readonly string[] = ['HOST', 'PORT', 'ALLOWED_ORIGINS', 'DATA_DIR', 'WORKSPACE_ROOT', 'WORKSPACES', 'RUNTIME', 'TASK_TIMEOUT_MS', 'CANCEL_GRACE_MS', 'APPROVAL_TIMEOUT_MS', 'ALLOWED_TOOLS', 'MAX_MESSAGE_BYTES', 'MAX_TASK_OUTPUT_BYTES', 'EVENT_BUFFER_SIZE', 'AUDIT_LOG_MAX_BYTES', 'API_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_MODEL', 'CLAUDE_MAX_TURNS', 'CLAUDE_MAX_BUDGET_USD', 'MAX_CONCURRENT_TASKS', 'ALLOW_BROAD_WRITE_SCOPES', 'ENABLE_CLAUDE_RUNTIME']
+export const CONFIG_VARIABLES: readonly string[] = ['HOST', 'PORT', 'ALLOWED_ORIGINS', 'DATA_DIR', 'WORKSPACE_ROOT', 'WORKSPACES', 'RUNTIME', 'TASK_TIMEOUT_MS', 'CANCEL_GRACE_MS', 'APPROVAL_TIMEOUT_MS', 'ALLOWED_TOOLS', 'MAX_MESSAGE_BYTES', 'MAX_TASK_OUTPUT_BYTES', 'EVENT_BUFFER_SIZE', 'AUDIT_LOG_MAX_BYTES', 'API_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_MODEL', 'CLAUDE_MAX_TURNS', 'CLAUDE_MAX_BUDGET_USD', 'MAX_CONCURRENT_TASKS', 'ALLOW_BROAD_WRITE_SCOPES', 'ENABLE_CLAUDE_RUNTIME', 'OFFICE_ROUTINE', 'VO_DEV_CLOCK']
 
 /** Environment names that suggest skipping permission checks. This server has no such switch, so their presence is an error rather than being ignored. */
 export const REFUSED_ENV_PATTERN = /DANGEROUSLY|BYPASS_?PERMISSIONS|SKIP_?PERMISSIONS|PERMISSION_MODE/i
@@ -161,13 +162,28 @@ export function parseConfig(env: Env, cwd: string = process.cwd()): Parsed {
   const enableClaudeRuntime = read(env, 'ENABLE_CLAUDE_RUNTIME') === 'yes'
   const rawKey = (read(env, 'ANTHROPIC_API_KEY') ?? '').trim()
 
+  let officeRoutine = true
+  const rawRoutine = read(env, 'OFFICE_ROUTINE')
+  if (rawRoutine !== undefined) {
+    if (rawRoutine === 'on' || rawRoutine === 'off') officeRoutine = rawRoutine === 'on'
+    else errors.push(`OFFICE_ROUTINE must be "on" or "off" (got "${rawRoutine.length > 24 ? `${rawRoutine.slice(0, 24)}…` : rawRoutine}").`)
+  }
+  // A dev clock must never sit next to real work: refused whenever Claude is enabled, whichever way.
+  const parsedClock = parseDevClock(read(env, 'VO_DEV_CLOCK'))
+  let devClock: DevClock | null = null
+  if (parsedClock === 'invalid') errors.push('VO_DEV_CLOCK must look like 2026-11-09T11:40:00+07:00@60: a start time with its timezone offset, then @ and a speed from 1 to 3600.')
+  else if (parsedClock !== null) {
+    if (claudeEnabled({ runtime: rawRuntime as RuntimeKind, enableClaudeRuntime })) errors.push('VO_DEV_CLOCK is for development only and cannot be used while the Claude runtime is enabled (RUNTIME=claude or ENABLE_CLAUDE_RUNTIME=yes). Remove one of them.')
+    else devClock = parsedClock
+  }
+
   const ws = parseWorkspaces(read(env, 'WORKSPACE_ROOT'), read(env, 'WORKSPACES'), dataDir)
   errors.push(...ws.errors)
 
   if (errors.length > 0) return { ok: false, errors }
   return {
     ok: true,
-    config: { host, port, dataDir, runtime: rawRuntime as RuntimeKind, taskTimeoutMs, cancelGraceMs, approvalTimeoutMs, maxMessageBytes, maxTaskOutputBytes, eventBufferSize, auditLogMaxBytes, workspaceRoot: ws.workspaceRoot, workspaces: ws.workspaces, allowedTools, allowedOrigins, credentialsConfigured: rawKey !== '', anthropicApiKey: rawKey === '' ? null : new Secret(rawKey), claude: { model: claudeModel, maxTurns: claudeMaxTurns, maxBudgetUsd: claudeMaxBudgetUsd }, maxConcurrentTasks, allowBroadWriteScopes, enableClaudeRuntime, apiToken },
+    config: { host, port, dataDir, runtime: rawRuntime as RuntimeKind, taskTimeoutMs, cancelGraceMs, approvalTimeoutMs, maxMessageBytes, maxTaskOutputBytes, eventBufferSize, auditLogMaxBytes, workspaceRoot: ws.workspaceRoot, workspaces: ws.workspaces, allowedTools, allowedOrigins, credentialsConfigured: rawKey !== '', anthropicApiKey: rawKey === '' ? null : new Secret(rawKey), claude: { model: claudeModel, maxTurns: claudeMaxTurns, maxBudgetUsd: claudeMaxBudgetUsd }, maxConcurrentTasks, allowBroadWriteScopes, enableClaudeRuntime, officeRoutine, devClock, apiToken },
   }
 }
 

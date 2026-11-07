@@ -6,6 +6,7 @@ import type { MockDemoControls, RuntimeProvider } from './runtime/types'
 import { loadWorkforce, saveWorkforce, type Preserved } from './storage'
 import type { AgentFilesResponse, CreatePermissionBody, ImportAgentBody, RuntimeStatus } from './api'
 import type { PermissionsState } from './permissions'
+import type { OfficeClockInfo } from '../office/officeClock'
 import type { ApprovalChoice, WorkforceState } from './types'
 
 type KV = Pick<Storage, 'getItem' | 'setItem'>
@@ -30,6 +31,8 @@ export type WorkforceSnapshot = {
   needsPairing: boolean
   /** Shown above the pairing form when the page and backend host names differ (the cookie would not be kept); otherwise null. Never contains a token. */
   pairingNote: string | null
+  /** The office clock as the server last reported it (a new object with each state reply); null in browser-only demo, and with an older server, which both mean real time. */
+  office: OfficeClockInfo | null
   /** The backend's permission rules, kept live; null in browser mode (the local mock has no permission engine) and when the backend address is misconfigured. */
   permissions: PermissionsState | null
   /** The ids of the workspaces the backend registered, for the task form; null in browser mode (the local mock touches no files). Only a hint: the backend checks every id again. */
@@ -84,7 +87,7 @@ export function createWorkforceController(opts: { storage: KV | null; now?: () =
   const loaded = loadWorkforce(opts.storage, now())
   const listeners = new Set<() => void>()
   let current = loaded.state
-  let snapshot: WorkforceSnapshot = { state: current, loadProblem: loaded.problem, preserved: loaded.preserved, saveError: null, environment: { kind: 'browser' }, connection: 'local', lastSyncedAt: null, commandError: null, connectionError: null, needsPairing: false, pairingNote: null, permissions: null, workspaces: null }
+  let snapshot: WorkforceSnapshot = { state: current, loadProblem: loaded.problem, preserved: loaded.preserved, saveError: null, environment: { kind: 'browser' }, connection: 'local', lastSyncedAt: null, commandError: null, connectionError: null, needsPairing: false, pairingNote: null, office: null, permissions: null, workspaces: null }
   let disposed = false
 
   const publish = (patch: Partial<WorkforceSnapshot>) => {

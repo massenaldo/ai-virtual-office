@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createDemoWorkforce } from './demo'
-import { createFakeBackend, FakeEventSource } from './remote/fakes'
+import { createFakeBackend, FAKE_OFFICE, FakeEventSource } from './remote/fakes'
 import { createControllerFor, resolveWorkforceSource } from './source'
 
 const BASE = 'http://127.0.0.1:8787'
-const stateResponse = { state: createDemoWorkforce('2026-10-31T09:00:00.000Z'), lastEventId: 'b1:1', loadProblem: null, preserved: null, saveError: null } as const
+const stateResponse = { state: createDemoWorkforce('2026-10-31T09:00:00.000Z'), lastEventId: 'b1:1', loadProblem: null, preserved: null, saveError: null, office: FAKE_OFFICE } as const
 
 beforeEach(() => { vi.useFakeTimers(); FakeEventSource.reset() })
 afterEach(() => vi.useRealTimers())

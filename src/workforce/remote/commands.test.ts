@@ -3,12 +3,12 @@ import { createDemoWorkforce } from '../demo'
 import type { StateResponse } from '../api'
 import { createApiClient } from './client'
 import { createRemoteCommands, type RemoteCommands } from './commands'
-import { createFakeBackend } from './fakes'
+import { createFakeBackend, FAKE_OFFICE } from './fakes'
 
 const BASE = 'http://127.0.0.1:8787'
 const NOW = '2026-10-31T09:00:00.000Z'
 const demo = createDemoWorkforce(NOW)
-const fakeState: StateResponse = { state: demo, lastEventId: 'b1:5', loadProblem: null, preserved: null, saveError: null }
+const fakeState: StateResponse = { state: demo, lastEventId: 'b1:5', loadProblem: null, preserved: null, saveError: null, office: FAKE_OFFICE }
 
 let backend: ReturnType<typeof createFakeBackend>
 let commands: RemoteCommands

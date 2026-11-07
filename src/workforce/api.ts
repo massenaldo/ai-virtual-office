@@ -1,5 +1,6 @@
 import { ACTIVITY_LIMIT, type Agent, type AgentActivity, type AgentStatus, type AgentTask, type ApprovalChoice, type WorkforceState } from './types'
 import type { AgentInput } from './operations'
+import type { OfficeClockInfo } from '../office/officeClock'
 
 // The wire contract between the backend and the browser: pure types and one pure function, with no I/O.
 
@@ -54,7 +55,8 @@ export type PermissionChangedEvent = { id: string; type: 'permission.changed'; a
 
 export type WorkforceEvent = ChangeEvent | ResetEvent | PermissionChangedEvent
 
-export type StateResponse = { state: WorkforceState; lastEventId: string; loadProblem: 'corrupt' | 'unsupported-version' | null; preserved: 'backup-created' | 'backup-exists' | null; saveError: string | null }
+/** `office` is the office clock at the moment the response was built. An older server leaves it out; the browser then uses real time. */
+export type StateResponse = { state: WorkforceState; lastEventId: string; loadProblem: 'corrupt' | 'unsupported-version' | null; preserved: 'backup-created' | 'backup-exists' | null; saveError: string | null; office: OfficeClockInfo }
 
 export type ErrorResponse = { error: string }
 

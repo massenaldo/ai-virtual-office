@@ -75,7 +75,7 @@ describe('WorkforcePanel pairing', () => {
   const base = (over: Partial<WorkforceSnapshot>, actions: Partial<WorkforceController>): Workforce => ({
     state: createDemoWorkforce('2026-10-31T09:00:00.000Z'), loadProblem: null, preserved: null, saveError: null,
     environment: { kind: 'backend', runtime: null, available: null, reason: null }, connection: 'offline', lastSyncedAt: null,
-    commandError: null, connectionError: 'Not authorized. Something.', needsPairing: false, pairingNote: null, permissions: null, workspaces: null, ...over, actions: actions as WorkforceController,
+    commandError: null, connectionError: 'Not authorized. Something.', needsPairing: false, pairingNote: null, office: null, permissions: null, workspaces: null, ...over, actions: actions as WorkforceController,
   })
   const render = (w: Workforce, view: WorkforceView = { kind: 'list' }) => renderToStaticMarkup(<WorkforcePanel workforce={w} layout={layout} view={view} onViewChange={() => {}} onFocusDesk={() => {}} openDialog={() => {}}/>)
 

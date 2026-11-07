@@ -9,6 +9,8 @@ import type { ToolReview } from '../types'
 import type { Workforce } from '../useWorkforce'
 import { applyRuntimeEvent, assignTask, markStarting, recoverInterruptedTasks } from '../operations'
 import AgentDetail, { TaskForm } from './AgentDetail'
+import { createOfficeClock } from '../../office/officeClock'
+import { OfficeClockContext } from '../officeClockContext'
 
 const NOW = '2026-11-03T09:00:00.000Z'
 const layout = createDefaultLayout()
@@ -263,5 +265,13 @@ describe('AgentDetail today', () => {
     expect(h).toContain('On lunch')
     expect(h).not.toContain('Praying')
     expect(h).not.toContain('Prayer times are approximate')
+  })
+
+  it('lists the day of the office clock, not of the browser clock', () => {
+    const prayerOn = { ...demo, agents: demo.agents.map((a) => (a.id === agent.id ? { ...a, takesPrayerBreaks: true } : a)) }
+    const at = (iso: string) => createOfficeClock({ nowMs: Date.parse(iso), speed: 1, routine: true }, () => 0)
+    const withClock = (iso: string) => renderToStaticMarkup(<OfficeClockContext.Provider value={at(iso)}><AgentDetail workforce={{ state: prayerOn, permissions: null, actions: {} as WorkforceController } as unknown as Workforce} layout={layout} agent={prayerOn.agents.find((a) => a.id === agent.id)!} onBack={() => {}} onEdit={() => {}} onRemove={() => {}} onFocusDesk={() => {}}/></OfficeClockContext.Provider>)
+    expect(withClock('2026-11-13T09:00:00+07:00')).toContain('Friday prayer and lunch')
+    expect(withClock('2026-11-09T09:00:00+07:00')).not.toContain('Friday prayer and lunch')
   })
 })

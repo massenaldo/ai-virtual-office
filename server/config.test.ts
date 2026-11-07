@@ -6,7 +6,7 @@ import { Secret } from './secret'
 import { CONFIG_VARIABLES, claudeEnabled, formatConfigErrors, mergeEnv, parseConfig } from './config'
 import { makeWorkspaceRoot } from './test/workspaces'
 
-const DEFAULTS = { host: '127.0.0.1', port: 8787, dataDir: '/repo/data', runtime: 'mock', taskTimeoutMs: 600000, cancelGraceMs: 5000, approvalTimeoutMs: 300000, maxMessageBytes: 32768, maxTaskOutputBytes: 262144, eventBufferSize: 500, auditLogMaxBytes: 5242880, workspaceRoot: null, workspaces: [], allowedTools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'], allowedOrigins: ['http://localhost:5173', 'http://127.0.0.1:5173'], credentialsConfigured: false, anthropicApiKey: null, claude: { model: null, maxTurns: 12, maxBudgetUsd: 0.5 }, maxConcurrentTasks: 2, allowBroadWriteScopes: false, enableClaudeRuntime: false, apiToken: null }
+const DEFAULTS = { host: '127.0.0.1', port: 8787, dataDir: '/repo/data', runtime: 'mock', taskTimeoutMs: 600000, cancelGraceMs: 5000, approvalTimeoutMs: 300000, maxMessageBytes: 32768, maxTaskOutputBytes: 262144, eventBufferSize: 500, auditLogMaxBytes: 5242880, workspaceRoot: null, workspaces: [], allowedTools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'], allowedOrigins: ['http://localhost:5173', 'http://127.0.0.1:5173'], credentialsConfigured: false, anthropicApiKey: null, claude: { model: null, maxTurns: 12, maxBudgetUsd: 0.5 }, maxConcurrentTasks: 2, allowBroadWriteScopes: false, enableClaudeRuntime: false, officeRoutine: true, devClock: null, apiToken: null }
 const NAMES = CONFIG_VARIABLES
 
 const KEY = 'sk-ant-api03-abcdefghijklmnop'
@@ -22,7 +22,7 @@ describe('parseConfig', () => {
 
   it('reads every variable', () => {
     const r = parseConfig({ CLAUDE_MODEL: 'claude-sonnet-5-5', CLAUDE_MAX_TURNS: '7', CLAUDE_MAX_BUDGET_USD: '1.25', MAX_CONCURRENT_TASKS: '3', HOST: 'localhost', PORT: '9000', DATA_DIR: 'tmp/x', RUNTIME: 'claude', TASK_TIMEOUT_MS: '1000', CANCEL_GRACE_MS: '200', APPROVAL_TIMEOUT_MS: '3000', MAX_MESSAGE_BYTES: '100', MAX_TASK_OUTPUT_BYTES: '1000', EVENT_BUFFER_SIZE: '20', AUDIT_LOG_MAX_BYTES: '65536', ANTHROPIC_API_KEY: 'k', API_TOKEN: 't'.repeat(40) }, '/repo')
-    expect(r).toEqual({ ok: true, config: { host: 'localhost', port: 9000, dataDir: '/repo/tmp/x', runtime: 'claude', taskTimeoutMs: 1000, cancelGraceMs: 200, approvalTimeoutMs: 3000, maxMessageBytes: 100, maxTaskOutputBytes: 1000, eventBufferSize: 20, auditLogMaxBytes: 65536, workspaceRoot: null, workspaces: [], allowedTools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'], allowedOrigins: ['http://localhost:5173', 'http://127.0.0.1:5173'], credentialsConfigured: true, anthropicApiKey: expect.any(Secret), claude: { model: 'claude-sonnet-5-5', maxTurns: 7, maxBudgetUsd: 1.25 }, maxConcurrentTasks: 3, allowBroadWriteScopes: false, enableClaudeRuntime: false, apiToken: expect.any(Secret) } })
+    expect(r).toEqual({ ok: true, config: { host: 'localhost', port: 9000, dataDir: '/repo/tmp/x', runtime: 'claude', taskTimeoutMs: 1000, cancelGraceMs: 200, approvalTimeoutMs: 3000, maxMessageBytes: 100, maxTaskOutputBytes: 1000, eventBufferSize: 20, auditLogMaxBytes: 65536, workspaceRoot: null, workspaces: [], allowedTools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'], allowedOrigins: ['http://localhost:5173', 'http://127.0.0.1:5173'], credentialsConfigured: true, anthropicApiKey: expect.any(Secret), claude: { model: 'claude-sonnet-5-5', maxTurns: 7, maxBudgetUsd: 1.25 }, maxConcurrentTasks: 3, allowBroadWriteScopes: false, enableClaudeRuntime: false, officeRoutine: true, devClock: null, apiToken: expect.any(Secret) } })
     expect(r.ok && r.config.apiToken?.reveal()).toBe('t'.repeat(40))
     expect(r.ok && String(r.config.anthropicApiKey)).toBe('[REDACTED]')
     expect(JSON.stringify(r)).not.toContain(KEY)
@@ -122,6 +122,21 @@ describe('security-related config', () => {
     expect(flag()).toBe(false)
     for (const v of ['', 'no', 'true', '1', 'YES', 'Yes', 'y', 'yes ']) expect(flag(v)).toBe(false)
     expect(flag('yes')).toBe(true)
+  })
+
+  it('OFFICE_ROUTINE accepts only on or off, or nothing', () => {
+    const routine = (v?: string) => { const r = parseConfig(v === undefined ? {} : { OFFICE_ROUTINE: v }, '/repo'); return r.ok ? r.config.officeRoutine : r.errors }
+    expect(routine()).toBe(true)
+    expect(routine('')).toBe(true)
+    expect(routine('on')).toBe(true)
+    expect(routine('off')).toBe(false)
+    for (const v of ['yes', 'no', 'true', 'false', '0', '1', 'OFF', 'On', 'off ']) expect(routine(v)).toEqual([expect.stringContaining('OFFICE_ROUTINE must be "on" or "off"')])
+  })
+
+  it('a malformed VO_DEV_CLOCK or a speed outside 1 to 3600 is a config error', () => {
+    for (const v of ['nope', '2031-03-04T11:40:00+07:00', '2031-03-04T11:40:00+07:00@0', '2031-03-04T11:40:00+07:00@3601', '2031-03-04T11:40:00@60', '2031-03-04T11:40:00+07:00@NaN']) {
+      expect(parseConfig({ VO_DEV_CLOCK: v }, '/repo')).toEqual({ ok: false, errors: [expect.stringContaining('VO_DEV_CLOCK must look like')] })
+    }
   })
 
   it('.env.example lists exactly the config variables', () => {

@@ -10,6 +10,7 @@ button:disabled{opacity:.4;cursor:default}
 .save-chip.saved .save-chip-dot{background:#4ade80}
 .save-chip.unsaved{color:#f2c879}.save-chip.unsaved .save-chip-dot{background:#f2c879}
 .save-chip.save-failed{color:#ff8a8a}.save-chip.save-failed .save-chip-dot{background:#ff6b6b}
+.scene-chip{position:absolute;left:15px;top:14px;background:#f7f9f9e8;color:#4a5660;border:1px solid #c9d0d2;border-radius:6px;padding:6px 9px;font-size:10px;font-variant-numeric:tabular-nums;pointer-events:none}
 .scene-notice{position:absolute;top:12px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:8px;max-width:min(640px,calc(100% - 24px));background:#fff8e6;color:#5c4512;border:1px solid #f0d58a;border-radius:8px;padding:9px 10px 9px 12px;font-size:11px;box-shadow:0 5px 18px #15202a1a;z-index:20}
 .scene-notice.error{background:#fff0f0;color:#7a1f1f;border-color:#f3b4b4}
 .scene-notice + .scene-notice{top:58px}

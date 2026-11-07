@@ -3,13 +3,13 @@ import type { ChangeEvent, PermissionChangedEvent, PermissionRuleView, StateResp
 import { createDemoWorkforce } from '../demo'
 import type { Agent, AgentTask } from '../types'
 import { createApiClient, NOT_AUTHORIZED } from './client'
-import { createFakeBackend, FakeEventSource } from './fakes'
+import { createFakeBackend, FAKE_OFFICE, FakeEventSource } from './fakes'
 import { createRemoteSync, reconnectDelay, type RemoteSync } from './sync'
 
 const BASE = 'http://127.0.0.1:8787'
 const NOW = '2026-10-31T09:00:00.000Z'
 const demo = createDemoWorkforce(NOW)
-const stateAt = (lastEventId: string, state = demo): StateResponse => ({ state, lastEventId, loadProblem: null, preserved: null, saveError: null })
+const stateAt = (lastEventId: string, state = demo): StateResponse => ({ state, lastEventId, loadProblem: null, preserved: null, saveError: null, office: FAKE_OFFICE })
 const flush = () => vi.advanceTimersByTimeAsync(0)
 const calls = (b: { calls: { method: string; url: string }[] }, path: string) => b.calls.filter((c) => c.method === 'GET' && c.url === `${BASE}${path}`).length
 
@@ -30,6 +30,52 @@ function start(opts: { down?: boolean; lastEventId?: string; before?: (b: Return
 
 beforeEach(() => { vi.useFakeTimers(); FakeEventSource.reset() })
 afterEach(() => { sync?.dispose(); vi.useRealTimers() })
+
+describe('createRemoteSync: office clock', () => {
+  it('takes the office clock from the state reply', async () => {
+    start({ before: (b) => b.setState({ ...stateAt('b1:5'), office: { nowMs: 1_700_000_000_000, speed: 60, routine: false } }) })
+    await flush()
+    expect(sync.getSnapshot().office).toEqual({ nowMs: 1_700_000_000_000, speed: 60, routine: false })
+  })
+
+  it('state from an older server with no office field still loads, on real time', async () => {
+    const { office: _office, ...older } = stateAt('b1:5')
+    start({ before: (b) => b.respond('GET', '/api/state', 200, older) })
+    await flush()
+    es(0).open()
+    expect(sync.getSnapshot()).toMatchObject({ connection: 'live', office: null })
+    expect(sync.getSnapshot().state.agents.length).toBeGreaterThan(0)
+  })
+
+  it.each([[null], ['x'], [{}], [{ nowMs: 'x', speed: 1, routine: true }], [{ nowMs: 1, speed: 0, routine: true }], [{ nowMs: 1, speed: 1 }]])('a malformed office %j does not break the sync', async (office) => {
+    start({ before: (b) => b.respond('GET', '/api/state', 200, { ...stateAt('b1:5'), office }) })
+    await flush()
+    es(0).open()
+    expect(sync.getSnapshot()).toMatchObject({ connection: 'live', office: null })
+  })
+
+  it('after a reconnect the clock comes from the fresh state', async () => {
+    start()
+    await flush()
+    const first = sync.getSnapshot().office
+    expect(first).toEqual(FAKE_OFFICE)
+    backend.setState({ ...stateAt('b1:40'), office: { nowMs: FAKE_OFFICE.nowMs + 3_600_000, speed: 1, routine: true } })
+    es(0).emit(reset('b1:6'))
+    await flush()
+    expect(sync.getSnapshot().office).toEqual({ nowMs: FAKE_OFFICE.nowMs + 3_600_000, speed: 1, routine: true })
+    expect(sync.getSnapshot().office).not.toBe(first)
+  })
+
+  it('an older server after a newer one falls back to real time', async () => {
+    start()
+    await flush()
+    const { office: _office, ...older } = stateAt('b1:40')
+    backend.respond('GET', '/api/state', 200, older)
+    es(0).emit(reset('b1:6'))
+    await flush()
+    expect(sync.getSnapshot().office).toBeNull()
+  })
+})
 
 describe('createRemoteSync: workspaces', () => {
   it('is null until the backend answers, then holds the registered ids', async () => {

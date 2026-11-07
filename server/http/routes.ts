@@ -7,6 +7,7 @@ import { parseLayout } from '../../src/layout/storage'
 import { restoreDemoAgents } from '../../src/workforce/demo'
 import { assignDesk, clearAgentError, createAgent, updateAgent } from '../../src/workforce/operations'
 import type { ServerConfig } from '../config'
+import { officeClockInfo } from '../officeClock'
 import type { AuditLog } from '../audit'
 import type { Logger } from '../log'
 import type { EventLog } from '../eventLog'
@@ -43,6 +44,8 @@ export type RouteDeps = {
   audit: AuditLog
   sessions: SessionStore
   apiToken: string
+  /** Real time in ms, for the office clock only. Test seam; defaults to Date.now. */
+  officeNow?: () => number
 }
 
 /** What a refused grant tells the person. The store's own `limit` is a conflict, the rest are 422. */
@@ -106,6 +109,9 @@ export function createRoutes(deps: RouteDeps): Route[] {
   const auditImport = (action: 'agent.imported' | 'agent.reimported', requestId: string, workspaceId: string, agentId: string, file: string, digest: string) =>
     deps.audit.write({ action, actor: 'api', requestId, workspaceId, agentId, detail: `file=${file} digest=${digest.slice(0, DIGEST_PREFIX)}` })
 
+  const officeNow = deps.officeNow ?? Date.now
+  const officeBootMs = officeNow()
+
   const view = (rule: Parameters<typeof toRuleView>[0]) => toRuleView(rule, now())
 
   const routes: Route[] = [
@@ -124,7 +130,7 @@ export function createRoutes(deps: RouteDeps): Route[] {
       path: '/api/state',
       // The state and the last event id are read in the same tick, so a client can apply exactly the events after it.
       handler: () => {
-        const body: StateResponse = { state: store.state, lastEventId: events.lastEventId, loadProblem: store.load.problem, preserved: store.load.preserved, saveError: store.saveError === null ? null : errorSentence(store.saveError) }
+        const body: StateResponse = { state: store.state, lastEventId: events.lastEventId, loadProblem: store.load.problem, preserved: store.load.preserved, saveError: store.saveError === null ? null : errorSentence(store.saveError), office: officeClockInfo(config, officeNow, officeBootMs) }
         return { status: 200, body }
       },
     },

@@ -7,6 +7,7 @@ import type { Awaitable } from '../controller'
 import ApprovalChoiceForm, { type Scope } from './ApprovalChoiceForm'
 import ApprovalReview from './ApprovalReview'
 import { useBusy } from './useBusy'
+import { useOfficeClock } from '../officeClockContext'
 import { DESCRIPTION_MAX, TITLE_MAX, isActiveTask, type TaskInput } from '../operations'
 import type { RuntimeStatus } from '../api'
 import type { Agent } from '../types'
@@ -67,6 +68,7 @@ export function TaskForm({ workspaces, real = false, runtimes, defaultRuntime = 
 
 export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, onRemove, onFocusDesk }: AgentDetailProps) {
   const { state, actions } = workforce
+  const officeClock = useOfficeClock()
   const desk = deskStatus(layout, agent)
   const groups = deskOptions(layout, state, agent.id)
   const task = state.tasks.find((t) => t.id === agent.currentTaskId)
@@ -150,7 +152,7 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
     <div className="field-group-label section">Today</div>
     <p className="panel-hint">Jakarta time</p>
     <ul className="today-schedule">
-      {todaySchedule(agent, Date.now()).map((e, i) => <li key={i}><span>{e.time}</span> {e.label}</li>)}
+      {todaySchedule(agent, officeClock.now()).map((e, i) => <li key={i}><span>{e.time}</span> {e.label}</li>)}
     </ul>
     {agent.takesPrayerBreaks && <p className="panel-hint">Prayer times are approximate; follow your official schedule.</p>}
 

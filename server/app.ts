@@ -27,6 +27,8 @@ import { toolPolicyFrom } from './toolPolicy'
 
 export type AppDeps = {
   now?: () => string
+  /** Real time in ms for the office clock only (never used for tasks, audit or sessions). Test seam. */
+  officeNow?: () => number
   log?: Logger
   bootId?: string
   /** The default provider: replaces the registered provider of its kind, and its kind is the default runtime. */
@@ -116,7 +118,7 @@ export function createApp(config: ServerConfig, deps: AppDeps = {}): App {
     const streams = new Set<ServerResponse>()
     const startedAt = now()
     const sessions = createSessionStore({ now: () => Date.parse(now()) })
-    const routes = createRoutes({ config, store, layoutStore, events, manager, permissions, now, startedAt, heartbeatMs: deps.heartbeatMs ?? HEARTBEAT_MS, streams, log, maxStreams: deps.maxStreams, audit, sessions, apiToken: apiToken.value })
+    const routes = createRoutes({ config, store, layoutStore, events, manager, permissions, now, startedAt, heartbeatMs: deps.heartbeatMs ?? HEARTBEAT_MS, streams, log, maxStreams: deps.maxStreams, audit, sessions, apiToken: apiToken.value, officeNow: deps.officeNow })
     const onReject = (r: { requestId: string; code: string; method: string; path: string }) => audit.write({ action: 'request.rejected', actor: 'api', requestId: r.requestId, reason: r.code, detail: `${r.method} ${r.path}` })
     const guards = [...createSecurityGuards({ allowedOrigins: config.allowedOrigins, apiToken: apiToken.value, sessions, onReject }), ...(deps.guards ?? [])]
     const responseHeaders = (req: IncomingMessage) => ({ ...securityHeaders(req, config.allowedOrigins), ...(deps.responseHeaders?.(req) ?? {}) })

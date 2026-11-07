@@ -18,6 +18,9 @@ import type { FocusRequest } from './scene/OfficeScene'
 import WorkforcePanel, { selectedAgentId, type WorkforceView } from './workforce/ui/WorkforcePanel'
 import { deskCharacters, deskClickTarget, deskMarkers, deskStatus, workforceNotice } from './workforce/view'
 import { useWorkforce } from './workforce/useWorkforce'
+import { createOfficeClock } from './office/officeClock'
+import { OfficeClockContext } from './workforce/officeClockContext'
+import OfficeClockChip from './workforce/ui/OfficeClockChip'
 
 const LOAD_PROBLEM_MESSAGE = {
   corrupt: "Your saved layout couldn't be loaded, so the default layout is shown. The saved data is kept and backed up before your next save.",
@@ -89,6 +92,9 @@ export default function App() {
   // Agents in the office: markers whenever not editing; the selected agent's desk and desk clicks only with the panel open.
   const selectedAgent = agentsOpen && workforce ? workforce.state.agents.find((a) => a.id === selectedAgentId(agentView)) : undefined
   const workforceState = workforce?.state
+  // A new clock each time the server's reply gives a new office object, so it starts from that reply's time.
+  const officeInfo = workforce?.office ?? null
+  const officeClock = useMemo(() => createOfficeClock(officeInfo, Date.now), [officeInfo])
   const markers = useMemo(() => (workforceState && !editing ? deskMarkers(state.layout, workforceState, selectedAgent?.id ?? null) : undefined), [workforceState, editing, state.layout, selectedAgent?.id])
   const characters = useMemo(() => (workforceState && !editing ? deskCharacters(state.layout, workforceState) : undefined), [workforceState, editing, state.layout])
   const highlightDeskId = selectedAgent && deskStatus(state.layout, selectedAgent).kind === 'assigned' ? selectedAgent.deskId : null
@@ -102,7 +108,7 @@ export default function App() {
   }
   useEditorShortcuts(editing && !dialog, { undo, redo, delete: actions.requestDelete, escape: actions.escape })
 
-  return <main className="app-shell">
+  return <OfficeClockContext.Provider value={officeClock}><main className="app-shell">
     <aside className="sidebar">
       <div className="brand"><div className="brand-mark"><Boxes size={21} /></div><div><strong>AI WORKSPACE</strong><span>VIRTUAL OFFICE</span></div></div>
       <div className="workspace-label">WORKSPACE</div>
@@ -126,6 +132,7 @@ export default function App() {
         {editing && <OutlinerPanel layout={state.layout} selection={state.selection} issues={issues} onSelect={actions.select} onAddRoom={actions.addRoom} onAddFurniture={actions.addFurniture}/>}
         <div className="canvas-wrap">{ready || editor.phase === 'offline' ? <OfficeScene layout={state.layout} floorPlan={floorPlan} viewKey={viewKey} editing={editing} selection={state.selection} issues={issues} onSelect={actions.select} onTransformStart={actions.transformStart} onTransform={actions.transform} onTransformEnd={actions.transformEnd}
           markers={markers} characters={characters} highlightDeskId={highlightDeskId} onDeskClick={onDeskClick} focus={focus}/> : <div className="scene-hint" role="status">Loading office…</div>}
+          {!editing && <OfficeClockChip speed={officeInfo?.speed ?? 1}/>}
           {editor.loadProblem && <div className="scene-notice" role="alert"><AlertTriangle size={15}/><span>{LOAD_PROBLEM_MESSAGE[editor.loadProblem]}</span><button className="notice-close" onClick={editor.dismissLoadProblem} aria-label="Dismiss"><X size={14}/></button></div>}
           {breakNotice && <div className="scene-notice" role="status"><span>{breakNotice}</span><button className="notice-action" onClick={addBreakAreasFromNotice}>Add break areas</button><button className="notice-close" onClick={dismissBreakNoticeForever} aria-label="Dismiss"><X size={14}/></button></div>}
           {editor.status === 'save-failed' && <div className="scene-notice error" role="alert"><AlertTriangle size={15}/><span>Save failed: {editor.saveError} Your changes are still here; try saving again.</span></div>}
@@ -142,5 +149,5 @@ export default function App() {
       <footer className="page-footer"><span>AI Virtual Office <span className="footer-sep">·</span> Local prototype v0.1.0</span><span>Designed for your team, built by you.</span></footer>
     </section>
     <ConfirmDialog open={!!dialog} title={dialog?.title ?? ''} message={dialog?.message ?? ''} actions={dialog?.actions ?? []} cancelLabel={dialog?.cancelLabel} onClose={() => setDialog(null)}/>
-  </main>
+  </main></OfficeClockContext.Provider>
 }

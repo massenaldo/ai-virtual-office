@@ -56,6 +56,34 @@ describe('state and agents', () => {
     expect(r.body).toMatchObject({ loadProblem: null, preserved: null, saveError: null })
   })
 
+  it('/api/state carries the office clock, computed when the response is built', async () => {
+    const a = (await s.api('GET', '/api/state')).body.office
+    expect(a).toEqual({ nowMs: expect.any(Number), speed: 1, routine: true })
+    const real = Date.now()
+    expect(Math.abs(a.nowMs - real)).toBeLessThan(60000)
+    // A second response is not older than the first: nothing is cached or stored.
+    const b = (await s.api('GET', '/api/state')).body.office
+    expect(b.nowMs).toBeGreaterThanOrEqual(a.nowMs)
+  })
+
+  it('OFFICE_ROUTINE=off reports routine false', async () => {
+    const off = await startTestServer({ OFFICE_ROUTINE: 'off' })
+    try {
+      expect((await off.api('GET', '/api/state')).body.office).toMatchObject({ speed: 1, routine: false })
+    } finally { await off.close() }
+  })
+
+  it('a dev clock is reported as it runs, and moves between two replies', async () => {
+    let real = 1_000_000
+    const dev = await startTestServer({ VO_DEV_CLOCK: '2031-03-04T11:40:00+07:00@60' }, { officeNow: () => real })
+    try {
+      const start = Date.parse('2031-03-04T11:40:00+07:00')
+      expect((await dev.api('GET', '/api/state')).body.office).toEqual({ nowMs: start, speed: 60, routine: true })
+      real += 1000
+      expect((await dev.api('GET', '/api/state')).body.office).toEqual({ nowMs: start + 60000, speed: 60, routine: true })
+    } finally { await dev.close() }
+  })
+
   it('creates an agent', async () => {
     const r = await s.api('POST', '/api/agents', { name: 'Nova', role: 'Researcher', department: 'backend' })
     expect(r.status).toBe(201)

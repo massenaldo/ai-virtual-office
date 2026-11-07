@@ -2,13 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChangeEvent, StateResponse } from '../api'
 import type { WorkforceController } from '../controller'
 import { createDemoWorkforce } from '../demo'
-import { createFakeBackend, FakeEventSource } from './fakes'
+import { createFakeBackend, FAKE_OFFICE, FakeEventSource } from './fakes'
 import { createRemoteWorkforceController } from './remoteController'
 
 const BASE = 'http://127.0.0.1:8787'
 const NOW = '2026-10-31T09:00:00.000Z'
 const demo = createDemoWorkforce(NOW)
-const stateAt = (lastEventId: string, loadProblem: StateResponse['loadProblem'] = null): StateResponse => ({ state: demo, lastEventId, loadProblem, preserved: null, saveError: null })
+const stateAt = (lastEventId: string, loadProblem: StateResponse['loadProblem'] = null): StateResponse => ({ state: demo, lastEventId, loadProblem, preserved: null, saveError: null, office: FAKE_OFFICE })
 const flush = () => vi.advanceTimersByTimeAsync(0)
 const change = (id: string, agents = demo.agents.slice(0, 0)): ChangeEvent => ({ id, type: 'state.changed', at: NOW, agentId: null, taskId: null, patch: { agents, tasks: [], activities: [], removedAgentIds: [] } })
 const newAgent = { ...demo.agents[0], id: 'a9', name: 'Older' }

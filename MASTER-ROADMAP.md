@@ -41,7 +41,7 @@ Statuses below were checked against the repository on 2026-11-06 (merge state, a
 | M3B.4 final blockers | Permission reconciliation, scaling test, workspace picker | Merged in #59; the full rerun on merged `main` is still open (to be done after the step 1 cleanup PR merges) |
 | M3B.5 | Claude Agent SDK runtime integration | **VERIFIED — REAL RUN** (not `COMPLETE`: acceptance items remain open) |
 | M3B.6 + M3C.1 | Agent identity and presence, plus seated characters (one release) | IN PROGRESS (slice 1: agent profile; seated characters built, owner's review pending) |
-| M3C.2 onward | Office daily life, then sandbox and a small M4, then M5–M7 as separate decisions | IN PROGRESS (M3C.2 slice 4: break areas built; schedule, walking and holding next) |
+| M3C.2 onward | Office daily life, then sandbox and a small M4, then M5–M7 as separate decisions | IN PROGRESS (M3C.2 slices 4 and 5: break areas and the daily routine built, owner's review pending; holding tasks during breaks next) |
 
 ### Important baseline caveat
 

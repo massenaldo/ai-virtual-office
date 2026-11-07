@@ -227,6 +227,21 @@ describe('presenceAt', () => {
     expect(walkMapFor({ ...layout })).not.toBe(walkMapFor(layout))
   })
 
+  it('agents with no desk do not use up the chairs, mats and counter places', () => {
+    const owner = ownerOffice()
+    const nobody = (id: string): RoutineAgent => ({ id, deskId: null, takesPrayerBreaks: true, activeSince: null, busyUntil: null })
+    const seated = (id: string, deskId: string): RoutineAgent => ({ id, deskId, takesPrayerBreaks: false, activeSince: null, busyUntil: null })
+    // 'a' sorts ahead of 'z', so with six agents at no desk the seated ones would be numbered past the four chairs.
+    const agents = [...['a1', 'a2', 'a3', 'a4', 'a5', 'a6'].map(nobody), seated('z1', 'desk-01'), seated('z2', 'desk-02')]
+    const routine = createRoutine(agents, owner)
+    for (const a of agents.slice(6)) {
+      const lunch = daySchedule({ id: a.id, takesPrayerBreaks: false }, MONDAY).find((e) => e.kind === 'lunch')!
+      const at = routine.presenceAt(a.id, (lunch.startMs + lunch.endMs) / 2)!
+      const seat = seatOf(owner, a.deskId!)
+      expect([a.id, at.x === seat.x && at.z === seat.z]).toEqual([a.id, false])
+    }
+  })
+
   it('a deleted room or a missing route keeps the agent at its desk with the label', () => {
     const lunch = event('agent-01', MONDAY, 'lunch', false)
     const mid = (lunch.startMs + lunch.endMs) / 2

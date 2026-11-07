@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Bot, Boxes, Building2, CheckCircle2, ChevronDown, CircleHelp, Code2, LayoutGrid, Maximize2, Save, Settings2, Users, X } from 'lucide-react'
 import OfficeScene from './scene/OfficeScene'
+import { breakAreasNotice, dismissBreakNotice, isBreakNoticeDismissed } from './layout/breakAreas'
 import { canRedo, canUndo } from './layout/history'
+import { getBrowserStorage } from './layout/storage'
 import { findIssues } from './layout/validation'
 import ConfirmDialog from './editor/ConfirmDialog'
 import EditorToolbar from './editor/EditorToolbar'
@@ -68,11 +70,15 @@ export default function App() {
     })
   }
   // Layout editing and the agents panel are separate modes; turning one on turns the other off.
+  const startEditing = () => { closeAgents(); setEditing(true) }
   const toggleEditing = () => {
     if (editing) return requestLeaveEditing()
-    closeAgents()
-    setEditing(true)
+    startEditing()
   }
+  const [breakNoticeDismissed, setBreakNoticeDismissed] = useState(() => isBreakNoticeDismissed(getBrowserStorage()))
+  const breakNotice = ready && !editing && !breakNoticeDismissed ? breakAreasNotice(state.layout) : null
+  const dismissBreakNoticeForever = () => { dismissBreakNotice(getBrowserStorage()); setBreakNoticeDismissed(true) }
+  const addBreakAreasFromNotice = () => { startEditing(); actions.addBreakAreas() }
   const openAgents = () => (editing ? requestLeaveEditing(() => setAgentsOpen(true)) : setAgentsOpen(true))
   useEffect(() => {
     if (!unsaved) return
@@ -121,6 +127,7 @@ export default function App() {
         <div className="canvas-wrap">{ready || editor.phase === 'offline' ? <OfficeScene layout={state.layout} floorPlan={floorPlan} viewKey={viewKey} editing={editing} selection={state.selection} issues={issues} onSelect={actions.select} onTransformStart={actions.transformStart} onTransform={actions.transform} onTransformEnd={actions.transformEnd}
           markers={markers} characters={characters} highlightDeskId={highlightDeskId} onDeskClick={onDeskClick} focus={focus}/> : <div className="scene-hint" role="status">Loading office…</div>}
           {editor.loadProblem && <div className="scene-notice" role="alert"><AlertTriangle size={15}/><span>{LOAD_PROBLEM_MESSAGE[editor.loadProblem]}</span><button className="notice-close" onClick={editor.dismissLoadProblem} aria-label="Dismiss"><X size={14}/></button></div>}
+          {breakNotice && <div className="scene-notice" role="status"><span>{breakNotice}</span><button className="notice-action" onClick={addBreakAreasFromNotice}>Add break areas</button><button className="notice-close" onClick={dismissBreakNoticeForever} aria-label="Dismiss"><X size={14}/></button></div>}
           {editor.status === 'save-failed' && <div className="scene-notice error" role="alert"><AlertTriangle size={15}/><span>Save failed: {editor.saveError} Your changes are still here; try saving again.</span></div>}
           {workforce?.loadProblem && <div className="scene-notice" role="alert"><AlertTriangle size={15}/><span>{workforceNotice(workforce.loadProblem, workforce.preserved)}</span><button className="notice-close" onClick={workforce.actions.dismissLoadProblem} aria-label="Dismiss"><X size={14}/></button></div>}
           {workforce?.commandError && <div className="scene-notice error" role="alert"><AlertTriangle size={15}/><span>{workforce.commandError}</span><button className="notice-close" onClick={workforce.actions.dismissCommandError} aria-label="Dismiss"><X size={14}/></button></div>}

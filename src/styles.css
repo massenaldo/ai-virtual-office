@@ -13,6 +13,8 @@ button:disabled{opacity:.4;cursor:default}
 .scene-notice{position:absolute;top:12px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:8px;max-width:min(640px,calc(100% - 24px));background:#fff8e6;color:#5c4512;border:1px solid #f0d58a;border-radius:8px;padding:9px 10px 9px 12px;font-size:11px;box-shadow:0 5px 18px #15202a1a;z-index:20}
 .scene-notice.error{background:#fff0f0;color:#7a1f1f;border-color:#f3b4b4}
 .scene-notice + .scene-notice{top:58px}
+.notice-action{background:#fff;border:1px solid #f0d58a;color:inherit;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:600;margin-left:auto;white-space:nowrap}
+.notice-action + .notice-close{margin-left:0}
 .notice-close{display:grid;place-items:center;background:transparent;border:0;color:inherit;padding:2px;margin-left:auto}
 .dialog-backdrop{position:fixed;inset:0;background:#05080dcc;display:grid;place-items:center;z-index:50;padding:16px}
 .dialog{width:min(420px,100%);background:#111923;border:1px solid #2b3441;border-radius:12px;padding:20px;box-shadow:0 20px 60px #0008}

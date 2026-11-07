@@ -1,5 +1,5 @@
 import { BREAK_DEPARTMENTS, DEFAULT_WALL_HEIGHT, DEPARTMENTS, type BreakDepartment } from './catalog'
-import { furnitureRect, rectInsideOffice, rectsOverlap, roomRect, rotateOffset, type Rect } from './geometry'
+import { clampFurniture, clampRoom, furnitureRect, rectInsideOffice, rectsOverlap, roomRect, rotateOffset, type Rect } from './geometry'
 import { LAYOUT_SCHEMA_VERSION, type Furniture, type FurnitureType, type OfficeLayout, type Room, type Rotation } from './types'
 
 // The kitchen, the dining area and the prayer room. This module owns where they go, so the default layout, the
@@ -165,4 +165,70 @@ export function withBreakAreasIfTheyFit(layout: OfficeLayout): OfficeLayout {
     }
   }
   return next
+}
+
+/** The break departments this office has no room for, in the order kitchen, dining, prayer. */
+export function missingBreakDepartments(layout: OfficeLayout): BreakDepartment[] {
+  return BREAK_DEPARTMENTS.filter((d) => !layout.rooms.some((r) => r.department === d))
+}
+
+const NOTICE_NAME: Record<BreakDepartment, string> = { kitchen: 'kitchen', dining: 'dining area', prayer: 'prayer room' }
+
+/** The notice for an office missing some break rooms, or null when it has them all. */
+export function breakAreasNotice(layout: OfficeLayout): string | null {
+  const names = missingBreakDepartments(layout).map((d) => NOTICE_NAME[d])
+  if (names.length === 0) return null
+  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`
+  return `This office has no ${list}, so agents will stay at their desks for those breaks.`
+}
+
+/** The first of id, id-2, id-3 ... that is not taken. Deterministic. */
+function freeId(id: string, taken: Set<string>): string {
+  if (!taken.has(id)) return id
+  for (let n = 2; ; n++) if (!taken.has(`${id}-${n}`)) return `${id}-${n}`
+}
+
+/**
+ * Adds the missing break rooms, compact, each at the first free spot or else the office centre clamped to the floor.
+ * Never moves anything that exists. Pure, so a reducer may run it twice. Returns the same object when nothing is missing.
+ */
+export function addBreakAreas(layout: OfficeLayout): OfficeLayout {
+  const missing = missingBreakDepartments(layout)
+  if (missing.length === 0) return layout
+  const taken = new Set([...layout.rooms, ...layout.furniture].map((o) => o.id))
+  let next = layout
+  for (const department of COMPACT_ORDER.filter((d) => missing.includes(d))) {
+    const { room, furniture } = compactBreakArea(department)
+    const spot = findRoomSpot(next, room.width, room.depth)
+    const placed: Room = spot ? { ...room, x: spot.x, z: spot.z } : clampRoom({ ...room, x: 0, z: 0 }, layout.office)
+    const roomId = freeId(room.id, taken)
+    taken.add(roomId)
+    const pieces = furniture.map((f) => {
+      const id = freeId(f.id, taken)
+      taken.add(id)
+      return clampFurniture({ ...f, id, roomId, x: round3(f.x + placed.x), z: round3(f.z + placed.z) }, layout.office)
+    })
+    next = { ...next, rooms: [...next.rooms, { ...placed, id: roomId }], furniture: [...next.furniture, ...pieces] }
+  }
+  return next
+}
+
+export const BREAK_NOTICE_DISMISSED_KEY = 'ai-virtual-office:break-areas-notice:dismissed'
+type FlagStorage = { getItem(key: string): string | null; setItem(key: string, value: string): void }
+
+/** Whether the person dismissed the notice in this browser. No storage, or storage that throws, means not dismissed. */
+export function isBreakNoticeDismissed(storage: FlagStorage | null): boolean {
+  try {
+    return storage?.getItem(BREAK_NOTICE_DISMISSED_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+export function dismissBreakNotice(storage: FlagStorage | null): void {
+  try {
+    storage?.setItem(BREAK_NOTICE_DISMISSED_KEY, '1')
+  } catch {
+    // The notice is still hidden for this visit; it may come back next time.
+  }
 }

@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import type { FurnitureType } from '../layout/types'
 import type { MaterialKey } from './materials'
+import { stableHash } from '../office/hash'
 
 export type ModelPart = { material: MaterialKey; geometry: THREE.BufferGeometry; castShadow: boolean }
 
@@ -148,12 +149,7 @@ function prayerMat(): Pieces {
   }
 }
 
-/** FNV-1a over the text, as an unsigned 32-bit integer. The same text always gives the same number. */
-export function stableHash(text: string): number {
-  let hash = 2166136261
-  for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619)
-  return hash >>> 0
-}
+export { stableHash }
 
 export type PlantVariant = 0 | 1
 

@@ -7,6 +7,8 @@ import type { DeskMarker } from '../scene/labels'
 import type { PermissionRuleView } from './api'
 import type { PermissionsState } from './permissions'
 import type { ConnectionStatus, RuntimeEnvironment, WorkforceSnapshot } from './controller'
+import { dayStartMs, jakartaDay } from '../office/jakartaClock'
+import { daySchedule } from '../office/schedule'
 import { activeTaskFor, agentAtDesk } from './operations'
 import type { Preserved, WorkforceLoadProblem } from './storage'
 import type { Agent, AgentActivity, AgentDepartment, AgentStatus, AgentTask, TaskRuntime, TaskStatus, TaskUsage, WorkforceState } from './types'
@@ -298,4 +300,18 @@ export function agentPermissionChip(permissions: PermissionsState | null, s: Wor
 export function sourceFileName(sourceFile: string | null): string | null {
   const cut = sourceFile === null ? -1 : sourceFile.indexOf(':')
   return sourceFile !== null && cut > 0 && cut < sourceFile.length - 1 ? sourceFile.slice(cut + 1) : null
+}
+
+const clockText = (day: ReturnType<typeof jakartaDay>, ms: number) => {
+  const m = Math.round((ms - dayStartMs(day)) / 60000)
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
+}
+
+/** The agent's breaks for the Jakarta day that `nowMs` falls in, as `12:03` or `11:45–13:00` in Jakarta time. */
+export function todaySchedule(agent: Agent, nowMs: number): { time: string; label: string }[] {
+  const day = jakartaDay(nowMs)
+  return daySchedule(agent, day).map((e) => ({
+    time: e.kind === 'lunch' || e.kind === 'friday' ? `${clockText(day, e.startMs)}–${clockText(day, e.endMs)}` : clockText(day, e.startMs),
+    label: e.label,
+  }))
 }

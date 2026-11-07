@@ -249,3 +249,19 @@ describe('AgentDetail import source', () => {
     expect(view(demo, null)).not.toContain('Imported from')
   })
 })
+
+describe('AgentDetail today', () => {
+  it('shows the day in Jakarta time with the exact approximation line when prayer breaks are on', () => {
+    const h = view({ ...demo, agents: demo.agents.map((a) => (a.id === agent.id ? { ...a, takesPrayerBreaks: true } : a)) }, null)
+    expect(h).toContain('Today')
+    expect(h).toContain('Jakarta time')
+    expect(h).toContain('Praying')
+    expect(h).toContain('Prayer times are approximate; follow your official schedule.')
+  })
+  it('leaves the approximation line and prayers out when prayer breaks are off', () => {
+    const h = view({ ...demo, agents: demo.agents.map((a) => (a.id === agent.id ? { ...a, takesPrayerBreaks: false } : a)) }, null)
+    expect(h).toContain('On lunch')
+    expect(h).not.toContain('Praying')
+    expect(h).not.toContain('Prayer times are approximate')
+  })
+})

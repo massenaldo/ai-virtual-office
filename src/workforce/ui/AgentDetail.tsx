@@ -10,7 +10,7 @@ import { useBusy } from './useBusy'
 import { DESCRIPTION_MAX, TITLE_MAX, isActiveTask, type TaskInput } from '../operations'
 import type { RuntimeStatus } from '../api'
 import type { Agent } from '../types'
-import { TASK_RUNTIME_LABEL, TASK_STATUS_LABEL, agentStatusText, agentTimeline, agentPermissionChip, approveEnabled, choiceFor, shortDigest, deskOptions, deskStatus, formatTime, formatUsage, sourceFileName } from '../view'
+import { TASK_RUNTIME_LABEL, TASK_STATUS_LABEL, agentStatusText, agentTimeline, agentPermissionChip, todaySchedule, approveEnabled, choiceFor, shortDigest, deskOptions, deskStatus, formatTime, formatUsage, sourceFileName } from '../view'
 import { StatusDot } from './AgentList'
 
 export type AgentDetailProps = { workforce: Workforce; layout: OfficeLayout; agent: Agent; onBack(): void; onEdit(): void; onRemove(): void; onFocusDesk(): void }
@@ -146,6 +146,13 @@ export default function AgentDetail({ workforce, layout, agent, onBack, onEdit, 
     {desk.kind !== 'none' && <div className="panel-actions">
       <button className="panel-button" onClick={onFocusDesk} disabled={desk.kind === 'unavailable'}><LocateFixed size={13}/> {desk.kind === 'assigned' ? 'Focus desk' : 'Desk not in the layout'}</button>
     </div>}
+
+    <div className="field-group-label section">Today</div>
+    <p className="panel-hint">Jakarta time</p>
+    <ul className="today-schedule">
+      {todaySchedule(agent, Date.now()).map((e, i) => <li key={i}><span>{e.time}</span> {e.label}</li>)}
+    </ul>
+    {agent.takesPrayerBreaks && <p className="panel-hint">Prayer times are approximate; follow your official schedule.</p>}
 
     <div className="field-group-label section">Current task</div>
     {task ? <div className={`task-card ${task.status}`}>

@@ -266,14 +266,15 @@ describe('the demo tool request', () => {
 
   it('approving the demo write changes nothing on disk', async () => {
     const w = makeWorkspaceRoot(['sandbox'])
-    const t = await startTestServer(w.env, { mockTimings: { thinkingMs: 30, workingMs: 30 } })
+    const t = await startTestServer(w.env, { mockTimings: { thinkingMs: 60000, workingMs: 30 } })
     try {
       const r = await t.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'Build API', workspaceId: 'sandbox' })
       const id = r.body.task.id as string
       const get = async () => (await t.api('GET', '/api/state')).body.state.tasks[0]
       await until(async () => (await get()).status === 'running')
+      // A long thinking time holds the task until the request clears its timers; the approval itself is raised asynchronously.
       await t.api('POST', `/api/demo/tasks/${id}/request-approval`)
-      const pending = (await get()).pendingApproval
+      const pending = await until(async () => (await get()).pendingApproval, 20000)
       expect((await t.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'approve', digest: pending.digest })).status).toBe(200)
       await until(async () => (await get()).status === 'completed')
       expect(readdirSync(w.path('sandbox'))).toEqual([])

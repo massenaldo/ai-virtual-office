@@ -9,7 +9,7 @@ let s: TestServer | null = null
 let ws: ReturnType<typeof makeWorkspaceRoot> | null = null
 afterEach(async () => { await s?.close(); s = null; ws?.cleanup(); ws = null })
 
-const FAST = { thinkingMs: 30, workingMs: 30 }
+const FAST = { thinkingMs: 60000, workingMs: 30 }
 const SLOW = { thinkingMs: 60000, workingMs: 60000 }
 const readAudit = (t: TestServer): AuditRecord[] => readFileSync(join(t.dataDir, AUDIT_FILE), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as AuditRecord)
 const rawAudit = (t: TestServer) => readFileSync(join(t.dataDir, AUDIT_FILE), 'utf8')
@@ -43,12 +43,14 @@ describe('audit wiring', () => {
     const started = await s.api('POST', '/api/agents/agent-demo-backend/tasks', { title: 'Build API', workspaceId: 'sandbox' })
     const R = started.headers.get('x-request-id')
     const id = started.body.task.id as string
-    await until(async () => (await state(s!)).tasks[0].status === 'running')
+    await until(async () => (await state(s!)).tasks[0].status === 'running', 20000)
+    // The long thinking time holds the task until the request clears its timers; the approval itself is raised asynchronously.
     await s.api('POST', `/api/demo/tasks/${id}/request-approval`)
+    await until(async () => (await state(s!)).tasks[0].pendingApproval !== null, 20000)
     const pending = (await state(s)).tasks[0].pendingApproval
     const decided = await s.api('POST', `/api/tasks/${id}/approval`, { approvalId: pending.id, decision: 'approve', digest: pending.digest })
     const R2 = decided.headers.get('x-request-id')
-    await until(async () => (await state(s!)).tasks[0].status === 'completed')
+    await until(async () => (await state(s!)).tasks[0].status === 'completed', 20000)
     const records = readAudit(s).filter((r) => r.taskId === id)
     expect(records.map((r) => r.action)).toEqual(['task.start', 'tool.asked', 'approval.requested', 'permission.granted', 'approval.decided', 'permission.used'])
     expect(records[0]).toMatchObject({ actor: 'api', requestId: R, workspaceId: 'sandbox' })
@@ -103,6 +105,7 @@ describe('audit wiring', () => {
     const id = started.body.task.id as string
     await until(async () => (await state(s!)).tasks[0].status === 'running')
     await s.api('POST', `/api/demo/tasks/${id}/request-approval`)
+    await until(async () => readAudit(s!).some((r) => r.action === 'tool.denied'), 20000)
     const denied = readAudit(s).find((r) => r.action === 'tool.denied')!
     expect(denied).toMatchObject({ actor: 'runtime', tool: 'Write', decision: 'deny', reason: 'not_allowed' })
     expect('detail' in denied).toBe(false)

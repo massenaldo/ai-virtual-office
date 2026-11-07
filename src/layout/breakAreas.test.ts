@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { BREAK_DEPARTMENTS } from './catalog'
-import { breakAreaItems, compactBreakArea, findRoomSpot, withBreakAreasIfTheyFit } from './breakAreas'
+import { addBreakAreas, breakAreaItems, breakAreasNotice, compactBreakArea, dismissBreakNotice, findRoomSpot, isBreakNoticeDismissed, missingBreakDepartments, withBreakAreasIfTheyFit } from './breakAreas'
+import { parseLayout, serializeLayout } from './storage'
 import { createDefaultLayout } from './defaultLayout'
 import { furnitureRect, rectInsideOffice, rectsOverlap, roomRect, rotateOffset } from './geometry'
 import type { Furniture, OfficeLayout, Room } from './types'
@@ -220,5 +221,92 @@ describe('the default placement', () => {
       const front = { minX: e.minX, maxX: e.maxX, minZ: e.maxZ, maxZ: e.maxZ + 1 }
       expect([r.id, l.rooms.filter((o) => isBreak(o.department) && o.id !== r.id && rectsOverlap(front, roomRect(o))).map((o) => o.id)]).toEqual([r.id, []])
     }
+  })
+})
+
+describe('addBreakAreas', () => {
+  const none = (): OfficeLayout => ({ ...smallOffice(), office: { width: 40, depth: 30, gridSize: 0.25 } })
+  const withDept = (l: OfficeLayout, ...ds: string[]): OfficeLayout => ({ ...l, rooms: [...l.rooms, ...ds.map((d) => ({ ...room(`room-${d}`, 15, 10, 2.6, 2.4), department: d as Room['department'] }))] })
+
+  it('lists what is missing', () => {
+    expect(breakAreasNotice(createDefaultLayout())).toBeNull()
+    expect(missingBreakDepartments(none())).toEqual(['kitchen', 'dining', 'prayer'])
+    expect(breakAreasNotice(withDept(none(), 'dining', 'prayer'))).toBe('This office has no a kitchen, so agents will stay at their desks for those breaks.')
+    expect(breakAreasNotice(withDept(none(), 'dining'))).toBe('This office has no a kitchen or a prayer room, so agents will stay at their desks for those breaks.')
+    expect(breakAreasNotice(withDept(none(), 'prayer'))).toBe('This office has no a kitchen or a dining area, so agents will stay at their desks for those breaks.')
+    expect(breakAreasNotice(none())).toBe('This office has no a kitchen, a dining area or a prayer room, so agents will stay at their desks for those breaks.')
+  })
+
+  it('adds only the missing rooms and moves nothing that exists', () => {
+    const l = withDept(none(), 'kitchen')
+    const out = addBreakAreas(l)
+    expect(out.rooms.slice(0, l.rooms.length)).toEqual(l.rooms)
+    expect(out.furniture.slice(0, l.furniture.length)).toEqual(l.furniture)
+    expect(breakRooms(out).map((r) => r.department).sort()).toEqual(['dining', 'kitchen', 'prayer'])
+    expect(out.rooms.length).toBe(l.rooms.length + 2)
+  })
+
+  it('uses the compact set beside the existing rooms, furniture moving with its room', () => {
+    const out = addBreakAreas(none())
+    for (const d of ['kitchen', 'dining', 'prayer'] as const) {
+      const r = out.rooms.find((x) => x.department === d)!
+      expect([r.width, r.depth]).toEqual([2.6, 2.4])
+      const mine = out.furniture.filter((f) => f.roomId === r.id)
+      expect(mine.length).toBe(compactBreakArea(d).furniture.length)
+      const c = compactBreakArea(d).furniture
+      mine.forEach((f, i) => expect([f.x, f.z]).toEqual([Math.round((c[i].x + r.x) * 1000) / 1000, Math.round((c[i].z + r.z) * 1000) / 1000]))
+    }
+  })
+
+  it('rooms added in one call do not overlap each other', () => {
+    const rects = breakRooms(addBreakAreas(none())).map(roomRect)
+    for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) expect(rectsOverlap(rects[i], rects[j])).toBe(false)
+  })
+
+  it('on a floor with no free spot it still gives a valid layout inside the floor', () => {
+    const tiny: OfficeLayout = { ...none(), office: { width: 6, depth: 4, gridSize: 0.25 }, rooms: [room('room-ceo-office', 0, 0, 5.5, 3.6)], furniture: [] }
+    const out = addBreakAreas(tiny)
+    expect(breakRooms(out).length).toBe(3)
+    for (const r of out.rooms) expect(rectInsideOffice(roomRect(r), out.office)).toBe(true)
+    expect(() => parseLayout(JSON.parse(serializeLayout(out)))).not.toThrow()
+  })
+
+  it('a taken ID gets a suffix, also on its furniture', () => {
+    const l = { ...none(), furniture: [...none().furniture, desk('kitchen-counter-01', 0, 0)] }
+    const l2: OfficeLayout = { ...l, rooms: [...l.rooms, { ...room('room-kitchen', 15, 10, 2, 2), department: 'executive' }] }
+    const out = addBreakAreas(l2)
+    const k = out.rooms.find((r) => r.department === 'kitchen')!
+    expect(k.id).toBe('room-kitchen-2')
+    const counter = out.furniture.find((f) => f.type === 'kitchen-counter')!
+    expect(counter.id).toBe('kitchen-counter-01-2')
+    expect(counter.roomId).toBe('room-kitchen-2')
+    const ids = [...out.rooms, ...out.furniture].map((o) => o.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('returns the same object when nothing is missing', () => {
+    const l = createDefaultLayout()
+    expect(addBreakAreas(l)).toBe(l)
+  })
+
+  it('gives the same result every time', () => {
+    expect(addBreakAreas(none())).toEqual(addBreakAreas(none()))
+  })
+})
+
+describe('the dismissal flag', () => {
+  const store = (init: Record<string, string> = {}) => ({ getItem: (k: string) => init[k] ?? null, setItem: (k: string, v: string) => { init[k] = v } })
+  it('remembers a dismissal', () => {
+    const s = store()
+    expect(isBreakNoticeDismissed(s)).toBe(false)
+    dismissBreakNotice(s)
+    expect(isBreakNoticeDismissed(s)).toBe(true)
+  })
+  it('works with no storage or storage that throws', () => {
+    const bad = { getItem: () => { throw new Error('no') }, setItem: () => { throw new Error('no') } }
+    expect(isBreakNoticeDismissed(null)).toBe(false)
+    expect(isBreakNoticeDismissed(bad)).toBe(false)
+    expect(() => dismissBreakNotice(null)).not.toThrow()
+    expect(() => dismissBreakNotice(bad)).not.toThrow()
   })
 })

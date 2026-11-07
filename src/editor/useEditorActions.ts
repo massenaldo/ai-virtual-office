@@ -1,3 +1,4 @@
+import { addBreakAreas } from '../layout/breakAreas'
 import type { RoomTemplateId } from '../layout/catalog'
 import { addFurniture, addRoom, deleteFurniture, deleteRoom, duplicateFurniture, rotateFurniture, rotateRoom, updateFurniture, updateRoom } from '../layout/operations'
 import type { Furniture, FurnitureType, Room, Selection } from '../layout/types'
@@ -36,6 +37,13 @@ export function useEditorActions({ state, dispatch }: LayoutEditor, openDialog: 
     addFurniture: (type: FurnitureType) => {
       const added = addFurniture(layout, type, anchor())
       dispatch({ type: 'edit', update: () => added.layout, select: { kind: 'furniture', id: added.id } })
+    },
+    /** One undo step. The rooms are chosen from the current layout, then re-derived identically inside the reducer. */
+    addBreakAreas: () => {
+      const added = addBreakAreas(layout)
+      if (added === layout) return
+      const firstNew = added.rooms.find((r) => !layout.rooms.some((o) => o.id === r.id))
+      dispatch({ type: 'edit', update: addBreakAreas, select: firstNew ? { kind: 'room', id: firstNew.id } : undefined })
     },
     duplicate: (id: string) => {
       const added = duplicateFurniture(layout, id)

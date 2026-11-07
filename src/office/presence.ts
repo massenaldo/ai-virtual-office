@@ -81,11 +81,12 @@ export function createRoutine(agents: RoutineAgent[], layout: OfficeLayout): { p
   const sorted = [...agents].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   const desks = new Map(layout.furniture.filter((f) => f.type === 'desk').map((f) => [f.id, f]))
   const records = new Map<string, AgentRecord>()
-  sorted.forEach((agent, index) => {
+  sorted.forEach((agent) => {
     const desk = agent.deskId === null ? undefined : desks.get(agent.deskId)
     if (!desk) return
     const seat = seatForDesk(layout, desk)
-    records.set(agent.id, { agent, index, seat, home: { x: seat.x, z: seat.z }, schedules: new Map(), itineraries: new Map() })
+    // Numbered among agents with a desk, so one with no character never uses up a chair, a mat or a place at the counter.
+    records.set(agent.id, { agent, index: records.size, seat, home: { x: seat.x, z: seat.z }, schedules: new Map(), itineraries: new Map() })
   })
 
   // Spots nobody can walk to are left out, so a cramped room gives its reachable places to the first agents.
@@ -108,7 +109,7 @@ export function createRoutine(agents: RoutineAgent[], layout: OfficeLayout): { p
     const lists = spots()
     if (kind === 'coffee') {
       // The kitchen holds fewer than a full office, so who stays at their desk changes from day to day.
-      return lists.coffee[(record.index + stableHash(`coffee:${day.key}`)) % sorted.length] ?? null
+      return lists.coffee[(record.index + stableHash(`coffee:${day.key}`)) % records.size] ?? null
     }
     return (kind === 'prayer' ? lists.prayer : lists.dining)[record.index] ?? null
   }

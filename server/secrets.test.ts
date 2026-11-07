@@ -26,7 +26,7 @@ describe('secrets and paths', () => {
   it('never writes the API key, request bodies or workspace paths', async () => {
     ws = makeWorkspaceRoot(['sandbox'])
     const rec = recordingLogger()
-    s = await startTestServer({ ANTHROPIC_API_KEY: CANARY, ...ws.env }, { log: rec, mockTimings: { thinkingMs: 30, workingMs: 30 } })
+    s = await startTestServer({ ANTHROPIC_API_KEY: CANARY, ...ws.env }, { log: rec, mockTimings: { thinkingMs: 60000, workingMs: 30 } })
     const seen: string[] = []
     const keep = (r: { status: number; headers: Headers | Record<string, unknown>; body: unknown }) => {
       const headers = r.headers instanceof Headers ? Object.fromEntries(r.headers.entries()) : r.headers
@@ -46,7 +46,9 @@ describe('secrets and paths', () => {
     const id = started.body.task.id as string
     const get = async () => (await s!.api('GET', '/api/state')).body.state.tasks[0]
     await until(async () => (await get()).status === 'running')
+    // A long thinking time holds the task until the request clears its timers; the approval itself is raised asynchronously.
     keep(await s.api('POST', `/api/demo/tasks/${id}/request-approval`))
+    await until(async () => (await get()).pendingApproval !== null)
     keep(await s.api('POST', `/api/tasks/${id}/approval`, { approvalId: (await get()).pendingApproval.id, decision: 'approve', digest: (await get()).pendingApproval.digest }))
     await until(async () => (await get()).status === 'completed')
     keep(await s.api('GET', '/api/state'))
@@ -57,7 +59,7 @@ describe('secrets and paths', () => {
     for (const text of [...seen, ...files]) expect(text).not.toContain(ws.root)
     expect(rec.lines.join('\n')).not.toContain(ws.root)
     expect(health.body.credentialsConfigured).toBe(true)
-  })
+  }, 30000)
 
   it('the redacting logger hides a key that reaches a log line', async () => {
     const rec = recordingLogger()

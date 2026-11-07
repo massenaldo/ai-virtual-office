@@ -7,7 +7,7 @@ import { createDemoWorkforce } from './demo'
 import type { PermissionRuleView } from './api'
 import { addActivity, assignTask, cancelTask } from './operations'
 import type { RuntimeEnvironment } from './controller'
-import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskCharacters, deskClickTarget, deskMarkers, shortDigest, environmentBadge, environmentNote, connectionLabel, agentStatusText, workforceNotice, TASK_RUNTIME_LABEL, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, allowedScopes, permissionStateText, rulesForTab, scopeSentence, choiceFor, agentPermissionChip, revokePrompt, revokeAgentPrompt, waitingApprovals, removalPrompt, TASK_STATUS_LABEL, formatUsage, sourceFileName } from './view'
+import { AGENT_DEPARTMENTS, AGENT_STATUS_LABEL, agentHistory, assignableAgents, deskCharacters, deskClickTarget, deskMarkers, shortDigest, environmentBadge, environmentNote, connectionLabel, agentStatusText, workforceNotice, TASK_RUNTIME_LABEL, agentTimeline, deskOptions, deskStatus, filterAgents, formatTime, allowedScopes, permissionStateText, rulesForTab, scopeSentence, choiceFor, agentPermissionChip, revokePrompt, revokeAgentPrompt, waitingApprovals, removalPrompt, TASK_STATUS_LABEL, formatUsage, sourceFileName, todaySchedule } from './view'
 
 const NOW = '2026-10-30T09:00:00.000Z'
 const layout = createDefaultLayout()
@@ -428,5 +428,30 @@ describe('sourceFileName', () => {
     expect(sourceFileName('sandbox:a:b.md')).toBe('a:b.md')
     expect(sourceFileName(null)).toBeNull()
     expect(sourceFileName('broken')).toBeNull()
+  })
+})
+
+describe('todaySchedule', () => {
+  const agentOn = { ...agent('agent-demo-pm'), takesPrayerBreaks: true }
+  // 2026-11-06 is a Friday in Jakarta, even though it is still Thursday evening in New York.
+  const FRIDAY_NOON = Date.parse('2026-11-06T12:00:00+07:00')
+  it('lists the day in Jakarta time, in order, with ranges for lunch and the Friday window', () => {
+    const rows = todaySchedule(agentOn, FRIDAY_NOON)
+    expect(rows.every((r) => /^\d\d:\d\d(–\d\d:\d\d)?$/.test(r.time))).toBe(true)
+    expect(rows.map((r) => r.time)).toEqual([...rows.map((r) => r.time)].sort())
+    expect(rows).toContainEqual({ time: '11:45–13:00', label: 'Friday prayer and lunch' })
+    expect(rows.filter((r) => r.label === 'Praying')).toHaveLength(4)
+  })
+  it('follows the Jakarta date at the day boundary, not the viewer', () => {
+    const justBefore = todaySchedule(agentOn, Date.parse('2026-11-06T23:59:00+07:00'))
+    const justAfter = todaySchedule(agentOn, Date.parse('2026-11-07T00:01:00+07:00'))
+    expect(justBefore.some((r) => r.label === 'Friday prayer and lunch')).toBe(true)
+    expect(justAfter.some((r) => r.label === 'Friday prayer and lunch')).toBe(false)
+    expect(justAfter.some((r) => r.label === 'On lunch')).toBe(true)
+  })
+  it('has no prayers when the agent does not take prayer breaks', () => {
+    const rows = todaySchedule({ ...agentOn, takesPrayerBreaks: false }, FRIDAY_NOON)
+    expect(rows.some((r) => r.label === 'Praying' || r.label === 'Friday prayer and lunch')).toBe(false)
+    expect(rows.some((r) => r.label === 'On lunch')).toBe(true)
   })
 })

@@ -18,6 +18,7 @@ import { ClaudeAgentRuntimeProvider } from './runtime/claudeAgent'
 import { ServerMockProvider } from './runtime/mockProvider'
 import type { ServerRuntimeProvider } from './runtime/types'
 import { openWorkforceStore, type WorkforceStore } from './store'
+import { openLayoutStore, type LayoutStore } from './layoutStore'
 import { toRuleView } from './permissions/view'
 import { openPermissionStore, type PermissionChange, type PermissionStore } from './permissions/store'
 import { countUnboundWriteRules, UNBOUND_WRITE_RULES_WARNING } from './hostSafety'
@@ -38,13 +39,13 @@ export type AppDeps = {
   maxStreams?: number
   audit?: AuditLog
   permissions?: PermissionStore
-  /** Test seam: replaces the store's atomic file write. */
+  /** Test seam: replaces the atomic file write of the workforce and layout stores. */
   storeWriteFile?: (path: string, text: string) => void
   guards?: Guard[]
   responseHeaders?: (req: IncomingMessage) => Record<string, string>
 }
 
-export type App = { config: ServerConfig; apiToken: ApiToken; sessions: SessionStore; store: WorkforceStore; permissions: PermissionStore; audit: AuditLog; events: EventLog; provider: ServerRuntimeProvider; manager: TaskManager; startedAt: string; streams: Set<ServerResponse>; handler: (req: IncomingMessage, res: ServerResponse) => void; closeStreams(): void; releaseLock(): void }
+export type App = { config: ServerConfig; apiToken: ApiToken; sessions: SessionStore; store: WorkforceStore; layoutStore: LayoutStore; permissions: PermissionStore; audit: AuditLog; events: EventLog; provider: ServerRuntimeProvider; manager: TaskManager; startedAt: string; streams: Set<ServerResponse>; handler: (req: IncomingMessage, res: ServerResponse) => void; closeStreams(): void; releaseLock(): void }
 
 export type RunningServer = { url: string; port: number; app: App; close(): Promise<void> }
 
@@ -89,6 +90,7 @@ export function createApp(config: ServerConfig, deps: AppDeps = {}): App {
   try {
     // Every commit, from any path, becomes typed events in the same tick, so state and log can't disagree.
     const store = openWorkforceStore({ dataDir: config.dataDir, now, log, writeFile: deps.storeWriteFile, onCommit: (before, after) => { events.append(deriveEvents(before, after)) } })
+    const layoutStore = openLayoutStore({ dataDir: config.dataDir, log, writeFile: deps.storeWriteFile })
     // The store opens first: it creates DATA_DIR, where the audit log lives.
     const audit = deps.audit ?? openAuditLog({ dataDir: config.dataDir, maxBytes: config.auditLogMaxBytes, now, log, hide: config.workspaceRoot ? [config.workspaceRoot] : [] })
     const apiToken = resolveApiToken({ configured: config.apiToken?.reveal() ?? null, dataDir: config.dataDir })
@@ -114,13 +116,13 @@ export function createApp(config: ServerConfig, deps: AppDeps = {}): App {
     const streams = new Set<ServerResponse>()
     const startedAt = now()
     const sessions = createSessionStore({ now: () => Date.parse(now()) })
-    const routes = createRoutes({ config, store, events, manager, permissions, now, startedAt, heartbeatMs: deps.heartbeatMs ?? HEARTBEAT_MS, streams, log, maxStreams: deps.maxStreams, audit, sessions, apiToken: apiToken.value })
+    const routes = createRoutes({ config, store, layoutStore, events, manager, permissions, now, startedAt, heartbeatMs: deps.heartbeatMs ?? HEARTBEAT_MS, streams, log, maxStreams: deps.maxStreams, audit, sessions, apiToken: apiToken.value })
     const onReject = (r: { requestId: string; code: string; method: string; path: string }) => audit.write({ action: 'request.rejected', actor: 'api', requestId: r.requestId, reason: r.code, detail: `${r.method} ${r.path}` })
     const guards = [...createSecurityGuards({ allowedOrigins: config.allowedOrigins, apiToken: apiToken.value, sessions, onReject }), ...(deps.guards ?? [])]
     const responseHeaders = (req: IncomingMessage) => ({ ...securityHeaders(req, config.allowedOrigins), ...(deps.responseHeaders?.(req) ?? {}) })
     const handler = createRouter({ routes, guards, responseHeaders, log, onRejected: onReject })
     return {
-        config, apiToken, sessions, store, permissions, audit, events, provider, manager, startedAt, streams, handler, releaseLock: lock.release,
+        config, apiToken, sessions, store, layoutStore, permissions, audit, events, provider, manager, startedAt, streams, handler, releaseLock: lock.release,
       closeStreams: () => { for (const res of streams) res.end(); streams.clear() },
     }
   } catch (error) {

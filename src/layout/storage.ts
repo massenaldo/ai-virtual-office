@@ -114,7 +114,8 @@ export function saveLayout(storage: KV | null, l: OfficeLayout): { ok: true; jso
 
 export function getBrowserStorage(): KV | null {
   try {
-    return window.localStorage
+    // globalThis rather than window, so this file also type-checks in the server build, which imports parseLayout.
+    return (globalThis as { localStorage?: Storage }).localStorage ?? null
   } catch {
     return null
   }

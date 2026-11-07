@@ -7,6 +7,8 @@ import type { Issue } from '../layout/validation'
 import type { TransformIntent } from '../editor/transform'
 import { OVERVIEW_DIRECTION, OVERVIEW_FOV, fitOverview, focusPose } from './camera'
 import Characters from './Characters'
+import DrawScheduler from './DrawScheduler'
+import { serializeLayout } from '../layout/storage'
 import type { SceneCharacter } from './characterInstances'
 import { DeskMarkerLayer, DeskMarkerTracker, type MarkerRegistry } from './DeskMarkers'
 import FurnitureItem from './FurnitureItem'
@@ -144,6 +146,8 @@ function ViewCameras({ layout, floorPlan, viewKey, focus }: { layout: OfficeLayo
 function OfficeContents({ layout, floorPlan, viewKey, editing, selection, issues, labels, markerRegistry, markers, characters, highlightDeskId, onDeskClick, focus, onSelect, onTransformStart, onTransform, onTransformEnd }: OfficeSceneProps & { labels: LabelRegistry; markerRegistry: MarkerRegistry }) {
   const isSelected = (kind: 'room' | 'furniture', id: string) => selection?.kind === kind && selection.id === id
   const transform = { onTransformStart, onTransform, onTransformEnd }
+  // Soft floor shadows render twice per key. Outside editing a view or layout change makes a new key, so they refresh.
+  const layoutKey = useMemo(() => (editing ? '' : serializeLayout(layout)), [editing, layout])
   const selectedRoom = selection?.kind === 'room' ? layout.rooms.find((r) => r.id === selection.id) : undefined
   return <>
     <color attach="background" args={[floorPlan ? '#eceae6' : '#e6e3de']} />
@@ -158,7 +162,8 @@ function OfficeContents({ layout, floorPlan, viewKey, editing, selection, issues
     {!editing && characters && <Characters characters={characters} floorPlan={floorPlan} onDeskClick={onDeskClick} />}
     {editing && floorPlan && <Grid position={[0, 0.045, 0]} args={[layout.office.width, layout.office.depth]} cellSize={layout.office.gridSize} cellThickness={0.6} cellColor="#9aa6b0" sectionSize={1} sectionThickness={1} sectionColor="#6f7d89" fadeDistance={200} raycast={() => null} />}
     {editing && floorPlan && selectedRoom && <ResizeHandles room={selectedRoom} {...transform} />}
-    <ContactShadows position={[0, 0.03, 0]} opacity={floorPlan ? 0.12 : 0.3} scale={30} blur={2.5} far={8} />
+    {!editing && characters && <DrawScheduler characters={characters.length} editing={editing} floorPlan={floorPlan} />}
+    <ContactShadows key={editing ? 'editing' : `${floorPlan}:${layoutKey}`} frames={editing ? Infinity : 2} position={[0, 0.03, 0]} opacity={floorPlan ? 0.12 : 0.3} scale={30} blur={2.5} far={8} />
     <StudioEnvironment floorPlan={floorPlan} />
     <ViewCameras layout={layout} floorPlan={floorPlan} viewKey={viewKey} focus={focus} />
     <RoomLabelTracker rooms={layout.rooms} floorPlan={floorPlan} registry={labels} />

@@ -64,6 +64,7 @@ export default function Characters({ characters, floorPlan, onDeskClick }: Chara
   const dotMesh = useRef<THREE.InstancedMesh>(null)
   const state = useRef(new Map<string, Motion>())
   const lastMs = useRef<number | null>(null)
+  const jointCache = useRef<THREE.Matrix4[][]>([])
   const tmp = useRef({ root: new THREE.Matrix4(), m: new THREE.Matrix4() }).current
   const pointer = usePointer(onDeskClick, (instanceId, mesh) => {
     if (instanceId === undefined) return undefined
@@ -140,10 +141,11 @@ export default function Characters({ characters, floorPlan, onDeskClick }: Chara
     for (const id of state.current.keys()) if (!live.has(id)) state.current.delete(id)
     motion.current.active = active
 
-    const joints = characters.map((_, i) => {
-      const out = JOINTS.map(() => new THREE.Matrix4())
+    // Reused every frame: continuous drawing would otherwise allocate a matrix per joint per character per frame.
+    const joints = jointCache.current
+    characters.forEach((_, i) => {
+      const out = (joints[i] ??= JOINTS.map(() => new THREE.Matrix4()))
       jointMatrices(poses[i], out, bodies[i])
-      return out
     })
     groups.forEach((g, gi) => {
       const mesh = meshes.current[gi]

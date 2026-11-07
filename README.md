@@ -208,7 +208,7 @@ npm run build   # type-check and production build
 npm run preview # serve the production build at http://127.0.0.1:4173
 ```
 
-Add `?stats` to the URL (for example http://localhost:5173/?stats) to show a small render read-out over the 3D view: frames per second, CPU time per frame, draw calls and triangles. The 3D view only redraws when something changes, so it reads "idle" while nothing moves.
+Add `?stats` to the URL (for example http://localhost:5173/?stats) to show a small render read-out over the 3D view: frames per second, CPU time per frame, draw calls and triangles. The 3D view only redraws when something changes, so it reads "idle" while nothing moves. Every agent with a desk appears as a seated character at it, showing its real status; they are drawn at 30 fps while any is acting, 5 fps when all are idle, and not at all while the tab is hidden, so `?stats` is the way to read what that costs.
 
 ## Assets and licences
 

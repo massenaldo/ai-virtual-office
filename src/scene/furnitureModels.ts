@@ -216,9 +216,10 @@ const BUILDERS: Record<FurnitureType, (variant: number) => Pieces> = {
   'prayer-mat': prayerMat,
 }
 
-// Small details (monitors, keyboards, handles, books, chrome) skip shadow casting to keep the shadow pass cheap.
+// Small details (monitors, keyboards, handles, books, chrome) skip shadow casting to keep the shadow pass cheap, as do
+// dining chairs, whose count would otherwise add 32 draw calls for shadows mostly hidden under a table.
 const NO_SHADOW = new Set<MaterialKey>(['plastic', 'screen', 'chrome'])
-const SHADOWLESS_TYPES = new Set<FurnitureType>(['monitor', 'prayer-mat'])
+const SHADOWLESS_TYPES = new Set<FurnitureType>(['monitor', 'prayer-mat', 'dining-chair', 'coffee-machine'])
 
 const cache = new Map<string, ModelPart[]>()
 

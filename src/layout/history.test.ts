@@ -75,3 +75,20 @@ describe('editorReducer', () => {
     expect(run(s, { type: 'undo' })).toBe(s)
   })
 })
+
+describe('loaded action', () => {
+  it('replaces the layout and saved json and clears history and selection', () => {
+    const edited = run(start(), nudge(3), { type: 'select', selection: { kind: 'furniture', id: 'plant-01' } })
+    expect(edited.past).toHaveLength(1)
+    const incoming = updateFurniture(createDefaultLayout(), 'plant-01', { x: 5 })
+    const json = serializeLayout(incoming)
+    const s = run(edited, { type: 'loaded', layout: incoming, savedJson: json })
+    expect(s.layout).toBe(incoming)
+    expect(s.savedJson).toBe(json)
+    expect(s.past).toHaveLength(0)
+    expect(s.future).toHaveLength(0)
+    expect(s.selection).toBeNull()
+    expect(s.dragOrigin).toBeNull()
+    expect(isDirty(s)).toBe(false)
+  })
+})

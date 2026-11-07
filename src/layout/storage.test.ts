@@ -162,3 +162,14 @@ describe('furniture types', () => {
     expect(loadLayout(s).problem).toBeNull()
   })
 })
+
+describe('parseLayout inherited names', () => {
+  const withRoom = (department: string) => { const l = JSON.parse(serializeLayout(createDefaultLayout())); l.rooms[0].department = department; return l }
+  const withFurniture = (type: string) => { const l = JSON.parse(serializeLayout(createDefaultLayout())); l.furniture[0].type = type; return l }
+  it.each(['constructor', '__proto__', 'toString', 'hasOwnProperty'])('rejects %s as a department', (name) => {
+    expect(parseLayout(withRoom(name))).toBeNull()
+  })
+  it.each(['constructor', '__proto__', 'toString', 'hasOwnProperty'])('rejects %s as a furniture type', (name) => {
+    expect(parseLayout(withFurniture(name))).toBeNull()
+  })
+})

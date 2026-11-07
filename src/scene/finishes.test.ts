@@ -11,6 +11,12 @@ describe('floorFinishFor', () => {
     expect(floorFinishFor('devops')).toBe('epoxy')
   })
 
+  it('break rooms use their floor finishes', () => {
+    expect(floorFinishFor('kitchen')).toBe('epoxy')
+    expect(floorFinishFor('dining')).toBe('oak')
+    expect(floorFinishFor('prayer')).toBe('carpet')
+  })
+
   it('carpets team rooms', () => {
     expect(floorFinishFor('backend')).toBe('carpet')
     expect(floorFinishFor('qa')).toBe('carpet')

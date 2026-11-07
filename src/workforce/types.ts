@@ -1,3 +1,4 @@
+import type { BreakDepartment } from '../layout/catalog'
 import type { DepartmentId } from '../layout/types'
 
 export const WORKFORCE_SCHEMA_VERSION = 3
@@ -37,7 +38,7 @@ export type RuntimeMode = 'mock' | 'real'
 
 export type ActivitySource = 'mock' | 'real'
 
-export type AgentDepartment = Exclude<DepartmentId, 'meeting'>
+export type AgentDepartment = Exclude<DepartmentId, 'meeting' | BreakDepartment>
 
 /** Bounds on an agent's free text, in characters. */
 export const AGENT_DESCRIPTION_MAX = 500

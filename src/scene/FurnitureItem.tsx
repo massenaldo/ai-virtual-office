@@ -10,7 +10,7 @@ import { sharedMaterials } from './materials'
 import { useFloorDrag } from './useFloorDrag'
 
 // Stacking order for floor-plan tiles so monitors and chairs stay visible on top of desks and tables.
-const PLAN_HEIGHT: Record<FurnitureType, number> = { desk: 0.06, 'meeting-table': 0.06, plant: 0.06, 'storage-cabinet': 0.06, shelf: 0.06, chair: 0.07, 'meeting-chair': 0.07, monitor: 0.08 }
+const PLAN_HEIGHT: Record<FurnitureType, number> = { desk: 0.06, 'meeting-table': 0.06, plant: 0.06, 'storage-cabinet': 0.06, shelf: 0.06, chair: 0.07, 'meeting-chair': 0.07, monitor: 0.08, 'kitchen-counter': 0.06, 'coffee-machine': 0.08, 'dining-table': 0.06, 'dining-chair': 0.07, 'prayer-mat': 0.06 }
 
 function PlanTile({ type }: { type: FurnitureType }) {
   const spec = FURNITURE_SPECS[type]

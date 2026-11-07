@@ -1,4 +1,4 @@
-import { DEPARTMENTS } from '../layout/catalog'
+import { DEPARTMENTS, isAgentDepartmentId } from '../layout/catalog'
 import type { OfficeLayout } from '../layout/types'
 import { seatForDesk } from '../layout/seats'
 import type { SceneCharacter } from '../scene/characterInstances'
@@ -20,7 +20,7 @@ export type DeskStatus = { kind: 'none' } | { kind: 'assigned'; label: string; r
 
 export const AGENT_STATUS_LABEL: Record<AgentStatus, string> = { idle: 'Idle', working: 'Working', thinking: 'Thinking', waiting: 'Waiting', error: 'Error' }
 export const TASK_STATUS_LABEL: Record<TaskStatus, string> = { queued: 'Queued', starting: 'Starting', running: 'Running', waiting_for_approval: 'Waiting for approval', completed: 'Completed', failed: 'Failed', cancelling: 'Cancelling', cancelled: 'Cancelled' }
-export const AGENT_DEPARTMENTS = Object.keys(DEPARTMENTS).filter((id) => id !== 'meeting') as AgentDepartment[]
+export const AGENT_DEPARTMENTS = Object.keys(DEPARTMENTS).filter(isAgentDepartmentId) as AgentDepartment[]
 
 const OPEN_FLOOR = 'Open floor'
 const TIMELINE_LIMIT = 20

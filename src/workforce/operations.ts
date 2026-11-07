@@ -1,4 +1,4 @@
-import { DEPARTMENTS } from '../layout/catalog'
+import { isAgentDepartmentId } from '../layout/catalog'
 import { createId } from '../layout/operations'
 import type { RuntimeEvent } from './runtime/types'
 import { ACTIVITY_LIMIT, WORKFORCE_SCHEMA_VERSION, type ActivitySource, type Agent, type AgentActivity, type AgentDepartment, type AgentStatus, type AgentTask, type ApprovalDecision, type RuntimeMode, type TaskRuntime, type TaskStatus, type WorkforceState, AGENT_DESCRIPTION_MAX, AGENT_INSTRUCTIONS_MAX, validUsage } from './types'
@@ -30,7 +30,7 @@ export function emptyWorkforce(): WorkforceState {
   return { schemaVersion: WORKFORCE_SCHEMA_VERSION, agents: [], tasks: [], activities: [] }
 }
 
-const isAgentDepartment = (v: string): v is AgentDepartment => v !== 'meeting' && Object.hasOwn(DEPARTMENTS, v)
+const isAgentDepartment = (v: string): v is AgentDepartment => isAgentDepartmentId(v)
 
 export function validateAgentInput(input: AgentInput): string | null {
   const name = input.name.trim()

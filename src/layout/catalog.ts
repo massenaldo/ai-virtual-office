@@ -11,6 +11,18 @@ export const DEPARTMENTS: Record<DepartmentId, { label: string; color: string }>
   qa: { label: 'QA Testing', color: '#b5a5a0' },
   meeting: { label: 'Meeting', color: '#b99b72' },
   devops: { label: 'DevOps', color: '#596a78' },
+  kitchen: { label: 'Kitchen', color: '#a9b4a0' },
+  dining: { label: 'Dining', color: '#c2a27c' },
+  prayer: { label: 'Prayer Room', color: '#9fb0a6' },
+}
+
+/** Room departments for breaks. Like `meeting`, no agent belongs to them. */
+export const BREAK_DEPARTMENTS = ['kitchen', 'dining', 'prayer'] as const
+export type BreakDepartment = (typeof BREAK_DEPARTMENTS)[number]
+
+/** The one rule for who can be an agent's department: it exists, and is not the meeting room or a break room. */
+export function isAgentDepartmentId(id: string): boolean {
+  return Object.hasOwn(DEPARTMENTS, id) && id !== 'meeting' && !(BREAK_DEPARTMENTS as readonly string[]).includes(id)
 }
 
 /** width runs along X and depth along Z at rotation 0. */
@@ -23,6 +35,11 @@ export const FURNITURE_SPECS: Record<FurnitureType, { label: string; width: numb
   'meeting-chair': { label: 'Meeting chair', width: 0.56, depth: 0.56, planColor: '#5a5e66' },
   'storage-cabinet': { label: 'Storage cabinet', width: 0.8, depth: 0.45, planColor: '#9c968c' },
   shelf: { label: 'Shelf', width: 0.9, depth: 0.35, planColor: '#8b6a4f' },
+  'kitchen-counter': { label: 'Kitchen counter', width: 2.2, depth: 0.6, planColor: '#b8b4ab' },
+  'coffee-machine': { label: 'Coffee machine', width: 0.34, depth: 0.3, planColor: '#2b2e33' },
+  'dining-table': { label: 'Dining table', width: 2.0, depth: 0.9, planColor: '#c49a6c' },
+  'dining-chair': { label: 'Dining chair', width: 0.46, depth: 0.46, planColor: '#5a5e66' },
+  'prayer-mat': { label: 'Prayer mat', width: 0.6, depth: 1.0, planColor: '#6f7f5f' },
 }
 
 export type RoomTemplateId = 'office' | 'team-room' | 'meeting-room'

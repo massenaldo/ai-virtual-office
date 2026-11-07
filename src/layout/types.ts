@@ -3,9 +3,9 @@ export const LAYOUT_SCHEMA_VERSION = 1
 /** Quarter turns around the vertical axis, in degrees. */
 export type Rotation = 0 | 90 | 180 | 270
 
-export type DepartmentId = 'executive' | 'project-management' | 'tech-lead' | 'backend' | 'frontend' | 'data' | 'design' | 'qa' | 'meeting' | 'devops'
+export type DepartmentId = 'executive' | 'project-management' | 'tech-lead' | 'backend' | 'frontend' | 'data' | 'design' | 'qa' | 'meeting' | 'devops' | 'kitchen' | 'dining' | 'prayer'
 
-export type FurnitureType = 'desk' | 'chair' | 'monitor' | 'plant' | 'meeting-table' | 'meeting-chair' | 'storage-cabinet' | 'shelf'
+export type FurnitureType = 'desk' | 'chair' | 'monitor' | 'plant' | 'meeting-table' | 'meeting-chair' | 'storage-cabinet' | 'shelf' | 'kitchen-counter' | 'coffee-machine' | 'dining-table' | 'dining-chair' | 'prayer-mat'
 
 /**
  * Footprint fields (x, z, width, depth) live on the floor plane and are world-aligned; wallHeight is the only vertical value.

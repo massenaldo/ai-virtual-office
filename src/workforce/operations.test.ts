@@ -37,6 +37,10 @@ describe('createAgent', () => {
     for (const department of ['constructor', '__proto__', 'toString']) expect(createAgent(s, { ...NOVA, department: department as AgentInput['department'] }, NOW)).toEqual({ ok: false, error: 'Choose a department.' })
   })
 
+  it.each(['kitchen', 'dining', 'prayer', 'meeting'])('refuses %s as an agent department', (department) => {
+    expect(createAgent(emptyWorkforce(), { ...NOVA, department: department as AgentInput['department'] }, NOW)).toEqual({ ok: false, error: 'Choose a department.' })
+  })
+
   it('records a real runtime mode when asked', () => {
     const r = createAgent(emptyWorkforce(), NOVA, NOW, { runtimeMode: 'real' })
     expect(r.ok && r.state.agents[0].runtimeMode).toBe('real')

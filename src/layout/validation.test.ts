@@ -21,6 +21,17 @@ describe('findIssues', () => {
     expect(findIssues(withFurniture(item('d', 'desk'), item('c', 'chair', 0, 0.3), item('m', 'monitor'))).size).toBe(0)
   })
 
+  it('a coffee machine may stand on a counter, and dining chairs may tuck under a dining table', () => {
+    expect(findIssues(withFurniture(item('k', 'kitchen-counter'), item('c', 'coffee-machine', 0.2, 0))).size).toBe(0)
+    expect(findIssues(withFurniture(item('t', 'dining-table'), item('c1', 'dining-chair', 0, 0.5), item('c2', 'dining-chair', 0, -0.5))).size).toBe(0)
+  })
+
+  it('a coffee machine and a desk still warn when they overlap', () => {
+    const issues = findIssues(withFurniture(item('d', 'desk'), item('c', 'coffee-machine')))
+    expect(issues.get('d')?.[0]).toMatchObject({ code: 'furniture-overlap', otherId: 'c' })
+    expect(issues.get('c')?.[0]).toMatchObject({ code: 'furniture-overlap', otherId: 'd' })
+  })
+
   it('flags overlapping rooms', () => {
     const l = createDefaultLayout()
     l.rooms[1] = { ...l.rooms[1], x: l.rooms[0].x }
